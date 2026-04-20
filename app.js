@@ -585,7 +585,9 @@ function savePhoneIconsSafely(savedIcons) {
 
 function parseVVChatBlocks(raw) {
   const text = String(raw || '');
-  const chatMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
+  const chatMatch =
+  text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/) ||
+  text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
   if (!chatMatch) return null;
 
   const full = chatMatch[1];
@@ -2083,6 +2085,9 @@ function buildVVEventPayload(chatId) {
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
     '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
+    '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
+    '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
     '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
     '然后再输出角色自己的 side=left 的 [消息] 回复块。',
     '如果有多条用户消息，必须逐条展开，不可合并成一条。',
