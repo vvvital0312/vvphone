@@ -2097,6 +2097,7 @@ function buildVVEventPayload(chatId) {
     '每条消息都要单独成块。',
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
+    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
     '',
     '[VV_EVENT]',
     'type=chat',
