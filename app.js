@@ -1683,14 +1683,45 @@ function openChatDetail(chatId, forceName = '') {
   currentChatId = chatId;
   currentChatType = 'direct';
 
+  let contact = contactList.find(i => i.id === chatId);
+
+  if (!contact) {
+    contact = {
+      id: chatId,
+      name: forceName || '联系人',
+      bridgeName: forceName || '',
+      avatar: DEFAULT_AVATAR,
+      isSticky: false,
+      lastTime: getNowTime(),
+      lastPreview: '',
+      threadType: 'direct'
+    };
+    contactList.unshift(contact);
+  } else {
+    if (forceName && (!contact.name || contact.name === '联系人')) {
+      contact.name = forceName;
+    }
+    if (forceName && !contact.bridgeName) {
+      contact.bridgeName = forceName;
+    }
+  }
+
   const rel = getRelSetting(chatId);
   if (forceName && !rel.name) {
     rel.name = forceName;
   }
 
+  const setting = getChatSetting(chatId);
+  if (!setting.theirAvatar) {
+    setting.theirAvatar = DEFAULT_AVATAR;
+  }
+  if (!setting.myAvatar) {
+    setting.myAvatar = appProfile.myAvatar || DEFAULT_AVATAR;
+  }
+
   const titleEl = document.getElementById('chatDetailName');
   if (titleEl) {
-    titleEl.textContent = forceName || rel.name || '联系人';
+    titleEl.textContent = forceName || contact.name || rel.name || '联系人';
   }
 
   document.querySelectorAll('.page').forEach(p => {
@@ -1711,47 +1742,14 @@ function openChatDetail(chatId, forceName = '') {
   if (typeof renderMessages === 'function') {
     renderMessages();
   }
-}
 
-function renderComposerPreview() {
-  const quoteWrap = document.getElementById('composerQuotePreview');
-  const quoteText = document.getElementById('composerQuoteText');
-  const attachmentsWrap = document.getElementById('composerAttachments');
-
-  if (quoteWrap && quoteText) {
-    if (composerDraft.quote) {
-      quoteWrap.style.display = 'flex';
-      quoteText.textContent = `${composerDraft.quote.senderName || '消息'}：${composerDraft.quote.preview || ''}`;
-    } else {
-      quoteWrap.style.display = 'none';
-      quoteText.textContent = '';
-    }
+  if (typeof renderChatList === 'function') {
+    renderChatList();
+  } else if (typeof renderAllPanels === 'function') {
+    renderAllPanels();
   }
 
-  if (attachmentsWrap) {
-    const list = composerDraft.attachments || [];
-    if (!list.length) {
-      attachmentsWrap.innerHTML = '';
-      attachmentsWrap.style.display = 'none';
-    } else {
-      attachmentsWrap.style.display = 'flex';
-      attachmentsWrap.innerHTML = list.map((att, idx) => {
-        let label = '附件';
-
-        if (att.type === 'image') label = '图片';
-        else if (att.type === 'sticker') label = `表情：${att.stickerName || ''}`;
-        else if (att.type === 'voice') label = `语音：${att.transcript || ''}`;
-        else if (att.type === 'transfer') label = `转账：¥${att.amount || ''}`;
-
-        return `
-          <div class="composer-attachment-item">
-            <span>${escapeHTML(label)}</span>
-            <button type="button" onclick="removeComposerAttachment(${idx})">✕</button>
-          </div>
-        `;
-      }).join('');
-    }
-  }
+  saveAll();
 }
 
 function removeComposerAttachment(index) {
