@@ -629,6 +629,8 @@ function parseVVChatBlocks(raw) {
 }
 
 function appendVVChatReplyToLocal(chatData) {
+  console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
+  
   if (!chatData || !chatData.chatId) return;
 
   const chatId = chatData.chatId;
@@ -641,6 +643,8 @@ function appendVVChatReplyToLocal(chatData) {
   const timeLabel = getNowFullLabel();
 
   const leftMsgs = (chatData.messages || []).filter(msg => msg.side === 'left' && msg.content);
+
+  console.log('[VV] leftMsgs to append:', leftMsgs);
 
   leftMsgs.forEach(msg => {
     const duplicated = thread.some(item =>
@@ -693,8 +697,13 @@ function appendVVChatReplyToLocal(chatData) {
 }
 
 function handleVVChatSyncRaw(raw) {
+  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 300));
+
   const parsed = parseVVChatBlocks(raw);
+  console.log('[VV] parseVVChatBlocks result:', parsed);
+
   if (!parsed) return;
+
   appendVVChatReplyToLocal(parsed);
 }
 
@@ -3059,6 +3068,7 @@ function initSTBridgeListener() {
     }
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
+      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
       handleVVChatSyncRaw(data.raw || '');
     }
 
