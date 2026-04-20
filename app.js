@@ -680,10 +680,12 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   const setting = getChatSetting(chatId);
-  if (chatData.targetAvatarId) setting.theirAvatar = chatData.targetAvatarId;
-  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
-  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-  if (chatData.targetBubble) setting.theirBubble = chatData.targetBubble;
+  if (chatData.chatBgKey) settings.chatBgKey = chatData.chatBgKey;
+  if (chatData.myBubble) settings.myBubble = chatData.myBubble;
+  if (chatData.targetBubble) settings.targetBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) settings.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.myAvatarKey) settings.myAvatarKey = chatData.myAvatarKey;
+  if (chatData.target) settings.target = chatData.target;
 
   if (leftMsgs.length) {
     const last = leftMsgs[leftMsgs.length - 1];
