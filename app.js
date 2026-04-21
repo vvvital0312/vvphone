@@ -627,6 +627,7 @@ function parseVVChatBlocks(raw) {
   };
 
   const msgBlocks = body.match(/\[消息\][\s\S]*?\[\/消息\]/g) || [];
+  console.log('[VV] raw msgBlocks:', msgBlocks, 'body=', body);
 
   msgBlocks.forEach((block, index) => {
     const inner = block
