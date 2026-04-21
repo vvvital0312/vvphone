@@ -43,6 +43,8 @@ const IDB_STORE_NAME = 'assets';
 const IDB_REF_PREFIX = 'idb:';
 const assetObjectUrlCache = new Map();
 
+window.__vv_view_id = window.__vv_view_id || ('vvview-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+
 const VV_BRIDGE_CONFIG = {
   enabled: true,
   debug: true,
@@ -892,10 +894,16 @@ async function triggerSlash(cmd) {
   try {
     const result = await new Promise((resolve) => {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      const viewId = window.__vv_view_id || '';
 
       function onMessage(event) {
         const data = event.data;
         if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
+          return;
+        }
+
+        if (data.viewId && viewId && data.viewId !== viewId) {
+          console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
           return;
         }
 
@@ -916,7 +924,8 @@ async function triggerSlash(cmd) {
       window.parent.postMessage({
         type: 'VV_EXECUTE_SLASH',
         requestId,
-        command: cmd
+        command: cmd,
+        viewId
       }, '*');
 
       setTimeout(() => {
@@ -3248,12 +3257,18 @@ function initSTBridgeListener() {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
 
+    const myViewId = window.__vv_view_id || '';
+    if (data.viewId && myViewId && data.viewId !== myViewId) {
+      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+      return;
+    }
+
     if (VV_BRIDGE_CONFIG.debug) {
       console.log('[VV] 收到 bridge 消息:', data);
     }
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
-      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
+      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300), 'viewId=', data.viewId || '');
       handleVVChatSyncRaw(data.raw || '');
     }
 
