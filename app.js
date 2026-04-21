@@ -630,35 +630,29 @@ function parseVVChatBlocks(raw) {
 
   msgBlocks.forEach((block, index) => {
     const inner = block
-      .replace(/^\[消息\]\s*/, '')
-      .replace(/\s*\[\/消息\]$/, '');
+      .replace(/^\s*\[消息\]\s*/, '')
+      .replace(/\s*\[\/消息\]\s*$/, '');
 
-    const lines = inner.split('\n').map(s => s.trim()).filter(Boolean);
-
-    const msg = {
-      side: '',
-      sender: '',
-      content: '',
-      state: ''
+    const readField = (name) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(
+        '(?:^|\\n)' + escaped + '=([\\s\\S]*?)(?=\\n(?:side|sender|content|state)=|$)'
+      );
+      const m = inner.match(re);
+      return m ? String(m[1] || '').trim() : '';
     };
 
-    lines.forEach(line => {
-      const eqIndex = line.indexOf('=');
-      if (eqIndex === -1) return;
-
-      const key = line.slice(0, eqIndex).trim();
-      const value = line.slice(eqIndex + 1).trim();
-
-      if (key === 'side') msg.side = value;
-      else if (key === 'sender') msg.sender = value;
-      else if (key === 'content') msg.content = value;
-      else if (key === 'state') msg.state = value;
-    });
+    const msg = {
+      side: readField('side'),
+      sender: readField('sender'),
+      content: readField('content'),
+      state: readField('state')
+    };
 
     if (msg.side && msg.content) {
       result.messages.push(msg);
     } else {
-      console.warn('[VV] parseVVChatBlocks skip invalid msg block:', index, msg);
+      console.warn('[VV] parseVVChatBlocks skip invalid msg block:', index, msg, inner);
     }
   });
 
