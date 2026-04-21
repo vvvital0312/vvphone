@@ -585,19 +585,35 @@ function savePhoneIconsSafely(savedIcons) {
 
 function parseVVChatBlocks(raw) {
   const text = String(raw || '');
-  const chatMatch =
-  text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/) ||
-  text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
-  if (!chatMatch) return null;
+  console.log('[VV] parseVVChatBlocks input:', text.slice(0, 500));
 
-  const full = chatMatch[1];
+  const blockMatch =
+    text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/) ||
+    text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
 
-  function readField(name) {
-    const m = full.match(new RegExp('^' + name + '=(.*)$', 'm'));
-    return m ? m[1].trim() : '';
+  if (!blockMatch) {
+    console.log('[VV] parseVVChatBlocks: no block matched');
+    return {
+      chatId: '',
+      target: '',
+      time: '',
+      myAvatarKey: '',
+      targetAvatarId: '',
+      myBubble: '',
+      targetBubble: '',
+      chatBgKey: '',
+      messages: []
+    };
   }
 
-  const chat = {
+  const body = blockMatch[1] || '';
+
+  function readField(name) {
+    const m = body.match(new RegExp('(?:^|\\n)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^\\n]*)'));
+    return m ? String(m[1] || '').trim() : '';
+  }
+
+  const result = {
     chatId: readField('chatId'),
     target: readField('target'),
     time: readField('time'),
@@ -610,24 +626,39 @@ function parseVVChatBlocks(raw) {
   };
 
   const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/g;
-  let m;
-  while ((m = msgRegex.exec(full))) {
-    const block = m[1];
+  let match;
 
-    function readMsgField(name) {
-      const mm = block.match(new RegExp('^' + name + '=(.*)$', 'm'));
-      return mm ? mm[1].trim() : '';
+  while ((match = msgRegex.exec(body))) {
+    const msgBody = match[1] || '';
+
+    const readMsgField = (name) => {
+      const m = msgBody.match(new RegExp('(?:^|\\n)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^\\n]*)'));
+      return m ? String(m[1] || '').trim() : '';
+    };
+
+    const side = readMsgField('side');
+    const sender = readMsgField('sender');
+    const state = readMsgField('state');
+
+    let content = '';
+    const contentMatch = msgBody.match(/(?:^|\n)content=([\s\S]*)$/);
+    if (contentMatch) {
+      content = String(contentMatch[1] || '').trim();
+      content = content.replace(/\n(?:side|sender|state)=.*$/s, '').trim();
     }
 
-    chat.messages.push({
-      side: readMsgField('side'),
-      sender: readMsgField('sender'),
-      content: readMsgField('content'),
-      state: readMsgField('state')
+    if (!side || !content) continue;
+
+    result.messages.push({
+      side,
+      sender,
+      content,
+      state
     });
   }
 
-  return chat;
+  console.log('[VV] parseVVChatBlocks result:', result);
+  return result;
 }
 
 function appendVVChatReplyToLocal(chatData) {
@@ -647,6 +678,18 @@ function appendVVChatReplyToLocal(chatData) {
   const leftMsgs = (chatData.messages || []).filter(msg => msg.side === 'left' && msg.content);
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
+
+  if (!leftMsgs.length) {
+    console.log('[VV] no new left msgs');
+    return;
+  }
+
+  const syncKey = chatId + '|' + leftMsgs.map(m => `${m.sender}|${m.content}|${m.state || ''}`).join('||');
+  if (window.__vv_last_sync_key === syncKey) {
+    console.log('[VV] duplicated sync ignored:', syncKey);
+    return;
+  }
+  window.__vv_last_sync_key = syncKey;
 
   leftMsgs.forEach(msg => {
     const duplicated = thread.some(item =>
@@ -682,8 +725,8 @@ function appendVVChatReplyToLocal(chatData) {
   const setting = getChatSetting(chatId);
   if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
   if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.targetBubble) setting.theirBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) setting.theirAvatar = chatData.targetAvatarId;
   if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
   if (chatData.target) setting.target = chatData.target;
 
@@ -701,14 +744,15 @@ function appendVVChatReplyToLocal(chatData) {
 }
 
 function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 300));
+  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 500));
 
-  const parsed = parseVVChatBlocks(raw);
-  console.log('[VV] parseVVChatBlocks result:', parsed);
+  const chatData = parseVVChatBlocks(raw);
+  if (!chatData || !chatData.chatId) {
+    console.warn('[VV] handleVVChatSyncRaw: invalid chatData');
+    return;
+  }
 
-  if (!parsed) return;
-
-  appendVVChatReplyToLocal(parsed);
+  appendVVChatReplyToLocal(chatData);
 }
 
 async function triggerSlash(cmd) {
@@ -2103,7 +2147,9 @@ function buildVVEventPayload(chatId) {
     '每条消息都要单独成块。',
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
-    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
+    '[聊天界面] 用于楼层展示，[VV_CHAT_SYNC] 只用于前端同步。',
+    '[聊天界面] 可以展示完整历史；但 [VV_CHAT_SYNC] 只能包含本轮新增消息，不要重复历史消息。',
+    '历史聊天由前端根据 chatId 自行累计显示。',
     '',
     '[VV_EVENT]',
     'type=chat',
