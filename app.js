@@ -632,7 +632,7 @@ function parseVVChatBlocks(raw) {
 
 function appendVVChatReplyToLocal(chatData) {
   console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
-  
+
   if (!chatData || !chatData.chatId) return;
 
   const chatId = chatData.chatId;
@@ -680,12 +680,12 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   const setting = getChatSetting(chatId);
-  if (chatData.chatBgKey) settings.chatBgKey = chatData.chatBgKey;
-  if (chatData.myBubble) settings.myBubble = chatData.myBubble;
-  if (chatData.targetBubble) settings.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) settings.targetAvatarId = chatData.targetAvatarId;
-  if (chatData.myAvatarKey) settings.myAvatarKey = chatData.myAvatarKey;
-  if (chatData.target) settings.target = chatData.target;
+  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
+  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+  if (chatData.target) setting.target = chatData.target;
 
   if (leftMsgs.length) {
     const last = leftMsgs[leftMsgs.length - 1];
@@ -1672,7 +1672,8 @@ function openChat(id, type = 'direct') {
 }
 
 async function applyCurrentChatBackground() {
-  const bg = getChatSetting(currentChatId).background || '';
+  const setting = getChatSetting(currentChatId) || {};
+  const bg = setting.background || setting.chatBgKey || '';
   const layer = document.getElementById('chatBackgroundLayer');
   if (!layer) return;
 
@@ -1730,6 +1731,9 @@ function openChatDetail(chatId, forceName = '') {
   }
   if (!setting.myAvatar) {
     setting.myAvatar = appProfile.myAvatar || DEFAULT_AVATAR;
+  }
+  if (!setting.background) {
+    setting.background = 'current_chat_bg';
   }
 
   const titleEl = document.getElementById('chatDetailName');
