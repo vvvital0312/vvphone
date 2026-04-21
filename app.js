@@ -837,12 +837,43 @@ function handleVVChatSyncRaw(raw) {
     setTimeout(() => {
       try {
         console.log('[VV] refreshing chat after sync:', chatId, 'currentChatId(before)=', currentChatId);
-        openChatDetail(chatId, chatData.target || '');
-        console.log('[VV] refreshing chat after sync done:', chatId, 'currentChatId(after)=', currentChatId);
+
+        currentChatId = '';
+        currentChatType = 'direct';
+
+        const page = document.getElementById('chatDetailPage');
+        if (page) {
+          page.style.display = 'none';
+        }
+
+        setTimeout(() => {
+          try {
+            openChatDetail(chatId, chatData.target || '');
+
+            if (typeof renderMessages === 'function') {
+              renderMessages();
+            }
+
+            if (typeof applyCurrentChatBackground === 'function') {
+              applyCurrentChatBackground();
+            }
+
+            if (typeof renderChatList === 'function') {
+              renderChatList();
+            } else if (typeof renderAllPanels === 'function') {
+              renderAllPanels();
+            }
+
+            console.log('[VV] refreshing chat after sync done:', chatId, 'currentChatId(after)=', currentChatId);
+          } catch (err2) {
+            console.warn('[VV] second-stage refresh failed:', err2);
+          }
+        }, 30);
       } catch (err) {
         console.warn('[VV] refresh after sync failed:', err);
       }
     }, 80);
+
 
     return true;
   } catch (err) {
