@@ -634,20 +634,21 @@ function parseVVChatBlocks(raw) {
       .replace(/^\s*\[消息\]\s*/, '')
       .replace(/\s*\[\/消息\]\s*$/, '');
 
-    const readField = (name) => {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(
-        '(?:^|\\n)' + escaped + '=([\\s\\S]*?)(?=\\n(?:side|sender|content|state)=|$)'
-      );
-      const m = inner.match(re);
-      return m ? String(m[1] || '').trim() : '';
+    const readField = (names) => {
+      for (const name of names) {
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp('(?:^|\\n)' + escaped + '=([\\s\\S]*?)(?=\\n(?:side|sender|content|text|state)=|$)');
+        const m = inner.match(re);
+        if (m) return String(m[1] || '').trim();
+      }
+      return '';
     };
 
     const msg = {
-      side: readField('side'),
-      sender: readField('sender'),
-      content: readField('content'),
-      state: readField('state')
+      side: readField(['side']),
+      sender: readField(['sender']),
+      content: readField(['content', 'text']),
+      state: readField(['state'])
     };
 
     if (msg.side && msg.content) {
