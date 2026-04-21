@@ -667,185 +667,192 @@ function parseVVChatBlocks(raw) {
 }
 
 function appendVVChatReplyToLocal(chatData) {
-  console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
+  try {
+    console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
 
-  if (!chatData || !chatData.chatId) return 0;
-
-  const chatId = String(chatData.chatId).trim();
-  if (!messages[chatId]) {
-    messages[chatId] = [];
-  }
-
-  const thread = messages[chatId];
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  const leftMsgs = (chatData.messages || []).filter(msg => {
-    return msg && String(msg.side || '').trim() === 'left' && String(msg.content || '').trim();
-  });
-
-  console.log('[VV] leftMsgs to append:', leftMsgs);
-
-  if (!leftMsgs.length) {
-    console.warn('[VV] no left messages found in sync block');
-    return 0;
-  }
-
-  const syncKey = chatId + '|' + leftMsgs.map(m => `${m.sender}|${m.content}|${m.state || ''}`).join('||');
-  if (window.__vv_last_sync_key === syncKey) {
-    console.log('[VV] duplicated sync ignored:', syncKey);
-    return 0;
-  }
-  window.__vv_last_sync_key = syncKey;
-
-  let appended = 0;
-
-  leftMsgs.forEach(msg => {
-    const contentText = String(msg.content || '').trim();
-    if (!contentText) return;
-
-    const duplicated = thread.some(item =>
-      !item.isMe &&
-      !item.recalled &&
-      item.type === 'text' &&
-      Array.isArray(item.chunks) &&
-      item.chunks.join('\n').trim() === contentText
-    );
-
-    if (duplicated) {
-      console.log('[VV] duplicated left msg skipped:', contentText);
-      return;
+    if (!chatData || !chatData.chatId) {
+      console.warn('[VV] append aborted: missing chatId');
+      return 0;
     }
 
-    thread.push({
-      id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-      sender: 'them',
-      senderName: msg.sender || chatData.target || '对方',
-      isMe: false,
-      type: 'text',
-      chunks: [contentText],
-      replyTo: null,
-      recalled: false,
-      time,
-      timeLabel,
-      state: msg.state || 'reply'
+    const chatId = String(chatData.chatId).trim();
+    if (!messages[chatId]) {
+      messages[chatId] = [];
+    }
+
+    const thread = messages[chatId];
+    const time = getNowTime();
+    const timeLabel = getNowFullLabel();
+
+    const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+    console.log('[VV] all sync messages:', allMsgs);
+
+    const leftMsgs = allMsgs.filter(msg => {
+      return msg && String(msg.side || '').trim() === 'left' && String(msg.content || '').trim();
     });
 
-    appended++;
-  });
+    console.log('[VV] leftMsgs to append:', leftMsgs);
 
-  if (!appended) {
-    console.log('[VV] no new message appended');
+    if (!leftMsgs.length) {
+      console.warn('[VV] no left messages found in sync block');
+      return 0;
+    }
+
+    const syncKey = chatId + '|' + leftMsgs.map(m => `${m.sender}|${m.content}|${m.state || ''}`).join('||');
+    console.log('[VV] syncKey =', syncKey);
+
+    if (window.__vv_last_sync_key === syncKey) {
+      console.log('[VV] duplicated sync ignored:', syncKey);
+      return 0;
+    }
+    window.__vv_last_sync_key = syncKey;
+
+    let appended = 0;
+
+    leftMsgs.forEach(msg => {
+      const contentText = String(msg.content || '').trim();
+      if (!contentText) {
+        console.warn('[VV] skip empty left message:', msg);
+        return;
+      }
+
+      const duplicated = thread.some(item =>
+        !item.isMe &&
+        !item.recalled &&
+        item.type === 'text' &&
+        Array.isArray(item.chunks) &&
+        item.chunks.join('\n').trim() === contentText
+      );
+
+      if (duplicated) {
+        console.log('[VV] duplicated left msg skipped:', contentText);
+        return;
+      }
+
+      const newItem = {
+        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+        sender: 'them',
+        senderName: msg.sender || chatData.target || '对方',
+        isMe: false,
+        type: 'text',
+        chunks: [contentText],
+        replyTo: null,
+        recalled: false,
+        time,
+        timeLabel,
+        state: msg.state || 'reply'
+      };
+
+      console.log('[VV] pushing message item:', newItem);
+      thread.push(newItem);
+      appended++;
+    });
+
+    console.log('[VV] appended count =', appended, 'chatId=', chatId, 'currentChatId=', currentChatId);
+
+    if (!appended) {
+      console.log('[VV] no new message appended');
+      return 0;
+    }
+
+    const rel = getRelSetting(chatId);
+    if (chatData.target && rel && !rel.name) {
+      rel.name = chatData.target;
+    }
+
+    const setting = getChatSetting(chatId);
+    if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
+    if (chatData.background) setting.background = chatData.background;
+    if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+    if (chatData.targetBubble) setting.theirBubble = chatData.targetBubble;
+    if (chatData.targetAvatarId) setting.theirAvatar = chatData.targetAvatarId;
+    if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+    if (chatData.target) setting.target = chatData.target;
+
+    const last = leftMsgs[leftMsgs.length - 1];
+    if (last && last.content) {
+      updateLastMsg(chatId, last.content, time, 'direct');
+    }
+
+    saveAll();
+
+    return appended;
+  } catch (err) {
+    console.error('[VV] appendVVChatReplyToLocal failed:', err);
     return 0;
   }
-
-  const rel = getRelSetting(chatId);
-  if (chatData.target && rel && !rel.name) {
-    rel.name = chatData.target;
-  }
-
-  const setting = getChatSetting(chatId);
-  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
-  if (chatData.background) setting.background = chatData.background;
-  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-  if (chatData.targetBubble) setting.theirBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) setting.theirAvatar = chatData.targetAvatarId;
-  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
-  if (chatData.target) setting.target = chatData.target;
-
-  const last = leftMsgs[leftMsgs.length - 1];
-  if (last && last.content) {
-    updateLastMsg(chatId, last.content, time, 'direct');
-  }
-
-  saveAll();
-
-  console.log('[VV] appended count =', appended, 'chatId=', chatId, 'currentChatId=', currentChatId);
-
-  return appended;
 }
 
 function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 1000));
+  try {
+    console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 1000));
 
-  const chatData = parseVVChatBlocks(raw);
-  console.log('[VV] parseVVChatBlocks result:', chatData);
+    const chatData = parseVVChatBlocks(raw);
+    console.log('[VV] parseVVChatBlocks result:', chatData);
 
-  if (!chatData || !chatData.chatId) {
-    console.warn('[VV] handleVVChatSyncRaw: invalid chatData');
+    if (!chatData || !chatData.chatId) {
+      console.warn('[VV] handleVVChatSyncRaw: invalid chatData');
+      return false;
+    }
+
+    const chatId = String(chatData.chatId).trim();
+
+    if (!messages[chatId]) {
+      messages[chatId] = [];
+    }
+
+    let contact = contactList.find(i => String(i.id) === chatId);
+    if (!contact) {
+      contact = {
+        id: chatId,
+        name: chatData.target || '联系人',
+        bridgeName: chatData.target || '',
+        avatar: DEFAULT_AVATAR,
+        isSticky: false,
+        lastTime: getNowTime(),
+        lastPreview: '',
+        threadType: 'direct'
+      };
+      contactList.unshift(contact);
+      console.log('[VV] created missing contact:', contact);
+    } else {
+      if (chatData.target && (!contact.name || contact.name === '联系人')) {
+        contact.name = chatData.target;
+      }
+      if (chatData.target && !contact.bridgeName) {
+        contact.bridgeName = chatData.target;
+      }
+    }
+
+    const appended = appendVVChatReplyToLocal(chatData);
+    console.log('[VV] handleVVChatSyncRaw appended =', appended);
+
+    if (typeof renderChatList === 'function') {
+      renderChatList();
+    } else if (typeof renderAllPanels === 'function') {
+      renderAllPanels();
+    }
+
+    if (!appended) {
+      console.warn('[VV] handleVVChatSyncRaw: nothing appended');
+      return false;
+    }
+
+    setTimeout(() => {
+      try {
+        console.log('[VV] refreshing chat after sync:', chatId, 'currentChatId(before)=', currentChatId);
+        openChatDetail(chatId, chatData.target || '');
+        console.log('[VV] refreshing chat after sync done:', chatId, 'currentChatId(after)=', currentChatId);
+      } catch (err) {
+        console.warn('[VV] refresh after sync failed:', err);
+      }
+    }, 80);
+
+    return true;
+  } catch (err) {
+    console.error('[VV] handleVVChatSyncRaw failed:', err);
     return false;
   }
-
-  const chatId = String(chatData.chatId).trim();
-
-  if (!messages[chatId]) {
-    messages[chatId] = [];
-  }
-
-  let contact = contactList.find(i => String(i.id) === chatId);
-  if (!contact) {
-    contact = {
-      id: chatId,
-      name: chatData.target || '联系人',
-      bridgeName: chatData.target || '',
-      avatar: DEFAULT_AVATAR,
-      isSticky: false,
-      lastTime: getNowTime(),
-      lastPreview: '',
-      threadType: 'direct'
-    };
-    contactList.unshift(contact);
-  } else {
-    if (chatData.target && (!contact.name || contact.name === '联系人')) {
-      contact.name = chatData.target;
-    }
-    if (chatData.target && !contact.bridgeName) {
-      contact.bridgeName = chatData.target;
-    }
-  }
-
-  const appended = appendVVChatReplyToLocal(chatData);
-
-  if (typeof renderChatList === 'function') {
-    renderChatList();
-  } else if (typeof renderAllPanels === 'function') {
-    renderAllPanels();
-  }
-
-  if (!appended) {
-    console.log('[VV] handleVVChatSyncRaw: nothing appended');
-    return false;
-  }
-
-  setTimeout(() => {
-    try {
-      console.log('[VV] refreshing chat after sync:', chatId, 'currentChatId(before)=', currentChatId);
-
-      // 强制把当前会话切到这条聊天并重绘
-      if (typeof openChatDetail === 'function') {
-        openChatDetail(chatId);
-      } else {
-        currentChatId = chatId;
-        if (typeof renderMessages === 'function') renderMessages();
-      }
-
-      if (typeof applyCurrentChatBackground === 'function') {
-        applyCurrentChatBackground();
-      }
-
-      if (typeof renderChatList === 'function') {
-        renderChatList();
-      } else if (typeof renderAllPanels === 'function') {
-        renderAllPanels();
-      }
-
-      console.log('[VV] refreshing chat after sync done:', chatId, 'currentChatId(after)=', currentChatId);
-    } catch (err) {
-      console.warn('[VV] refresh after sync failed:', err);
-    }
-  }, 80);
-
-  return true;
 }
 
 async function triggerSlash(cmd) {
