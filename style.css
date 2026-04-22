@@ -389,3 +389,106 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .danger-row button{background:#fff1f0;color:#ff4d4f}
 .hidden-file{display:none}
 .hidden{display:none!important}
+/* ===== VVPhone 无刘海 + 更安全的桌面布局 ===== */
+
+/* 1) 完全隐藏刘海，双保险 */
+.phone-notch {
+  display: none !important;
+}
+
+/* 2) 整个手机屏幕的顶部留白缩小一点，避免原来给刘海留太多空间 */
+.page {
+  padding-top: 0 !important;
+}
+
+/* 3) 状态栏上移并保持简洁 */
+.status-bar {
+  position: relative;
+  z-index: 5;
+  height: 28px !important;
+  padding: 8px 14px 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 4) 首页顶部组件整体更靠上，但保留安全距离 */
+.widget-container {
+  padding-top: 12px !important;
+  margin-top: 0 !important;
+}
+
+/* 5) 桌面应用区缩紧，避免图标太靠边 */
+.app-grid {
+  padding: 10px 16px 0 !important;
+  gap: 18px 14px !important;
+  justify-content: space-between;
+}
+
+/* 6) 首页底部 dock 也留出更合理边距 */
+.bottom-bar {
+  padding: 10px 14px 16px !important;
+  gap: 10px !important;
+}
+
+/* 7) 桌面应用图标缩小一点 */
+.app-block img {
+  width: 52px !important;
+  height: 52px !important;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+/* 8) 底部栏图标也缩小一点 */
+.bottom-bar .app img,
+.app img {
+  width: 50px !important;
+  height: 50px !important;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+/* 9) 图标文字缩小一点，避免拥挤 */
+.app-block span,
+.bottom-bar .app span,
+.app span {
+  font-size: 11px !important;
+  line-height: 1.2;
+  margin-top: 6px;
+}
+
+/* 10) app 项整体宽度收一点，减少被边缘切到的概率 */
+.app-block,
+.bottom-bar .app,
+.app {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* 11) 如果 phone-container 本身太贴边，给一点内边距感 */
+.phone-container {
+  overflow: hidden;
+}
+
+/* 12) 聊天页/联系人页/其他页顶部也统一一点，避免无刘海后空得怪 */
+.contact-nav,
+.chat-header,
+.setting-header,
+.call-header {
+  margin-top: 0 !important;
+}
+
+/* 13) 状态栏图标稍微小一点，更像无刘海机型 */
+.status-icon-svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* 14) 时间文字略微收紧 */
+.status-bar-left,
+.status-bar-right {
+  font-size: 12px !important;
+}
