@@ -896,64 +896,142 @@ async function triggerSlash(cmd) {
   if (!cmd) return false;
 
   if (VV_BRIDGE_CONFIG.debug) {
-    console.log('[VV] triggerSlash -> VVPHONE_SEND:', cmd);
+    console.log('[VV] triggerSlash called:', cmd);
   }
 
-  if (!VV_INSTANCE_ID) {
-    console.warn('[VV] triggerSlash failed: VV_INSTANCE_ID not ready');
-    return false;
-  }
+  async function triggerSlashLegacy(command) {
+    if (VV_BRIDGE_CONFIG.debug) {
+      console.log('[VV] fallback legacy triggerSlash -> VV_EXECUTE_SLASH:', command);
+    }
 
-  try {
-    const result = await new Promise((resolve) => {
-      const requestId = vvMakeId('vvreq');
+    try {
+      const result = await new Promise((resolve) => {
+        const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+        const viewId = window.__vv_view_id || '';
 
-      VV_PENDING_REQUESTS.set(requestId, {
-        requestId,
-        command: cmd,
-        createdAt: Date.now()
+        function onMessage(event) {
+          const data = event.data;
+          if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
+            return;
+          }
+
+          if (data.viewId && viewId && data.viewId !== viewId) {
+            console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
+            return;
+          }
+
+          window.removeEventListener('message', onMessage);
+
+          if (VV_BRIDGE_CONFIG.debug) {
+            console.log('[VV] legacy bridge message:', data);
+          }
+
+          resolve({
+            ok: !!data.ok,
+            error: data.error || null
+          });
+        }
+
+        window.addEventListener('message', onMessage);
+
+        window.parent.postMessage({
+          type: 'VV_EXECUTE_SLASH',
+          requestId,
+          command,
+          viewId
+        }, '*');
+
+        setTimeout(() => {
+          window.removeEventListener('message', onMessage);
+          resolve({
+            ok: false,
+            error: 'timeout'
+          });
+        }, 15000);
       });
 
-      window.parent.postMessage({
-        type: 'VVPHONE_SEND',
-        requestId,
-        instanceId: VV_INSTANCE_ID,
-        text: cmd
-      }, '*');
+      if (!result.ok) {
+        console.warn('[VV] legacy triggerSlash failed:', result.error);
+        return false;
+      }
 
-      if (VV_BRIDGE_CONFIG.debug) {
-        console.log('[VV] posted VVPHONE_SEND', {
+      return true;
+    } catch (err) {
+      console.error('[VV] legacy triggerSlash exception:', err);
+      return false;
+    }
+  }
+
+  // ===== 优先尝试新链 =====
+  if (VV_INSTANCE_ID) {
+    if (VV_BRIDGE_CONFIG.debug) {
+      console.log('[VV] try new chain -> VVPHONE_SEND:', {
+        instanceId: VV_INSTANCE_ID,
+        cmd
+      });
+    }
+
+    try {
+      const result = await new Promise((resolve) => {
+        const requestId = vvMakeId('vvreq');
+
+        VV_PENDING_REQUESTS.set(requestId, {
+          requestId,
+          command: cmd,
+          createdAt: Date.now()
+        });
+
+        window.parent.postMessage({
+          type: 'VVPHONE_SEND',
           requestId,
           instanceId: VV_INSTANCE_ID,
           text: cmd
-        });
+        }, '*');
+
+        if (VV_BRIDGE_CONFIG.debug) {
+          console.log('[VV] posted VVPHONE_SEND', {
+            requestId,
+            instanceId: VV_INSTANCE_ID,
+            text: cmd
+          });
+        }
+
+        const timer = setTimeout(() => {
+          VV_PENDING_REQUESTS.delete(requestId);
+          resolve({
+            ok: false,
+            error: 'timeout'
+          });
+        }, 15000);
+
+        const pending = VV_PENDING_REQUESTS.get(requestId);
+        if (pending) {
+          pending.resolve = (payload) => {
+            clearTimeout(timer);
+            VV_PENDING_REQUESTS.delete(requestId);
+            resolve(payload);
+          };
+        }
+      });
+
+      if (result.ok) {
+        if (VV_BRIDGE_CONFIG.debug) {
+          console.log('[VV] new chain success');
+        }
+        return true;
       }
 
-      const timer = setTimeout(() => {
-        VV_PENDING_REQUESTS.delete(requestId);
-        resolve({
-          ok: false,
-          error: 'timeout'
-        });
-      }, 45000);
-
-      VV_PENDING_REQUESTS.get(requestId).resolve = (payload) => {
-        clearTimeout(timer);
-        VV_PENDING_REQUESTS.delete(requestId);
-        resolve(payload);
-      };
-    });
-
-    if (!result.ok) {
-      console.warn('[VV] triggerSlash failed:', result.error);
-      return false;
+      console.warn('[VV] new chain failed, fallback to legacy:', result.error);
+      return await triggerSlashLegacy(cmd);
+    } catch (err) {
+      console.error('[VV] new chain exception, fallback to legacy:', err);
+      return await triggerSlashLegacy(cmd);
     }
-
-    return true;
-  } catch (err) {
-    console.error('[VV] triggerSlash exception:', err);
-    return false;
   }
+
+  // ===== 没有 host init，直接回退旧链 =====
+  console.warn('[VV] VV_INSTANCE_ID not ready, use legacy bridge');
+  return await triggerSlashLegacy(cmd);
 }
 
 function escapeHTML(str) {
@@ -3268,7 +3346,7 @@ function initSTBridgeListener() {
       console.log('[VV] 收到 bridge 消息:', data);
     }
 
-    // 1) host 初始化：给当前手机实例分配 instanceId
+    // 1) 新链 host 初始化
     if (data.type === 'VVPHONE_HOST_INIT') {
       VV_INSTANCE_ID = data.instanceId || null;
       VV_HOST_META = data || null;
@@ -3280,9 +3358,11 @@ function initSTBridgeListener() {
       return;
     }
 
-    // 2) 全局脚本成功回包：结束这次 triggerSlash 等待
+    // 2) 新链成功回包
     if (data.type === 'VVPHONE_SYNC_RESULT') {
-      if (!VV_INSTANCE_ID || data.instanceId !== VV_INSTANCE_ID) return;
+      if (VV_INSTANCE_ID && data.instanceId && data.instanceId !== VV_INSTANCE_ID) {
+        return;
+      }
 
       const pending = VV_PENDING_REQUESTS.get(data.requestId);
       if (pending && typeof pending.resolve === 'function') {
@@ -3302,9 +3382,11 @@ function initSTBridgeListener() {
       return;
     }
 
-    // 3) 全局脚本失败回包：结束这次 triggerSlash 等待
+    // 3) 新链失败回包
     if (data.type === 'VVPHONE_SYNC_ERROR') {
-      if (!VV_INSTANCE_ID || data.instanceId !== VV_INSTANCE_ID) return;
+      if (VV_INSTANCE_ID && data.instanceId && data.instanceId !== VV_INSTANCE_ID) {
+        return;
+      }
 
       const pending = VV_PENDING_REQUESTS.get(data.requestId);
       if (pending && typeof pending.resolve === 'function') {
@@ -3318,7 +3400,16 @@ function initSTBridgeListener() {
       return;
     }
 
-    // ===== 以下保留你原有的其他桥接能力 =====
+    // 4) 旧链聊天同步，保留兼容
+    if (data.type === 'VVPHONE_CHAT_SYNC') {
+      console.log('[VV] 收到旧版 VVPHONE_CHAT_SYNC');
+      if (data.raw) {
+        handleVVChatSyncRaw(data.raw);
+      }
+      return;
+    }
+
+    // ===== 以下保留你原有桥接能力 =====
 
     if (data.type === 'VVPHONE_REPLY') {
       const chatId = data.chatId || currentChatId;
