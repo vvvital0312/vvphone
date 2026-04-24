@@ -648,25 +648,33 @@ function savePhoneIconsSafely(savedIcons) {
 
 function parseVVChatBlocks(raw) {
   const text = String(raw || '');
+  console.log('[VV] parseVVChatBlocks input full >>>');
+  console.log(text);
+  console.log('<<< [VV] parseVVChatBlocks input full');
 
-  // 优先吃同步块，再退回聊天界面块
-  const chatMatch =
-    text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/) ||
-    text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
+  const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
+  const uiMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
 
+  console.log('[VV] syncMatch exists:', !!syncMatch);
+  console.log('[VV] uiMatch exists:', !!uiMatch);
+
+  const chatMatch = syncMatch || uiMatch;
   if (!chatMatch) {
     console.warn('[VV] parseVVChatBlocks: no sync/chat block found');
     return null;
   }
 
   const full = chatMatch[1];
+  console.log('[VV] extracted block full >>>');
+  console.log(full);
+  console.log('<<< [VV] extracted block full');
 
   function escapeRegExp(s) {
     return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   function readField(name) {
-    const m = full.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*=\\s*(.*)$', 'mi'));
+    const m = full.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*[=:]\\s*(.*)$', 'mi'));
     return m ? m[1].trim() : '';
   }
 
@@ -684,36 +692,32 @@ function parseVVChatBlocks(raw) {
 
   const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/g;
   let m;
-
   while ((m = msgRegex.exec(full))) {
     const block = m[1];
+    console.log('[VV] found [消息] block >>>');
+    console.log(block);
+    console.log('<<< [VV] found [消息] block');
 
     function readMsgField(name) {
-      const mm = block.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*=\\s*(.*)$', 'mi'));
+      const mm = block.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*[=:]\\s*(.*)$', 'mi'));
       return mm ? mm[1].trim() : '';
     }
 
-    const side = readMsgField('side');
-    const sender = readMsgField('sender');
-
-    // 兼容多种正文字段名
-    const content =
-      readMsgField('content') ||
-      readMsgField('text') ||
-      readMsgField('message') ||
-      readMsgField('msg');
-
-    const state = readMsgField('state');
-    const type = readMsgField('type') || 'text';
-
-    chat.messages.push({
-      side,
-      sender,
-      content,
-      state,
-      type,
+    const msg = {
+      side: readMsgField('side'),
+      sender: readMsgField('sender'),
+      content:
+        readMsgField('content') ||
+        readMsgField('text') ||
+        readMsgField('message') ||
+        readMsgField('msg'),
+      state: readMsgField('state'),
+      type: readMsgField('type') || 'text',
       _raw: block.trim()
-    });
+    };
+
+    console.log('[VV] parsed msg:', msg);
+    chat.messages.push(msg);
   }
 
   console.log('[VV] parseVVChatBlocks parsed chat:', chat);
@@ -809,14 +813,22 @@ function appendVVChatReplyToLocal(chatData) {
 }
 
 function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 300));
+  console.log('[VV] handleVVChatSyncRaw raw full >>>');
+  console.log(String(raw || ''));
+  console.log('<<< [VV] handleVVChatSyncRaw raw full');
 
   const parsed = parseVVChatBlocks(raw);
   console.log('[VV] parseVVChatBlocks result:', parsed);
 
-  if (!parsed) return;
+  if (!parsed) {
+    console.warn('[VV] parseVVChatBlocks returned null');
+    return;
+  }
 
   appendVVChatReplyToLocal(parsed);
+  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
+
+  renderMessages();
 }
 
 async function triggerSlash(cmd) {
