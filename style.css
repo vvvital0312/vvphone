@@ -919,3 +919,49 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .emoji-item.manage-mode img {
   opacity: 0.92;
 }
+
+/* 临时替换 */
+#chatDetailPage {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-detail-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.chat-detail-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.chat-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+}
+
+.message-area {
+  position: absolute;
+  top: 50px;
+  left: 0;
+  right: 0;
+  bottom: 118px;
+  overflow-y: auto;
+  z-index: 2;
+}
+
+.input-toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+}
