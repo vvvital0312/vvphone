@@ -2534,8 +2534,6 @@ function sendMessage() {
     renderMessages();
     saveAll();
     closeEmojiPanel();
-
-    triggerAIReply();  
 }
 
 function buildVVEventPayload(chatId) {
@@ -2601,15 +2599,21 @@ function buildVVEventPayload(chatId) {
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
-  if (isTriggeringAIReply) return;
+  if (isTriggeringAIReply) {
+    console.log('[VV] triggerAIReply blocked: isTriggeringAIReply = true');
+    return;
+  }
+
   isTriggeringAIReply = true;
+  console.log('[VV] triggerAIReply entered');
 
   try {
-    console.log('triggerAIReply check:', currentChatId, pendingReplyTargets[currentChatId]);
+    console.log('[VV] currentChatId =', currentChatId);
+    console.log('[VV] pendingReplyTargets[currentChatId] =', pendingReplyTargets[currentChatId]);
+    console.log('[VV] VV_BRIDGE_CONFIG =', VV_BRIDGE_CONFIG);
 
-    if (!currentChatId) return;
-
-    if (!pendingReplyTargets[currentChatId]) {
+    if (!currentChatId) {
+      console.log('[VV] return: no currentChatId');
       return;
     }
 
@@ -2617,16 +2621,23 @@ async function triggerAIReply() {
     const thread = messages[chatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
+    console.log('[VV] pendingMessages =', pendingMessages);
+
     if (!pendingMessages.length) {
+      console.log('[VV] return: no pendingMessages');
       pendingReplyTargets[chatId] = false;
       saveAll();
       return;
     }
 
     const beforeCount = thread.filter(m => !m.isMe && !m.recalled).length;
+    console.log('[VV] beforeCount =', beforeCount);
 
     const bridgeName = getBridgeNameByChatId(chatId, currentChatType);
     const promptText = buildVVEventPayload(chatId) || buildLatestUserPayload(chatId);
+
+    console.log('[VV] bridgeName =', bridgeName);
+    console.log('[VV] promptText =', promptText);
 
     let slashOk = false;
 
@@ -2637,12 +2648,15 @@ async function triggerAIReply() {
         chatType: currentChatType,
         promptText
       });
+
+      console.log('[VV] reply cmd =', cmd);
       slashOk = await triggerSlash(cmd);
-      console.log('[VV] slashOk:', slashOk);
+      console.log('[VV] slashOk =', slashOk);
     }
 
-    // slash 模式：只信桥接回包
     if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'slash') {
+      console.log('[VV] mode=slash, wait bridge only');
+
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
@@ -2651,17 +2665,20 @@ async function triggerAIReply() {
       return;
     }
 
-    // local+slash：给桥接回包一点时间，没回来就本地兜底
     if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'local+slash') {
+      console.log('[VV] mode=local+slash, wait 1200ms for bridge');
+
       await new Promise(resolve => setTimeout(resolve, 1200));
 
       const afterThread = messages[chatId] || [];
       const afterCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
       const gotBridgeReply = afterCount > beforeCount;
 
-      console.log('[VV] local+slash gotBridgeReply:', gotBridgeReply, 'before:', beforeCount, 'after:', afterCount);
+      console.log('[VV] afterCount =', afterCount);
+      console.log('[VV] gotBridgeReply =', gotBridgeReply);
 
       if (!gotBridgeReply) {
+        console.log('[VV] no bridge reply, fallback simulateAutoReply');
         simulateAutoReply(chatId, currentChatType);
       }
 
@@ -2673,8 +2690,8 @@ async function triggerAIReply() {
       return;
     }
 
-    // 纯 local 或 slash 失败时兜底
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
+      console.log('[VV] slash failed or mode=local, fallback simulateAutoReply');
       simulateAutoReply(chatId, currentChatType);
 
       pendingMessages.forEach(m => {
@@ -2683,9 +2700,12 @@ async function triggerAIReply() {
       pendingReplyTargets[chatId] = false;
       saveAll();
     }
+  } catch (err) {
+    console.error('[VV] triggerAIReply error:', err);
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
+      console.log('[VV] triggerAIReply released');
     }, 300);
   }
 }
