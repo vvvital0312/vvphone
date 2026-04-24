@@ -2190,16 +2190,30 @@ function removeComposerAttachment(index) {
 
 function renderMessageOriginal(m) {
   switch (m.type) {
-    case 'text':
-      return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
+    case 'text': {
+      const textChunks = Array.isArray(m.chunks) && m.chunks.length
+        ? m.chunks
+        : (m.text ? [m.text] : (m.content ? [m.content] : []));
+
+      if (!textChunks.length) {
+        return `<div class="message-bubble">[空文本]</div>`;
+      }
+
+      return textChunks
+        .map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`)
+        .join('');
+    }
+
     case 'sticker':
       return `<div class="message-bubble sticker-bubble"><img ${buildMediaSrcAttrs(m.src)} alt="${escapeHTML(m.stickerName || '表情')}"></div>`;
+
     case 'image':
       return `
         <div class="message-bubble image-bubble">
           <img ${buildMediaSrcAttrs(m.src)} alt="">
           ${m.desc ? `<div class="image-desc">${escapeHTML(m.desc)}</div>` : ''}
         </div>`;
+
     case 'voice':
       return `
         <div class="message-bubble voice-bubble">
@@ -2209,22 +2223,30 @@ function renderMessageOriginal(m) {
           </div>
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
+
     case 'transfer':
       return `
         <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
           <div class="transfer-card-top">
             <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
             <div class="transfer-text">
-              <div class="transfer-amount">¥${escapeHTML(m.amount)}</div>
+              <div class="transfer-amount">¥${escapeHTML(m.amount || '')}</div>
               <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
             </div>
           </div>
           <div class="transfer-card-bottom">${escapeHTML(m.status || '待收款')}</div>
         </div>`;
+
     case 'system':
       return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
-    default:
+
+    default: {
+      const fallbackText = m.text || m.content || '';
+      if (fallbackText) {
+        return `<div class="message-bubble">${escapeHTML(fallbackText)}</div>`;
+      }
       return `<div class="message-bubble">未知消息</div>`;
+    }
   }
 }
 
@@ -2233,6 +2255,11 @@ function renderMessages() {
   if (!area) return;
 
   const msgs = messages[currentChatId] || [];
+  console.log('当前 chatId:', currentChatId);
+  console.log('当前消息总数:', msgs.length);
+  console.log('最后3条消息:', msgs.slice(-3));
+  console.log('AI消息样本:', msgs.filter(m => !m.isMe).slice(-3));
+
   if (!msgs.length) {
     area.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">开始聊天吧~</div>';
     return;
