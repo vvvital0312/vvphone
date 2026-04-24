@@ -2534,6 +2534,8 @@ function sendMessage() {
     renderMessages();
     saveAll();
     closeEmojiPanel();
+
+    triggerAIReply();  
 }
 
 function buildVVEventPayload(chatId) {
