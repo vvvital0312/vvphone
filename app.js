@@ -2190,30 +2190,16 @@ function removeComposerAttachment(index) {
 
 function renderMessageOriginal(m) {
   switch (m.type) {
-    case 'text': {
-      const textChunks = Array.isArray(m.chunks) && m.chunks.length
-        ? m.chunks
-        : (m.text ? [m.text] : (m.content ? [m.content] : []));
-
-      if (!textChunks.length) {
-        return `<div class="message-bubble">[空文本]</div>`;
-      }
-
-      return textChunks
-        .map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`)
-        .join('');
-    }
-
+    case 'text':
+      return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
     case 'sticker':
       return `<div class="message-bubble sticker-bubble"><img ${buildMediaSrcAttrs(m.src)} alt="${escapeHTML(m.stickerName || '表情')}"></div>`;
-
     case 'image':
       return `
         <div class="message-bubble image-bubble">
           <img ${buildMediaSrcAttrs(m.src)} alt="">
           ${m.desc ? `<div class="image-desc">${escapeHTML(m.desc)}</div>` : ''}
         </div>`;
-
     case 'voice':
       return `
         <div class="message-bubble voice-bubble">
@@ -2223,30 +2209,22 @@ function renderMessageOriginal(m) {
           </div>
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
-
     case 'transfer':
       return `
         <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
           <div class="transfer-card-top">
             <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
             <div class="transfer-text">
-              <div class="transfer-amount">¥${escapeHTML(m.amount || '')}</div>
+              <div class="transfer-amount">¥${escapeHTML(m.amount)}</div>
               <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
             </div>
           </div>
           <div class="transfer-card-bottom">${escapeHTML(m.status || '待收款')}</div>
         </div>`;
-
     case 'system':
       return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
-
-    default: {
-      const fallbackText = m.text || m.content || '';
-      if (fallbackText) {
-        return `<div class="message-bubble">${escapeHTML(fallbackText)}</div>`;
-      }
+    default:
       return `<div class="message-bubble">未知消息</div>`;
-    }
   }
 }
 
@@ -2255,11 +2233,6 @@ function renderMessages() {
   if (!area) return;
 
   const msgs = messages[currentChatId] || [];
-  console.log('当前 chatId:', currentChatId);
-  console.log('当前消息总数:', msgs.length);
-  console.log('最后3条消息:', msgs.slice(-3));
-  console.log('AI消息样本:', msgs.filter(m => !m.isMe).slice(-3));
-
   if (!msgs.length) {
     area.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">开始聊天吧~</div>';
     return;
@@ -2599,113 +2572,61 @@ function buildVVEventPayload(chatId) {
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
-  if (isTriggeringAIReply) {
-    console.log('[VV] triggerAIReply blocked: isTriggeringAIReply = true');
-    return;
-  }
-
+  if (isTriggeringAIReply) return;
   isTriggeringAIReply = true;
-  console.log('[VV] triggerAIReply entered');
 
   try {
-    console.log('[VV] currentChatId =', currentChatId);
-    console.log('[VV] pendingReplyTargets[currentChatId] =', pendingReplyTargets[currentChatId]);
-    console.log('[VV] VV_BRIDGE_CONFIG =', VV_BRIDGE_CONFIG);
+    console.log('triggerAIReply check:', currentChatId, pendingReplyTargets[currentChatId]);
 
-    if (!currentChatId) {
-      console.log('[VV] return: no currentChatId');
+    if (!currentChatId) return;
+
+    if (!pendingReplyTargets[currentChatId]) {
       return;
     }
 
-    const chatId = currentChatId;
-    const thread = messages[chatId] || [];
+    const thread = messages[currentChatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
-    console.log('[VV] pendingMessages =', pendingMessages);
-
     if (!pendingMessages.length) {
-      console.log('[VV] return: no pendingMessages');
-      pendingReplyTargets[chatId] = false;
+      pendingReplyTargets[currentChatId] = false;
       saveAll();
       return;
     }
 
-    const beforeCount = thread.filter(m => !m.isMe && !m.recalled).length;
-    console.log('[VV] beforeCount =', beforeCount);
-
-    const bridgeName = getBridgeNameByChatId(chatId, currentChatType);
-    const promptText = buildVVEventPayload(chatId) || buildLatestUserPayload(chatId);
-
-    console.log('[VV] bridgeName =', bridgeName);
-    console.log('[VV] promptText =', promptText);
+    const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
+    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
 
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')) {
       const cmd = VV_BRIDGE_CONFIG.buildReplyCommand({
         bridgeName,
-        chatId,
+        chatId: currentChatId,
         chatType: currentChatType,
         promptText
       });
-
-      console.log('[VV] reply cmd =', cmd);
       slashOk = await triggerSlash(cmd);
-      console.log('[VV] slashOk =', slashOk);
     }
 
-    if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'slash') {
-      console.log('[VV] mode=slash, wait bridge only');
-
+    if (slashOk) {
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
-      pendingReplyTargets[chatId] = false;
-      saveAll();
-      return;
-    }
-
-    if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'local+slash') {
-      console.log('[VV] mode=local+slash, wait 1200ms for bridge');
-
-      await new Promise(resolve => setTimeout(resolve, 1200));
-
-      const afterThread = messages[chatId] || [];
-      const afterCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
-      const gotBridgeReply = afterCount > beforeCount;
-
-      console.log('[VV] afterCount =', afterCount);
-      console.log('[VV] gotBridgeReply =', gotBridgeReply);
-
-      if (!gotBridgeReply) {
-        console.log('[VV] no bridge reply, fallback simulateAutoReply');
-        simulateAutoReply(chatId, currentChatType);
-      }
-
-      pendingMessages.forEach(m => {
-        m.pendingForReply = false;
-      });
-      pendingReplyTargets[chatId] = false;
-      saveAll();
-      return;
+      pendingReplyTargets[currentChatId] = false;
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
-      console.log('[VV] slash failed or mode=local, fallback simulateAutoReply');
-      simulateAutoReply(chatId, currentChatType);
-
+      simulateAutoReply(currentChatId, currentChatType);
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
-      pendingReplyTargets[chatId] = false;
-      saveAll();
+      pendingReplyTargets[currentChatId] = false;
     }
-  } catch (err) {
-    console.error('[VV] triggerAIReply error:', err);
+
+    saveAll();
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
-      console.log('[VV] triggerAIReply released');
     }, 300);
   }
 }
@@ -2757,8 +2678,6 @@ function simulateAutoReply(targetId, type) {
 }
 
 function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
-  console.log('[VV] appendAIMessageToCurrentChat:', { chatId, senderName, text, type });
-
   if (!chatId) return;
   if (!messages[chatId]) messages[chatId] = [];
 
