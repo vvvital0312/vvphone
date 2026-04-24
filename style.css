@@ -349,9 +349,16 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .reply-trigger-btn{
   border:none;background:#111;color:#fff;padding:8px 14px;border-radius:999px;font-size:12px;cursor:pointer
 }
-.emoji-panel{
-  display:none;position:absolute;left:0;right:0;bottom:100%;background:#fff;border-top:1px solid #eee;
-  padding:10px;max-height:220px;overflow-y:auto;box-shadow:0 -8px 20px rgba(0,0,0,.08)
+.emoji-panel {
+  display: none;
+  margin-top: 10px;
+  background: #fff;
+  border-top: 1px solid #eee;
+  border-radius: 16px 16px 0 0;
+  padding: 12px 10px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 -6px 16px rgba(0,0,0,.08);
 }
 .emoji-panel-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .emoji-item{background:#f6f6f6;border-radius:12px;padding:8px;text-align:center;cursor:pointer}
@@ -536,23 +543,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   cursor:pointer;
 }
 
-/* 表情面板：仍然在输入区里，但做成“上滑感” */
-.emoji-panel{
-  display:none;
-  margin-top:10px;
-  background:#fff;
-  border-top:1px solid #eee;
-  border-radius:16px 16px 0 0;
-  padding:12px 10px 14px;
-  max-height:220px;
-  overflow-y:auto;
-  box-shadow:0 -6px 16px rgba(0,0,0,.08);
-}
-
-.emoji-panel.show{
-  display:block;
-}
-
 .emoji-panel-grid{
   display:grid;
   grid-template-columns:repeat(4,1fr);
@@ -581,48 +571,19 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   color:#555;
 }
 
-/* 抽屉顶部小横条 */
-.emoji-panel::before{
-  content:'';
-  display:block;
-  width:40px;
-  height:5px;
-  border-radius:999px;
-  background:#d8d8d8;
-  margin:0 auto 10px;
-}
-
 /* ===== 删除预览框 ===== */
 .composer-quote-preview,
 .composer-attachments {
   display: none !important;
 }
 
-/* ===== 输入区保持原位，不要绝对吸底 ===== */
 .input-toolbar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
   z-index: 10;
   background: rgba(255,255,255,.96);
   border-top: 1px solid #ddd;
   padding: 8px 10px 10px;
-  backdrop-filter: blur(10px);
   box-sizing: border-box;
-}
-
-/* ===== 表情面板保守版抽屉 ===== */
-.emoji-panel {
-  display: none;
-  margin-top: 10px;
-  background: #fff;
-  border-top: 1px solid #eee;
-  border-radius: 16px 16px 0 0;
-  padding: 12px 10px 14px;
-  max-height: 220px;
-  overflow-y: auto;
-  box-shadow: 0 -6px 16px rgba(0,0,0,.08);
 }
 
 .emoji-panel.show {
@@ -795,15 +756,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 
 .switch input:checked + .switch-slider::before {
   transform: translateX(18px);
-}
-
-.bottom-tabs {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 200 !important;
-  pointer-events: auto !important;
 }
 
 .contact-body .panel {

@@ -648,15 +648,25 @@ function savePhoneIconsSafely(savedIcons) {
 
 function parseVVChatBlocks(raw) {
   const text = String(raw || '');
+
+  // 优先吃同步块，再退回聊天界面块
   const chatMatch =
-  text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/) ||
-  text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
-  if (!chatMatch) return null;
+    text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/) ||
+    text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
+
+  if (!chatMatch) {
+    console.warn('[VV] parseVVChatBlocks: no sync/chat block found');
+    return null;
+  }
 
   const full = chatMatch[1];
 
+  function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   function readField(name) {
-    const m = full.match(new RegExp('^' + name + '=(.*)$', 'm'));
+    const m = full.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*=\\s*(.*)$', 'mi'));
     return m ? m[1].trim() : '';
   }
 
@@ -674,29 +684,49 @@ function parseVVChatBlocks(raw) {
 
   const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/g;
   let m;
+
   while ((m = msgRegex.exec(full))) {
     const block = m[1];
 
     function readMsgField(name) {
-      const mm = block.match(new RegExp('^' + name + '=(.*)$', 'm'));
+      const mm = block.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*=\\s*(.*)$', 'mi'));
       return mm ? mm[1].trim() : '';
     }
 
+    const side = readMsgField('side');
+    const sender = readMsgField('sender');
+
+    // 兼容多种正文字段名
+    const content =
+      readMsgField('content') ||
+      readMsgField('text') ||
+      readMsgField('message') ||
+      readMsgField('msg');
+
+    const state = readMsgField('state');
+    const type = readMsgField('type') || 'text';
+
     chat.messages.push({
-      side: readMsgField('side'),
-      sender: readMsgField('sender'),
-      content: readMsgField('content'),
-      state: readMsgField('state')
+      side,
+      sender,
+      content,
+      state,
+      type,
+      _raw: block.trim()
     });
   }
 
+  console.log('[VV] parseVVChatBlocks parsed chat:', chat);
   return chat;
 }
 
 function appendVVChatReplyToLocal(chatData) {
   console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
 
-  if (!chatData || !chatData.chatId) return;
+  if (!chatData || !chatData.chatId) {
+    console.warn('[VV] appendVVChatReplyToLocal: invalid chatData');
+    return;
+  }
 
   const chatId = chatData.chatId;
   if (!messages[chatId]) {
@@ -705,22 +735,34 @@ function appendVVChatReplyToLocal(chatData) {
 
   const thread = messages[chatId];
   const time = getNowTime();
-  const timeLabel = getNowFullLabel();
+  const timeLabel = chatData.time || getNowFullLabel();
 
-  const leftMsgs = (chatData.messages || []).filter(msg => msg.side === 'left' && msg.content);
+  const leftMsgs = (chatData.messages || []).filter(msg => {
+    const isLeft = String(msg.side || '').trim().toLowerCase() === 'left';
+    const hasContent = !!String(msg.content || '').trim();
+    return isLeft && hasContent;
+  });
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
 
   leftMsgs.forEach(msg => {
+    const normalizedContent = String(msg.content || '').trim();
+    if (!normalizedContent) return;
+
     const duplicated = thread.some(item =>
       !item.isMe &&
       !item.recalled &&
       item.type === 'text' &&
-      Array.isArray(item.chunks) &&
-      item.chunks.join('\n') === msg.content
+      (
+        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
+        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
+      )
     );
 
-    if (duplicated) return;
+    if (duplicated) {
+      console.log('[VV] skip duplicated assistant msg:', normalizedContent);
+      return;
+    }
 
     thread.push({
       id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
@@ -728,7 +770,8 @@ function appendVVChatReplyToLocal(chatData) {
       senderName: msg.sender || chatData.target || '对方',
       isMe: false,
       type: 'text',
-      chunks: [msg.content],
+      chunks: [normalizedContent],
+      text: normalizedContent,
       replyTo: null,
       recalled: false,
       time,
@@ -754,6 +797,8 @@ function appendVVChatReplyToLocal(chatData) {
     const last = leftMsgs[leftMsgs.length - 1];
     updateLastMsg(chatId, last.content, time, currentChatType);
   }
+
+  console.log('[VV] thread after append:', thread);
 
   if (chatId === currentChatId) {
     renderMessages();
@@ -2198,8 +2243,14 @@ function removeComposerAttachment(index) {
 
 function renderMessageOriginal(m) {
   switch (m.type) {
-    case 'text':
-      return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
+    case 'text': {
+      const chunks = Array.isArray(m.chunks) && m.chunks.length
+        ? m.chunks
+        : (typeof m.text === 'string' && m.text.trim()
+            ? [m.text]
+            : []);
+      return chunks.map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
+    }
     case 'sticker':
       return `<div class="message-bubble sticker-bubble"><img ${buildMediaSrcAttrs(m.src)} alt="${escapeHTML(m.stickerName || '表情')}"></div>`;
     case 'image':
