@@ -2613,46 +2613,76 @@ async function triggerAIReply() {
       return;
     }
 
-    const thread = messages[currentChatId] || [];
+    const chatId = currentChatId;
+    const thread = messages[chatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
     if (!pendingMessages.length) {
-      pendingReplyTargets[currentChatId] = false;
+      pendingReplyTargets[chatId] = false;
       saveAll();
       return;
     }
 
-    const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
+    const beforeCount = thread.filter(m => !m.isMe && !m.recalled).length;
+
+    const bridgeName = getBridgeNameByChatId(chatId, currentChatType);
+    const promptText = buildVVEventPayload(chatId) || buildLatestUserPayload(chatId);
 
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')) {
       const cmd = VV_BRIDGE_CONFIG.buildReplyCommand({
         bridgeName,
-        chatId: currentChatId,
+        chatId,
         chatType: currentChatType,
         promptText
       });
       slashOk = await triggerSlash(cmd);
+      console.log('[VV] slashOk:', slashOk);
     }
 
-    if (slashOk) {
+    // slash 模式：只信桥接回包
+    if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'slash') {
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
-      pendingReplyTargets[currentChatId] = false;
+      pendingReplyTargets[chatId] = false;
+      saveAll();
+      return;
     }
 
+    // local+slash：给桥接回包一点时间，没回来就本地兜底
+    if (slashOk && VV_BRIDGE_CONFIG.chatMode === 'local+slash') {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+
+      const afterThread = messages[chatId] || [];
+      const afterCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
+      const gotBridgeReply = afterCount > beforeCount;
+
+      console.log('[VV] local+slash gotBridgeReply:', gotBridgeReply, 'before:', beforeCount, 'after:', afterCount);
+
+      if (!gotBridgeReply) {
+        simulateAutoReply(chatId, currentChatType);
+      }
+
+      pendingMessages.forEach(m => {
+        m.pendingForReply = false;
+      });
+      pendingReplyTargets[chatId] = false;
+      saveAll();
+      return;
+    }
+
+    // 纯 local 或 slash 失败时兜底
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
-      simulateAutoReply(currentChatId, currentChatType);
+      simulateAutoReply(chatId, currentChatType);
+
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
-      pendingReplyTargets[currentChatId] = false;
+      pendingReplyTargets[chatId] = false;
+      saveAll();
     }
-
-    saveAll();
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
@@ -2707,6 +2737,8 @@ function simulateAutoReply(targetId, type) {
 }
 
 function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
+  console.log('[VV] appendAIMessageToCurrentChat:', { chatId, senderName, text, type });
+
   if (!chatId) return;
   if (!messages[chatId]) messages[chatId] = [];
 
