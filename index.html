@@ -19,7 +19,6 @@
       </div>
 
       <div class="status-bar">
-        <div class="status-bar-left"><span id="topBarTime">12:00</span></div>
         <div class="status-bar-right">
           <svg class="status-icon-svg" viewBox="0 0 24 24"><path d="M20,20h2v-2h-2V20z M18,20h-2v-4h2V20z M14,20h-2v-6h2V20z M10,20H8v-8h2V20z M6,20H4v-10h2V20z"></path></svg>
           <svg class="status-icon-svg" viewBox="0 0 24 24"><path d="M12,3C7.41,3,3.86,4.53,0.96,7.03L2.37,8.44C4.89,6.31,8.06,5,12,5s7.11,1.31,9.63,3.44l1.41-1.41C20.14,4.53,16.59,3,12,3z"></path></svg>
@@ -89,7 +88,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18L9 12L15 6" stroke="#111" stroke-width="2" stroke-linecap="round"/></svg>返回
         </div>
         <div class="nav-title">消息</div>
-        <div class="nav-action" onclick="playClickSound(); handleTopAdd()">＋</div>
+        <div class="nav-action">＋</div>
       </div>
 
       <div class="contact-body with-bottom-tabs">
@@ -110,11 +109,91 @@
             <div class="feed-list" id="feedList"></div>
           </div>
         </div>
+   
+        <div id="profilePage" class="panel contact-tab-page" style="display:none;">
+          <div class="profile-page">
+            <div class="profile-header-card">
+              <label class="profile-avatar-wrap">
+                <img id="myProfileAvatar" data-my-profile-avatar src="" alt="我的头像" class="profile-avatar" />
+                <input id="profileAvatarInput" type="file" accept="image/*" hidden />
+              </label>
+
+              <div id="profileNickname" class="profile-nickname clickable" onclick="openProfileNicknameDialog()">我</div>
+            </div>
+
+            <div class="profile-section">
+              <div class="profile-setting-item">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">头像统一</div>
+                  <div class="profile-setting-desc">开启后，聊天头像 / 动态头像 / 主页头像统一</div>
+                </div>
+                <label class="switch">
+                  <input id="avatarUnifiedSwitch" type="checkbox" onchange="toggleAvatarUnified(this.checked)" />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="profile-setting-item">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">背景统一</div>
+                  <div class="profile-setting-desc">开启后，所有聊天会话共用同一张背景</div>
+                </div>
+                <label class="switch">
+                  <input id="backgroundUnifiedSwitch" type="checkbox" onchange="toggleBackgroundUnified(this.checked)" />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="profile-setting-item clickable" onclick="document.getElementById('feedCoverInput')?.click()">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">朋友圈封面</div>
+                  <div class="profile-setting-desc">设置动态页顶部封面</div>
+                </div>
+                <div class="profile-setting-value">更换</div>
+              </div>
+
+              <div class="profile-setting-item clickable" onclick="triggerGlobalBgPick()">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">一键更换背景</div>
+                  <div class="profile-setting-desc">设置统一聊天背景</div>
+                </div>
+                <div class="profile-setting-value">选择</div>
+              </div>
+
+              <input id="globalBgInput" type="file" accept="image/*" hidden />
+
+              <div class="profile-setting-item clickable" onclick="handleWalletClick()">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">钱包</div>
+                  <div class="profile-setting-desc">点击可获得 10 元</div>
+                </div>
+                <div id="walletBalance" class="profile-setting-value">¥0</div>
+              </div>
+
+              <div class="profile-setting-item">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">聊天气泡</div>
+                  <div class="profile-setting-desc">下一步接入颜色与形状设置</div>
+                </div>
+                <div class="profile-setting-value">待开发</div>
+              </div>
+
+              <div class="profile-setting-item">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">界面字体</div>
+                  <div class="profile-setting-desc">下一步接入字体切换</div>
+                </div>
+                <div class="profile-setting-value">待开发</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="contact-tabs bottom-tabs">
           <div class="contact-tab active" data-tab="direct" onclick="switchContactTab('direct')">聊天</div>
           <div class="contact-tab" data-tab="group" onclick="switchContactTab('group')">群聊</div>
           <div class="contact-tab" data-tab="feed" onclick="switchContactTab('feed')">动态</div>
+          <div class="contact-tab" data-tab="profile" onclick="switchContactTab('profile')">我的</div>        
         </div>
       </div>
     </div>
@@ -167,6 +246,7 @@
         </div>
 
         <div class="emoji-panel" id="emojiPanel">
+          <div class="emoji-drawer-bar"></div>
           <div class="emoji-panel-grid" id="emojiPanelGrid"></div>
         </div>
       </div>
@@ -191,14 +271,8 @@
       </div>
 
       <div class="setting-page-body">
-        <div class="profile-cover" id="profileCover">
-          <div class="profile-avatar-big">
-            <img id="profileTheirAvatar" src="" alt="">
-          </div>
-          <div class="profile-name-block">
-            <h4 id="profileTitleName">联系人</h4>
-            <p id="profileSubText">聊天设置与资料</p>
-          </div>
+        <div class="profile-name-block">
+          <h4 id="profileTitleName"></h4>
         </div>
 
         <div class="profile-setting-content">
@@ -232,12 +306,6 @@
               </div>
               <label for="chatBgInput">上传</label>
             </div>
-            <div class="setting-row">
-              <div class="setting-row-left">
-                <div class="setting-row-title">朋友圈封面</div>
-              </div>
-              <label for="feedCoverInput">上传</label>
-            </div>
           </div>
 
           <div class="setting-group">
@@ -257,12 +325,6 @@
                 <div class="setting-row-title">导入本地表情</div>
               </div>
               <button onclick="openStickerImportDialog('file')">导入</button>
-            </div>
-            <div class="setting-row">
-              <div class="setting-row-left">
-                <div class="setting-row-title">URL添加表情</div>
-              </div>
-              <button onclick="openStickerImportDialog('url')">添加</button>
             </div>
           </div>
 
@@ -440,6 +502,10 @@
       </div>
     </div>
 
+    <div id="feedImageViewer" class="feed-image-viewer" onclick="closeFeedImageViewer()">
+      <img id="feedImageViewerImg" src="" alt="">
+    </div>
+
     <div id="transferDialog" class="dialog">
       <div class="dialog-content">
         <h3>转账</h3>
@@ -459,7 +525,7 @@
         <div class="preview-box" id="sendImagePreviewBox"><span>图片预览区</span></div>
         <input type="text" id="sendImageDesc" placeholder="图片描述（可选）">
         <div class="dialog-buttons">
-          <button onclick="confirmImageDraft()">加入发送区</button>
+          <button onclick="confirmImageDraft()">确认</button>
           <button onclick="closeDialog('imageSendDialog')">取消</button>
         </div>
       </div>
@@ -471,7 +537,7 @@
         <textarea id="voiceTextInput" placeholder="请输入语音转文字内容..."></textarea>
         <input type="number" id="voiceDurationInput" placeholder="语音时长（秒，可选）">
         <div class="dialog-buttons">
-          <button onclick="confirmVoiceDraft()">加入发送区</button>
+          <button onclick="confirmVoiceDraft()">确认</button>
           <button onclick="closeDialog('voiceDialog')">取消</button>
         </div>
       </div>
@@ -487,6 +553,17 @@
         <div class="dialog-buttons">
           <button onclick="confirmStickerImport()">确认添加</button>
           <button onclick="closeDialog('stickerImportDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileNicknameDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>修改昵称</h3>
+        <input type="text" id="profileNicknameDialogInput" maxlength="20" placeholder="请输入昵称">
+        <div class="dialog-buttons">
+          <button onclick="confirmProfileNicknameChange()">确认</button>
+          <button onclick="closeDialog('profileNicknameDialog')">取消</button>
         </div>
       </div>
     </div>

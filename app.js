@@ -31,6 +31,21 @@ let composerDraft = {
 
 let pendingReplyTargets = {};
 
+let myProfile = {
+  avatar: '',
+  nickname: '我',
+  avatarUnified: false,
+  backgroundUnified: false,
+  globalChatBg: ''
+};
+
+let walletData = {
+  balance: 0
+};
+
+let stickerManageMode = false;
+let stickerPressTimer = null;
+
 const DEFAULT_AVATAR = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMDdjMTYwIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIxOCIgcj0iNiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMTIgMzRDMTIgMjcuMzcyMyAxNy4zNzIzIDIyIDI0IDIyQzMwLjYyNzcgMjIgMzYgMjcuMzcyMyAzNiAzNEgxMloiIGZpbGw9IndoaXRlIi8+PC9zdmc+';
 
 const STORAGE_DEBUG = true;
@@ -42,8 +57,6 @@ const IDB_DB_VERSION = 1;
 const IDB_STORE_NAME = 'assets';
 const IDB_REF_PREFIX = 'idb:';
 const assetObjectUrlCache = new Map();
-
-window.__vv_view_id = window.__vv_view_id || ('vvview-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 
 const VV_BRIDGE_CONFIG = {
   enabled: true,
@@ -291,6 +304,52 @@ async function persistImageToIDB(dataUrl, meta) {
   });
 
   return createAssetRef(id);
+}
+
+async function handleProfileAvatarFile(file) {
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const dataUrl = e.target?.result;
+    if (!dataUrl) return;
+
+    let finalSrc = dataUrl;
+    if (typeof persistImageToIDB === 'function') {
+      finalSrc = await persistImageToIDB(dataUrl, {
+        area: 'profile.avatar'
+      });
+    }
+
+    setMyProfileAvatar(finalSrc);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function handleGlobalBgFile(file) {
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const dataUrl = e.target?.result;
+    if (!dataUrl) return;
+
+    let finalSrc = dataUrl;
+    if (typeof persistImageToIDB === 'function') {
+      finalSrc = await persistImageToIDB(dataUrl, {
+        area: 'profile.globalBg'
+      });
+    }
+
+    ensureProfileData();
+    myProfile.globalChatBg = finalSrc;
+    myProfile.backgroundUnified = true;
+
+    updateProfileUI();
+    renderMessages?.();
+    saveAll();
+  };
+  reader.readAsDataURL(file);
 }
 
 async function resolveImageRefToUrl(ref) {
@@ -587,301 +646,130 @@ function savePhoneIconsSafely(savedIcons) {
 
 function parseVVChatBlocks(raw) {
   const text = String(raw || '');
-  console.log('[VV] parseVVChatBlocks input:', text.slice(0, 1000));
+  const chatMatch =
+  text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/) ||
+  text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
+  if (!chatMatch) return null;
 
-  const blockMatch =
-    text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/) ||
-    text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
+  const full = chatMatch[1];
 
-  if (!blockMatch) {
-    console.log('[VV] parseVVChatBlocks: no block matched');
-    return {
-      chatId: '',
-      target: '',
-      time: '',
-      myAvatarKey: '',
-      targetAvatarId: '',
-      myBubble: '',
-      targetBubble: '',
-      chatBgKey: '',
-      messages: []
-    };
+  function readField(name) {
+    const m = full.match(new RegExp('^' + name + '=(.*)$', 'm'));
+    return m ? m[1].trim() : '';
   }
 
-  const body = String(blockMatch[1] || '');
-
-  const readTopField = (name) => {
-    const re = new RegExp('(?:^|\\n)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^\\n]*)');
-    const m = body.match(re);
-    return m ? String(m[1] || '').trim() : '';
-  };
-
-  const result = {
-    chatId: readTopField('chatId'),
-    target: readTopField('target'),
-    time: readTopField('time'),
-    myAvatarKey: readTopField('myAvatarKey'),
-    targetAvatarId: readTopField('targetAvatarId'),
-    myBubble: readTopField('myBubble'),
-    targetBubble: readTopField('targetBubble'),
-    chatBgKey: readTopField('chatBgKey'),
+  const chat = {
+    chatId: readField('chatId'),
+    target: readField('target'),
+    time: readField('time'),
+    myAvatarKey: readField('myAvatarKey'),
+    targetAvatarId: readField('targetAvatarId'),
+    myBubble: readField('myBubble'),
+    targetBubble: readField('targetBubble'),
+    chatBgKey: readField('chatBgKey'),
     messages: []
   };
 
-  const msgBlocks = body.match(/\[消息\][\s\S]*?\[\/消息\]/g) || [];
-  console.log('[VV] raw msgBlocks:', msgBlocks, 'body=', body);
+  const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/g;
+  let m;
+  while ((m = msgRegex.exec(full))) {
+    const block = m[1];
 
-  msgBlocks.forEach((block, index) => {
-    const inner = block
-      .replace(/^\s*\[消息\]\s*/, '')
-      .replace(/\s*\[\/消息\]\s*$/, '');
-
-    const readField = (names) => {
-      for (const name of names) {
-        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = new RegExp('(?:^|\\n)' + escaped + '=([\\s\\S]*?)(?=\\n(?:side|sender|content|text|state)=|$)');
-        const m = inner.match(re);
-        if (m) return String(m[1] || '').trim();
-      }
-      return '';
-    };
-
-    const msg = {
-      side: readField(['side']),
-      sender: readField(['sender']),
-      content: readField(['content', 'text']),
-      state: readField(['state'])
-    };
-
-    if (msg.side && msg.content) {
-      result.messages.push(msg);
-    } else {
-      console.warn('[VV] parseVVChatBlocks skip invalid msg block:', index, msg, inner);
+    function readMsgField(name) {
+      const mm = block.match(new RegExp('^' + name + '=(.*)$', 'm'));
+      return mm ? mm[1].trim() : '';
     }
-  });
 
-  console.log('[VV] parseVVChatBlocks result:', result);
-  return result;
+    chat.messages.push({
+      side: readMsgField('side'),
+      sender: readMsgField('sender'),
+      content: readMsgField('content'),
+      state: readMsgField('state')
+    });
+  }
+
+  return chat;
 }
 
 function appendVVChatReplyToLocal(chatData) {
-  try {
-    console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
+  console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
 
-    if (!chatData || !chatData.chatId) {
-      console.warn('[VV] append aborted: missing chatId');
-      return 0;
-    }
+  if (!chatData || !chatData.chatId) return;
 
-    const chatId = String(chatData.chatId).trim();
-    if (!messages[chatId]) {
-      messages[chatId] = [];
-    }
-
-    const thread = messages[chatId];
-    const time = getNowTime();
-    const timeLabel = getNowFullLabel();
-
-    const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
-    console.log('[VV] all sync messages:', allMsgs);
-
-    const leftMsgs = allMsgs.filter(msg => {
-      return msg && String(msg.side || '').trim() === 'left' && String(msg.content || '').trim();
-    });
-
-    console.log('[VV] leftMsgs to append:', leftMsgs);
-
-    if (!leftMsgs.length) {
-      console.warn('[VV] no left messages found in sync block');
-      return 0;
-    }
-
-    const syncKey = chatId + '|' + leftMsgs.map(m => `${m.sender}|${m.content}|${m.state || ''}`).join('||');
-    console.log('[VV] syncKey =', syncKey);
-
-    if (window.__vv_last_sync_key === syncKey) {
-      console.log('[VV] duplicated sync ignored:', syncKey);
-      return 0;
-    }
-    window.__vv_last_sync_key = syncKey;
-
-    let appended = 0;
-
-    leftMsgs.forEach(msg => {
-      const contentText = String(msg.content || '').trim();
-      if (!contentText) {
-        console.warn('[VV] skip empty left message:', msg);
-        return;
-      }
-
-      const duplicated = thread.some(item =>
-        !item.isMe &&
-        !item.recalled &&
-        item.type === 'text' &&
-        Array.isArray(item.chunks) &&
-        item.chunks.join('\n').trim() === contentText
-      );
-
-      if (duplicated) {
-        console.log('[VV] duplicated left msg skipped:', contentText);
-        return;
-      }
-
-      const newItem = {
-        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-        sender: 'them',
-        senderName: msg.sender || chatData.target || '对方',
-        isMe: false,
-        type: 'text',
-        chunks: [contentText],
-        replyTo: null,
-        recalled: false,
-        time,
-        timeLabel,
-        state: msg.state || 'reply'
-      };
-
-      console.log('[VV] pushing message item:', newItem);
-      thread.push(newItem);
-      appended++;
-    });
-
-    console.log('[VV] appended count =', appended, 'chatId=', chatId, 'currentChatId=', currentChatId);
-
-    if (!appended) {
-      console.log('[VV] no new message appended');
-      return 0;
-    }
-
-    const rel = getRelSetting(chatId);
-    if (chatData.target && rel && !rel.name) {
-      rel.name = chatData.target;
-    }
-
-    const setting = getChatSetting(chatId);
-    if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
-    if (chatData.background) setting.background = chatData.background;
-    if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-    if (chatData.targetBubble) setting.theirBubble = chatData.targetBubble;
-    if (chatData.targetAvatarId) setting.theirAvatar = chatData.targetAvatarId;
-    if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
-    if (chatData.target) setting.target = chatData.target;
-
-    const last = leftMsgs[leftMsgs.length - 1];
-    if (last && last.content) {
-      updateLastMsg(chatId, last.content, time, 'direct');
-    }
-
-    saveAll();
-
-    return appended;
-  } catch (err) {
-    console.error('[VV] appendVVChatReplyToLocal failed:', err);
-    return 0;
+  const chatId = chatData.chatId;
+  if (!messages[chatId]) {
+    messages[chatId] = [];
   }
+
+  const thread = messages[chatId];
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  const leftMsgs = (chatData.messages || []).filter(msg => msg.side === 'left' && msg.content);
+
+  console.log('[VV] leftMsgs to append:', leftMsgs);
+
+  leftMsgs.forEach(msg => {
+    const duplicated = thread.some(item =>
+      !item.isMe &&
+      !item.recalled &&
+      item.type === 'text' &&
+      Array.isArray(item.chunks) &&
+      item.chunks.join('\n') === msg.content
+    );
+
+    if (duplicated) return;
+
+    thread.push({
+      id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+      sender: 'them',
+      senderName: msg.sender || chatData.target || '对方',
+      isMe: false,
+      type: 'text',
+      chunks: [msg.content],
+      replyTo: null,
+      recalled: false,
+      time,
+      timeLabel,
+      state: msg.state || 'reply'
+    });
+  });
+
+  const rel = getRelSetting(chatId);
+  if (chatData.target && rel && !rel.name) {
+    rel.name = chatData.target;
+  }
+
+  const setting = getChatSetting(chatId);
+  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
+  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+  if (chatData.target) setting.target = chatData.target;
+
+  if (leftMsgs.length) {
+    const last = leftMsgs[leftMsgs.length - 1];
+    updateLastMsg(chatId, last.content, time, currentChatType);
+  }
+
+  if (chatId === currentChatId) {
+    renderMessages();
+    applyCurrentChatBackground();
+  }
+
+  saveAll();
 }
 
 function handleVVChatSyncRaw(raw) {
-  try {
-    console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 1000));
+  console.log('[VV] handleVVChatSyncRaw input:', String(raw || '').slice(0, 300));
 
-    const chatData = parseVVChatBlocks(raw);
-    console.log('[VV] parseVVChatBlocks result:', chatData);
+  const parsed = parseVVChatBlocks(raw);
+  console.log('[VV] parseVVChatBlocks result:', parsed);
 
-    if (!chatData || !chatData.chatId) {
-      console.warn('[VV] handleVVChatSyncRaw: invalid chatData');
-      return false;
-    }
+  if (!parsed) return;
 
-    const chatId = String(chatData.chatId).trim();
-
-    if (!messages[chatId]) {
-      messages[chatId] = [];
-    }
-
-    let contact = contactList.find(i => String(i.id) === chatId);
-    if (!contact) {
-      contact = {
-        id: chatId,
-        name: chatData.target || '联系人',
-        bridgeName: chatData.target || '',
-        avatar: DEFAULT_AVATAR,
-        isSticky: false,
-        lastTime: getNowTime(),
-        lastPreview: '',
-        threadType: 'direct'
-      };
-      contactList.unshift(contact);
-      console.log('[VV] created missing contact:', contact);
-    } else {
-      if (chatData.target && (!contact.name || contact.name === '联系人')) {
-        contact.name = chatData.target;
-      }
-      if (chatData.target && !contact.bridgeName) {
-        contact.bridgeName = chatData.target;
-      }
-    }
-
-    const appended = appendVVChatReplyToLocal(chatData);
-    console.log('[VV] handleVVChatSyncRaw appended =', appended);
-
-    if (typeof renderChatList === 'function') {
-      renderChatList();
-    } else if (typeof renderAllPanels === 'function') {
-      renderAllPanels();
-    }
-
-    if (!appended) {
-      console.warn('[VV] handleVVChatSyncRaw: nothing appended');
-      return false;
-    }
-
-    setTimeout(() => {
-      try {
-        console.log('[VV] refreshing chat after sync:', chatId, 'currentChatId(before)=', currentChatId);
-
-        currentChatId = '';
-        currentChatType = 'direct';
-
-        const page = document.getElementById('chatDetailPage');
-        if (page) {
-          page.style.display = 'none';
-        }
-
-        setTimeout(() => {
-          try {
-            openChatDetail(chatId, chatData.target || '');
-
-            if (typeof renderMessages === 'function') {
-              renderMessages();
-            }
-
-            if (typeof applyCurrentChatBackground === 'function') {
-              applyCurrentChatBackground();
-            }
-
-            if (typeof renderChatList === 'function') {
-              renderChatList();
-            } else if (typeof renderAllPanels === 'function') {
-              renderAllPanels();
-            }
-
-            console.log('[VV] refreshing chat after sync done:', chatId, 'currentChatId(after)=', currentChatId);
-          } catch (err2) {
-            console.warn('[VV] second-stage refresh failed:', err2);
-          }
-        }, 30);
-      } catch (err) {
-        console.warn('[VV] refresh after sync failed:', err);
-      }
-    }, 80);
-
-
-    return true;
-  } catch (err) {
-    console.error('[VV] handleVVChatSyncRaw failed:', err);
-    return false;
-  }
+  appendVVChatReplyToLocal(parsed);
 }
 
 async function triggerSlash(cmd) {
@@ -894,16 +782,10 @@ async function triggerSlash(cmd) {
   try {
     const result = await new Promise((resolve) => {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-      const viewId = window.__vv_view_id || '';
 
       function onMessage(event) {
         const data = event.data;
         if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
-          return;
-        }
-
-        if (data.viewId && viewId && data.viewId !== viewId) {
-          console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
           return;
         }
 
@@ -924,8 +806,7 @@ async function triggerSlash(cmd) {
       window.parent.postMessage({
         type: 'VV_EXECUTE_SLASH',
         requestId,
-        command: cmd,
-        viewId
+        command: cmd
       }, '*');
 
       setTimeout(() => {
@@ -962,6 +843,180 @@ function escapeHTML(str) {
     .split(String.fromCharCode(62)).join(gt)
     .split(String.fromCharCode(34)).join(quot)
     .split(String.fromCharCode(39)).join(apos);
+}
+
+function ensureProfileData() {
+  if (!myProfile || typeof myProfile !== 'object') {
+    myProfile = {
+      avatar: '',
+      nickname: '我',
+      avatarUnified: false,
+      backgroundUnified: false,
+      globalChatBg: ''
+    };
+  }
+
+  if (!walletData || typeof walletData !== 'object') {
+    walletData = { balance: 0 };
+  }
+
+  if (typeof myProfile.avatarUnified !== 'boolean') {
+    myProfile.avatarUnified = false;
+  }
+
+  if (typeof myProfile.backgroundUnified !== 'boolean') {
+    myProfile.backgroundUnified = false;
+  }
+
+  if (typeof myProfile.nickname !== 'string' || !myProfile.nickname.trim()) {
+    myProfile.nickname = '我';
+  }
+
+  if (typeof walletData.balance !== 'number') {
+    walletData.balance = Number(walletData.balance || 0);
+  }
+}
+
+function getMyProfileAvatar() {
+  ensureProfileData();
+  return myProfile.avatar || DEFAULT_AVATAR;
+}
+
+function getMyAvatar(chatId = null) {
+  ensureProfileData();
+
+  if (!chatId) {
+    return myProfile.avatar || DEFAULT_AVATAR;
+  }
+
+  const setting = getChatSetting(chatId) || {};
+
+  if (myProfile.avatarUnified) {
+    return setting.myAvatarOverride || myProfile.avatar || DEFAULT_AVATAR;
+  }
+
+  return setting.myAvatarOverride || setting.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR;
+}
+
+function getChatBackground(chatId) {
+  ensureProfileData();
+
+  const setting = getChatSetting(chatId) || {};
+
+  if (myProfile.backgroundUnified) {
+    return setting.backgroundOverride || myProfile.globalChatBg || '';
+  }
+
+  return setting.backgroundOverride || setting.backgroundBase || '';
+}
+
+async function updateProfileUI() {
+  ensureProfileData();
+
+  const avatarUrl = await resolveImageRefToUrl(getMyProfileAvatar());
+
+  const avatarEls = document.querySelectorAll('[data-my-profile-avatar]');
+  avatarEls.forEach(el => {
+    if (el.tagName === 'IMG') {
+      el.src = avatarUrl;
+    } else {
+      el.style.backgroundImage = `url("${avatarUrl}")`;
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = 'center';
+    }
+  });
+
+  const nicknameEl = document.getElementById('profileNickname');
+  if (nicknameEl) nicknameEl.textContent = myProfile.nickname || '我';
+
+  const avatarUnifiedInput = document.getElementById('avatarUnifiedSwitch');
+  if (avatarUnifiedInput) avatarUnifiedInput.checked = !!myProfile.avatarUnified;
+
+  const bgUnifiedInput = document.getElementById('backgroundUnifiedSwitch');
+  if (bgUnifiedInput) bgUnifiedInput.checked = !!myProfile.backgroundUnified;
+
+  const walletBalanceEl = document.getElementById('walletBalance');
+  if (walletBalanceEl) walletBalanceEl.textContent = `¥${Number(walletData.balance || 0)}`;
+
+  renderFeedHeader?.();
+  renderFeedList?.();
+  renderMessages?.();
+}
+
+function setMyProfileAvatar(src) {
+  ensureProfileData();
+  myProfile.avatar = src || '';
+  updateProfileUI();
+  saveAll();
+}
+
+function setMyProfileNickname(name) {
+  ensureProfileData();
+  myProfile.nickname = (name || '').trim() || '我';
+  updateProfileUI();
+  saveAll();
+}
+
+function addWalletBalance(amount) {
+  ensureProfileData();
+  walletData.balance = Number(walletData.balance || 0) + Number(amount || 0);
+  if (walletData.balance < 0) walletData.balance = 0;
+  updateProfileUI();
+  saveAll();
+}
+
+function toggleAvatarUnified(checked) {
+  ensureProfileData();
+  myProfile.avatarUnified = !!checked;
+  updateProfileUI();
+  saveAll();
+}
+
+function toggleBackgroundUnified(checked) {
+  ensureProfileData();
+  myProfile.backgroundUnified = !!checked;
+  updateProfileUI();
+  renderMessages?.();
+  saveAll();
+}
+
+function handleWalletClick() {
+  playClickSound?.();
+  addWalletBalance(10);
+}
+
+function handleProfileNicknameChange() {
+  const input = document.getElementById('profileNicknameInput');
+  if (!input) return;
+  setMyProfileNickname(input.value);
+}
+
+function triggerGlobalBgPick() {
+  document.getElementById('globalBgInput')?.click();
+}
+
+function initProfilePage() {
+  ensureProfileData();
+
+  const avatarInput = document.getElementById('profileAvatarInput');
+  if (avatarInput) {
+    avatarInput.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      handleProfileAvatarFile(file);
+      e.target.value = '';
+    });
+  }
+
+  const bgInput = document.getElementById('globalBgInput');
+  if (bgInput) {
+    bgInput.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      handleGlobalBgFile(file);
+      e.target.value = '';
+    });
+  }
+
+  updateProfileUI();
 }
 
 function getNowTime() {
@@ -1002,7 +1057,9 @@ function saveAll(retryMode = 'normal') {
     safeSetItemJSON('st_sticker_packs', stickerPacks),
     safeSetItemJSON('st_relationship_settings', relationshipSettings),
     safeSetItemJSON('st_app_profile', appProfile),
-    safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets)
+    safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
+    safeSetItemJSON('st_my_profile', myProfile),
+    safeSetItemJSON('st_wallet_data', walletData)
   ];
 
   const success = okList.every(Boolean);
@@ -1021,7 +1078,9 @@ function saveAll(retryMode = 'normal') {
       safeSetItemJSON('st_sticker_packs', stickerPacks),
       safeSetItemJSON('st_relationship_settings', relationshipSettings),
       safeSetItemJSON('st_app_profile', appProfile),
-      safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets)
+      safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
+      safeSetItemJSON('st_my_profile', myProfile),
+      safeSetItemJSON('st_wallet_data', walletData)
     ];
 
     if (!secondTry.every(Boolean)) {
@@ -1066,6 +1125,19 @@ function loadAll() {
   });
   pendingReplyTargets = safeJSONParse(localStorage.getItem('st_pending_reply_targets') || '{}', {});
 
+  myProfile = safeJSONParse(localStorage.getItem('st_my_profile') || '{"avatar":"","nickname":"我","avatarUnified":false,"backgroundUnified":false,"globalChatBg":""}', {
+    avatar: '',
+    nickname: '我',
+    avatarUnified: false,
+    backgroundUnified: false,
+    globalChatBg: ''
+  });
+
+  walletData = safeJSONParse(localStorage.getItem('st_wallet_data') || '{"balance":0}', {
+    balance: 0
+  });
+
+  ensureProfileData();
   migrateOversizedLegacyStorage();
 }
 
@@ -1258,6 +1330,17 @@ function closeDialog(dialogId) {
   }, 300);
 }
 
+function showDialog(dialogId) {
+  const dialog = document.getElementById(dialogId);
+  if (!dialog) return;
+
+  dialog.style.display = 'flex';
+
+  requestAnimationFrame(() => {
+    dialog.classList.add('show');
+  });
+}
+
 function fileToDataURL(file, callback, options = {}) {
   if (!file) return;
 
@@ -1385,17 +1468,75 @@ function closeCallPage() {
 }
 
 function switchContactTab(tab) {
-  currentContactTab = tab;
+  const directPanel = document.getElementById('directPanel');
+  const groupPanel = document.getElementById('groupPanel');
+  const feedPanel = document.getElementById('feedPanel');
+  const profilePage = document.getElementById('profilePage');
+
+  const titleEl = document.querySelector('#contactPage .nav-title');
+  const navAction = document.querySelector('#contactPage .nav-action');
+
+  if (directPanel) {
+    directPanel.style.display = tab === 'direct' ? 'block' : 'none';
+    directPanel.classList.toggle('active', tab === 'direct');
+  }
+
+  if (groupPanel) {
+    groupPanel.style.display = tab === 'group' ? 'block' : 'none';
+    groupPanel.classList.toggle('active', tab === 'group');
+  }
+
+  if (feedPanel) {
+    feedPanel.style.display = tab === 'feed' ? 'block' : 'none';
+    feedPanel.classList.toggle('active', tab === 'feed');
+  }
+
+  if (profilePage) {
+    profilePage.style.display = tab === 'profile' ? 'block' : 'none';
+    profilePage.classList.toggle('active', tab === 'profile');
+  }
+
   document.querySelectorAll('.contact-tab').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === tab);
   });
-  document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
 
-  if (tab === 'direct') document.getElementById('directPanel')?.classList.add('active');
-  if (tab === 'group') document.getElementById('groupPanel')?.classList.add('active');
-  if (tab === 'feed') document.getElementById('feedPanel')?.classList.add('active');
+  if (titleEl) {
+    if (tab === 'direct') titleEl.textContent = '消息';
+    else if (tab === 'group') titleEl.textContent = '群聊';
+    else if (tab === 'feed') titleEl.textContent = '动态';
+    else if (tab === 'profile') titleEl.textContent = '我的';
+  }
 
-  renderAllPanels();
+  if (navAction) {
+    if (tab === 'profile') {
+      navAction.style.display = 'none';
+      navAction.textContent = '';
+      navAction.onclick = null;
+    } else if (tab === 'feed') {
+      navAction.style.display = 'flex';
+      navAction.textContent = '＋';
+      navAction.onclick = () => {
+        playClickSound?.();
+        showDialog('postFeedDialog');
+      };
+    } else {
+      navAction.style.display = 'flex';
+      navAction.textContent = '＋';
+      navAction.onclick = () => {
+        playClickSound?.();
+        handleTopAdd?.();
+      };
+    }
+  }
+
+  if (tab === 'feed') {
+    renderFeedHeader?.();
+    renderFeedList?.();
+  }
+
+  if (tab === 'profile') {
+    updateProfileUI?.();
+  }
 }
 
 function handleTopAdd() {
@@ -1553,11 +1694,11 @@ async function renderFeedHeader() {
   const coverEl = document.getElementById('feedCover');
   if (!avatarEl || !nameEl || !coverEl) return;
 
-  const myAvatar = appProfile.myAvatar || DEFAULT_AVATAR;
+  const myAvatar = getMyProfileAvatar();
   const cover = appProfile.feedCover || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=900&auto=format&fit=crop';
 
   avatarEl.src = await resolveImageRefToUrl(myAvatar);
-  nameEl.innerText = appProfile.myName || '我';
+  nameEl.innerText = myProfile.nickname || appProfile.myName || '我';
   coverEl.style.backgroundImage = `url(${await resolveImageRefToUrl(cover)})`;
 }
 
@@ -1566,14 +1707,20 @@ function renderFeedList() {
   if (!dom) return;
 
   if (feedPosts.length === 0) {
-    dom.innerHTML = `<div class="empty-state" style="height:220px;"><span>还没有动态，点击右上角＋发布</span></div>`;
+    dom.innerHTML = `<div class="empty-state" style="height:220px;"><span>还没有动态，点击右上角发布</span></div>`;
     return;
   }
 
+  const myName = myProfile.nickname || appProfile.myName || '我';
+
   dom.innerHTML = feedPosts.map(post => {
+    const isMine = post.author === myName;
+
     const images = (post.images || []).length ? `
       <div class="feed-image-grid">
-        ${(post.images || []).map(src => `<img ${buildMediaSrcAttrs(src)} alt="">`).join('')}
+        ${(post.images || []).map(src => `
+          <img ${buildMediaSrcAttrs(src)} alt="" onclick="openFeedImageViewerFromNode(this)">
+        `).join('')}
       </div>
     ` : '';
 
@@ -1581,18 +1728,26 @@ function renderFeedList() {
       ? `<div class="feed-comment">❤️ ${(post.likes || []).map(i => `<strong>${escapeHTML(i.from)}</strong>`).join('、')}</div>`
       : '';
 
-    const comments = (post.comments || []).map((c, idx) => `
-      <div class="feed-comment">
-        <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(c.text)}
-        <span style="color:#999;cursor:pointer;" onclick="replyFeedComment('${post.id}',${idx})"> 回复</span>
-      </div>
-    `).join('');
+    const comments = (post.comments || []).map((c, idx) => {
+      const isMyComment = c.from === myName;
+
+      return `
+        <div class="feed-comment">
+          <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(c.text)}
+          <span style="color:#999;cursor:pointer;margin-left:8px;" onclick="replyFeedComment('${post.id}',${idx})">回复</span>
+          ${isMyComment ? `<span style="color:#d9534f;cursor:pointer;margin-left:8px;" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>` : ''}
+        </div>
+      `;
+    }).join('');
 
     return `
       <div class="feed-card">
         <div class="feed-post-avatar"><img ${buildMediaSrcAttrs(post.authorAvatar || DEFAULT_AVATAR)} alt=""></div>
         <div class="feed-main">
-          <div class="feed-author">${escapeHTML(post.author)}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div class="feed-author">${escapeHTML(post.author)}</div>
+            ${isMine ? `<button class="feed-delete-btn" onclick="deleteFeedPost('${post.id}')">删除</button>` : ''}
+          </div>
           <div class="feed-content">${escapeHTML(post.content)}</div>
           ${images}
           <div class="feed-meta-row">
@@ -1612,6 +1767,35 @@ function renderFeedList() {
   }).join('');
 
   hydrateMediaRefs(dom);
+}
+
+function openFeedImageViewerFromNode(imgEl) {
+  if (!imgEl) return;
+  const src = imgEl.currentSrc || imgEl.src;
+  if (!src) return;
+
+  const viewer = document.getElementById('feedImageViewer');
+  const viewerImg = document.getElementById('feedImageViewerImg');
+  if (!viewer || !viewerImg) return;
+
+  viewerImg.src = src;
+  viewer.style.display = 'flex';
+
+  requestAnimationFrame(() => {
+    viewer.classList.add('show');
+  });
+}
+
+function closeFeedImageViewer() {
+  const viewer = document.getElementById('feedImageViewer');
+  const viewerImg = document.getElementById('feedImageViewerImg');
+  if (!viewer || !viewerImg) return;
+
+  viewer.classList.remove('show');
+  setTimeout(() => {
+    viewer.style.display = 'none';
+    viewerImg.src = '';
+  }, 200);
 }
 
 function toggleFeedLike(postId) {
@@ -1705,6 +1889,44 @@ async function replyFeedComment(postId, commentIndex) {
     }
   }
 
+  saveAll();
+  renderFeedList();
+}
+
+function deleteFeedPost(postId) {
+  const index = feedPosts.findIndex(post => post.id === postId);
+  if (index === -1) return;
+
+  const post = feedPosts[index];
+  if (post.author !== (myProfile.nickname || appProfile.myName || '我')) {
+    alert('只能删除自己发布的动态');
+    return;
+  }
+
+  const ok = confirm('确定删除这条动态吗？');
+  if (!ok) return;
+
+  feedPosts.splice(index, 1);
+  saveAll();
+  renderFeedList();
+}
+
+function deleteFeedComment(postId, commentIndex) {
+  const post = feedPosts.find(i => i.id === postId);
+  if (!post || !post.comments?.[commentIndex]) return;
+
+  const comment = post.comments[commentIndex];
+  const myName = myProfile.nickname || appProfile.myName || '我';
+
+  if (comment.from !== myName) {
+    alert('只能删除自己的评论');
+    return;
+  }
+
+  const ok = confirm('确定删除这条评论吗？');
+  if (!ok) return;
+
+  post.comments.splice(commentIndex, 1);
   saveAll();
   renderFeedList();
 }
@@ -1809,15 +2031,16 @@ async function addFeedPost() {
     }));
   }
 
-  const authorAvatar = appProfile.myAvatar
-    ? await persistImageToIDB(appProfile.myAvatar, { area: 'feed.authorAvatar' }).catch(() => appProfile.myAvatar)
+  const profileAvatar = getMyProfileAvatar();
+  const authorAvatar = profileAvatar
+    ? await persistImageToIDB(profileAvatar, { area: 'feed.authorAvatar' }).catch(() => profileAvatar)
     : DEFAULT_AVATAR;
 
   feedPosts.unshift({
     id: 'f' + Date.now(),
-    author: appProfile.myName || '我',
+    author: myProfile.nickname || appProfile.myName || '我',
     authorAvatar,
-    bridgeName: appProfile.myName || '我',
+    bridgeName: myProfile.nickname || appProfile.myName || '我',
     content,
     time: getNowTime(),
     images: storedImages,
@@ -1852,8 +2075,7 @@ function openChat(id, type = 'direct') {
 }
 
 async function applyCurrentChatBackground() {
-  const setting = getChatSetting(currentChatId) || {};
-  const bg = setting.background || setting.chatBgKey || '';
+  const bg = getChatBackground(currentChatId) || '';
   const layer = document.getElementById('chatBackgroundLayer');
   if (!layer) return;
 
@@ -1865,6 +2087,17 @@ async function applyCurrentChatBackground() {
     layer.style.backgroundImage = 'none';
     layer.style.backgroundColor = '#f0f0f0';
   }
+}
+
+function getChatBackground(chatId) {
+  ensureProfileData();
+
+  if (myProfile.backgroundUnified && myProfile.globalChatBg) {
+    return myProfile.globalChatBg;
+  }
+
+  const setting = getChatSetting(chatId) || {};
+  return setting.background || setting.chatBgKey || setting.chatBg || '';
 }
 
 function openChatDetail(chatId, forceName = '') {
@@ -1910,10 +2143,10 @@ function openChatDetail(chatId, forceName = '') {
     setting.theirAvatar = DEFAULT_AVATAR;
   }
   if (!setting.myAvatar) {
-    setting.myAvatar = appProfile.myAvatar || DEFAULT_AVATAR;
+    setting.myAvatar = getMyProfileAvatar();
   }
   if (!setting.background) {
-    setting.background = 'current_chat_bg';
+    setting.background = '';
   }
 
   const titleEl = document.getElementById('chatDetailName');
@@ -2017,7 +2250,7 @@ function renderMessages() {
     }
 
     const avatarSrc = m.isMe
-      ? (setting.myAvatar || DEFAULT_AVATAR)
+      ? getMyAvatar(currentChatId)
       : (setting.theirAvatar || DEFAULT_AVATAR);
 
     const avatar = `<div class="message-avatar"><img ${buildMediaSrcAttrs(avatarSrc)} alt=""></div>`;
@@ -2120,6 +2353,41 @@ function renderComposerPreview() {
     attachBox.style.display = 'none';
     attachBox.innerHTML = '';
   }
+}
+
+function enterStickerManageMode() {
+  stickerManageMode = true;
+  renderEmojiPanel();
+}
+
+function exitStickerManageMode() {
+  stickerManageMode = false;
+  renderEmojiPanel();
+}
+
+function handleStickerTouchStart(stickerId) {
+  clearTimeout(stickerPressTimer);
+  stickerPressTimer = setTimeout(() => {
+    enterStickerManageMode();
+  }, 450);
+}
+
+function handleStickerTouchEnd() {
+  clearTimeout(stickerPressTimer);
+}
+
+function deleteStickerById(stickerId, e) {
+  e?.stopPropagation();
+
+  const index = stickerPacks.findIndex(s => s.id === stickerId);
+  if (index === -1) return;
+
+  const ok = confirm('确定删除这个表情包吗？');
+  if (!ok) return;
+
+  stickerPacks.splice(index, 1);
+  saveAll();
+  renderEmojiPanel();
 }
 
 function removeDraftAttachment(index) {
@@ -2234,10 +2502,11 @@ function sendMessage() {
   pendingReplyTargets[currentChatId] = true;
   console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-  input.value = '';
-  clearComposerDraft();
-  renderMessages();
-  saveAll();
+    input.value = '';
+    clearComposerDraft();
+    renderMessages();
+    saveAll();
+    closeEmojiPanel();
 }
 
 function buildVVEventPayload(chatId) {
@@ -2283,9 +2552,7 @@ function buildVVEventPayload(chatId) {
     '每条消息都要单独成块。',
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
-    '[聊天界面] 用于楼层展示，[VV_CHAT_SYNC] 只用于前端同步。',
-    '[聊天界面] 可以展示完整历史；但 [VV_CHAT_SYNC] 只能包含本轮新增消息，不要重复历史消息。',
-    '历史聊天由前端根据 chatId 自行累计显示。',
+    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -2541,6 +2808,13 @@ function quoteCurrentMessage() {
 function recallCurrentMessage() {
   const msg = findCurrentMessage();
   if (!msg) return;
+
+  if (!(msg.sender === 'me' || msg.isMe === true)) {
+    document.getElementById('messageOperationMenu')?.classList.remove('show');
+    alert('只能撤回自己发出的消息');
+    return;
+  }
+
   msg.recalled = true;
   renderMessages();
   saveAll();
@@ -2574,20 +2848,58 @@ function initDefaultStickers() {
 function toggleEmojiPanel() {
   const panel = document.getElementById('emojiPanel');
   if (!panel) return;
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-  if (panel.style.display === 'block') renderEmojiPanel();
+
+  const isOpen = panel.classList.contains('show');
+
+  if (isOpen) {
+    panel.classList.remove('show');
+  } else {
+    renderEmojiPanel();
+    panel.classList.add('show');
+  }
 }
 
 function renderEmojiPanel() {
   const grid = document.getElementById('emojiPanelGrid');
   if (!grid) return;
+
+  if (!stickerPacks.length) {
+    grid.innerHTML = `<div class="empty-state"><span>还没有表情包</span></div>`;
+    return;
+  }
+
   grid.innerHTML = stickerPacks.map(s => `
-    <div class="emoji-item" onclick="addStickerDraft('${s.id}')">
+    <div class="emoji-item ${stickerManageMode ? 'manage-mode' : ''}"
+         oncontextmenu="event.preventDefault(); enterStickerManageMode()"
+         ontouchstart="handleStickerTouchStart('${s.id}')"
+         ontouchend="handleStickerTouchEnd()"
+         ontouchmove="handleStickerTouchEnd()"
+         onmousedown="handleStickerTouchStart('${s.id}')"
+         onmouseup="handleStickerTouchEnd()"
+         onmouseleave="handleStickerTouchEnd()"
+         onclick="${stickerManageMode ? 'return false;' : `sendStickerDirect('${s.id}')`}">
+
       <img ${buildMediaSrcAttrs(s.src)} alt="">
       <span>${escapeHTML(s.name)}</span>
+
+      ${stickerManageMode
+        ? `<button class="sticker-delete-btn" onclick="deleteStickerById('${s.id}', event)">×</button>`
+        : ''}
     </div>
   `).join('');
+
   hydrateMediaRefs(grid);
+}
+
+function closeEmojiPanel() {
+  const panel = document.getElementById('emojiPanel');
+  if (!panel) return;
+  panel.classList.remove('show');
+
+  if (stickerManageMode) {
+    stickerManageMode = false;
+    renderEmojiPanel();
+  }
 }
 
 function addStickerDraft(id) {
@@ -2606,6 +2918,18 @@ function pickComposerImage() {
 }
 
 async function confirmImageDraft() {
+  if (!currentChatId) return;
+
+  const rel = getRelSetting(currentChatId);
+  if (rel.blockedByMe) {
+    alert('你已拉黑该联系人，无法发送消息');
+    return;
+  }
+  if (rel.blockedByThem) {
+    alert('对方已拉黑你，消息将被拒收');
+    return;
+  }
+
   if (!currentSendImageData) {
     alert('请先选择图片');
     return;
@@ -2616,14 +2940,40 @@ async function confirmImageDraft() {
     chatId: currentChatId
   });
 
-  composerDraft.attachments.push({
+  if (!messages[currentChatId]) messages[currentChatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+  const desc = document.getElementById('sendImageDesc')?.value.trim() || '';
+
+  messages[currentChatId].push({
+    id: 'm' + Date.now() + '_img',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
     type: 'image',
     src: storedRef,
-    desc: document.getElementById('sendImageDesc')?.value.trim() || ''
+    desc,
+    recalled: false,
+    time,
+    timeLabel,
+    pendingForReply: true
   });
 
-  renderComposerPreview();
+  updateLastMsg(currentChatId, desc || '[图片]', time, currentChatType);
+  pendingReplyTargets[currentChatId] = true;
+
+  renderMessages();
+  saveAll();
+
+  currentSendImageData = null;
+  const input = document.getElementById('sendImageInput');
+  if (input) input.value = '';
+  const descInput = document.getElementById('sendImageDesc');
+  if (descInput) descInput.value = '';
+
   closeDialog('imageSendDialog');
+  closeEmojiPanel?.();
 }
 
 function addVoiceDraft() {
@@ -2631,19 +2981,58 @@ function addVoiceDraft() {
 }
 
 function confirmVoiceDraft() {
+  if (!currentChatId) return;
+
+  const rel = getRelSetting(currentChatId);
+  if (rel.blockedByMe) {
+    alert('你已拉黑该联系人，无法发送消息');
+    return;
+  }
+  if (rel.blockedByThem) {
+    alert('对方已拉黑你，消息将被拒收');
+    return;
+  }
+
   const transcript = document.getElementById('voiceTextInput')?.value.trim();
   const duration = document.getElementById('voiceDurationInput')?.value.trim() || '4';
+
   if (!transcript) {
     alert('请输入语音转文字内容');
     return;
   }
-  composerDraft.attachments.push({
+
+  if (!messages[currentChatId]) messages[currentChatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[currentChatId].push({
+    id: 'm' + Date.now() + '_voice',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
     type: 'voice',
     transcript,
-    duration
+    duration,
+    recalled: false,
+    time,
+    timeLabel,
+    pendingForReply: true
   });
-  renderComposerPreview();
+
+  updateLastMsg(currentChatId, '[语音]', time, currentChatType);
+  pendingReplyTargets[currentChatId] = true;
+
+  renderMessages();
+  saveAll();
+
+  const textInput = document.getElementById('voiceTextInput');
+  if (textInput) textInput.value = '';
+  const durationInput = document.getElementById('voiceDurationInput');
+  if (durationInput) durationInput.value = '';
+
   closeDialog('voiceDialog');
+  closeEmojiPanel?.();
 }
 
 function openTransferDialog() {
@@ -2653,6 +3042,17 @@ function openTransferDialog() {
 
 function confirmTransfer() {
   if (!currentChatId) return;
+
+  const rel = getRelSetting(currentChatId);
+  if (rel.blockedByMe) {
+    alert('你已拉黑该联系人，无法发送消息');
+    return;
+  }
+  if (rel.blockedByThem) {
+    alert('对方已拉黑你，消息将被拒收');
+    return;
+  }
+
   const amount = document.getElementById('transferAmount')?.value.trim();
   const note = document.getElementById('transferNote')?.value.trim();
 
@@ -2661,15 +3061,39 @@ function confirmTransfer() {
     return;
   }
 
-  composerDraft.attachments.push({
+  if (!messages[currentChatId]) messages[currentChatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[currentChatId].push({
+    id: 'm' + Date.now() + '_transfer',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
     type: 'transfer',
     amount,
     note: note || '转账',
-    status: '待收款'
+    status: '待收款',
+    recalled: false,
+    time,
+    timeLabel,
+    pendingForReply: true
   });
 
-  renderComposerPreview();
+  updateLastMsg(currentChatId, `[转账] ¥${amount}`, time, currentChatType);
+  pendingReplyTargets[currentChatId] = true;
+
+  renderMessages();
+  saveAll();
+
+  const amountInput = document.getElementById('transferAmount');
+  if (amountInput) amountInput.value = '';
+  const noteInput = document.getElementById('transferNote');
+  if (noteInput) noteInput.value = '';
+
   closeDialog('transferDialog');
+  closeEmojiPanel?.();
 }
 
 function startCallFromDialog() {
@@ -3257,18 +3681,12 @@ function initSTBridgeListener() {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
 
-    const myViewId = window.__vv_view_id || '';
-    if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
-      return;
-    }
-
     if (VV_BRIDGE_CONFIG.debug) {
       console.log('[VV] 收到 bridge 消息:', data);
     }
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
-      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300), 'viewId=', data.viewId || '');
+      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
       handleVVChatSyncRaw(data.raw || '');
     }
 
@@ -3383,14 +3801,31 @@ function initEventBindings() {
     }
   });
 
+  document.getElementById('emojiPanelGrid')?.addEventListener('click', e => {
+    if (!stickerManageMode) return;
+
+    const clickedItem = e.target.closest('.emoji-item');
+    const clickedDeleteBtn = e.target.closest('.sticker-delete-btn');
+
+    if (!clickedItem && !clickedDeleteBtn) {
+      exitStickerManageMode();
+    }
+  });
+
   bindFileInput('myAvatarInput', async data => {
     if (!currentChatId) return;
     const ref = await persistImageToIDB(data, { area: 'chat.myAvatar', chatId: currentChatId });
-    getChatSetting(currentChatId).myAvatar = ref;
-    appProfile.myAvatar = ref;
+
+    const setting = getChatSetting(currentChatId);
+
+    if (myProfile.avatarUnified) {
+      setting.myAvatarOverride = ref;
+    } else {
+      setting.myAvatarBase = ref;
+    }
+
     saveAll();
     openChatSettingPage();
-    renderFeedHeader();
     renderMessages();
     renderChatList();
   }, {
@@ -3416,7 +3851,15 @@ function initEventBindings() {
   bindFileInput('chatBgInput', async data => {
     if (!currentChatId) return;
     const ref = await persistImageToIDB(data, { area: 'chat.background', chatId: currentChatId });
-    getChatSetting(currentChatId).background = ref;
+
+    const setting = getChatSetting(currentChatId);
+
+    if (myProfile.backgroundUnified) {
+      setting.backgroundOverride = ref;
+    } else {
+      setting.backgroundBase = ref;
+    }
+
     saveAll();
     openChatSettingPage();
     applyCurrentChatBackground();
@@ -3509,6 +3952,78 @@ function openChatByRoute() {
   return true;
 }
 
+function openProfileNicknameDialog() {
+  const input = document.getElementById('profileNicknameDialogInput');
+  if (input) input.value = myProfile.nickname || '我';
+  showDialog('profileNicknameDialog');
+}
+
+function confirmProfileNicknameChange() {
+  const input = document.getElementById('profileNicknameDialogInput');
+  if (!input) return;
+
+  setMyProfileNickname(input.value);
+  closeDialog('profileNicknameDialog');
+}
+
+function normalizeChatSetting(chatId) {
+  const setting = getChatSetting(chatId);
+
+  if (typeof setting.myAvatarBase === 'undefined' && setting.myAvatar) {
+    setting.myAvatarBase = setting.myAvatar;
+  }
+
+  if (typeof setting.backgroundBase === 'undefined' && setting.background) {
+    setting.backgroundBase = setting.background;
+  }
+
+  return setting;
+}
+
+function updateContactHeaderByTab(tab) {
+  const titleEl = document.getElementById('contactNavTitle');
+  const actionEl = document.getElementById('navAction');
+  const actionIconEl = document.getElementById('navActionIcon'); // 如果你有的话
+
+  if (tab === 'direct') {
+    if (titleEl) titleEl.textContent = '消息';
+    if (actionEl) {
+      actionEl.style.display = 'flex';
+      actionEl.onclick = () => openContactActionMenu?.();
+      actionEl.textContent = '＋';
+    }
+    return;
+  }
+
+  if (tab === 'group') {
+    if (titleEl) titleEl.textContent = '群聊';
+    if (actionEl) {
+      actionEl.style.display = 'flex';
+      actionEl.onclick = () => openContactActionMenu?.();
+      actionEl.textContent = '＋';
+    }
+    return;
+  }
+
+  if (tab === 'feed') {
+    if (titleEl) titleEl.textContent = '动态';
+    if (actionEl) {
+      actionEl.style.display = 'flex';
+      actionEl.onclick = () => openPublishFeedDialog?.();
+      actionEl.textContent = '＋';
+    }
+    return;
+  }
+
+  if (tab === 'profile') {
+    if (titleEl) titleEl.textContent = '我的';
+    if (actionEl) {
+      actionEl.style.display = 'none';
+      actionEl.onclick = null;
+    }
+  }
+}
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
@@ -3532,6 +4047,7 @@ window.onload = async function () {
   initFeedPostImages();
   initSwipeCall();
   initSTBridgeListener();
+  initProfilePage();
 
   renderAllPanels();
   await renderFeedHeader();
