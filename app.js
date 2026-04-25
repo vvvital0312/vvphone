@@ -18,11 +18,6 @@ let callLogs = {};
 let chatSettings = {};
 let stickerPacks = [];
 let relationshipSettings = {};
-let appProfile = {
-  myName: '我',
-  myAvatar: '',
-  feedCover: ''
-};
 
 let composerDraft = {
   quote: null,
@@ -57,8 +52,6 @@ const IDB_DB_VERSION = 1;
 const IDB_STORE_NAME = 'assets';
 const IDB_REF_PREFIX = 'idb:';
 const assetObjectUrlCache = new Map();
-
-window.__vv_view_id = window.__vv_view_id || ('vvview-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 
 const VV_BRIDGE_CONFIG = {
   enabled: true,
@@ -954,13 +947,13 @@ function getMyAvatar(chatId = null) {
     return myProfile.avatar || DEFAULT_AVATAR;
   }
 
-  const setting = getChatSetting(chatId) || {};
+  const setting = getChatSetting(chatId);
 
   if (myProfile.avatarUnified) {
-    return setting.myAvatarOverride || myProfile.avatar || DEFAULT_AVATAR;
+    return myProfile.avatar || DEFAULT_AVATAR;
   }
 
-  return setting.myAvatarOverride || setting.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR;
+  return setting.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR;
 }
 
 function getChatBackground(chatId) {
@@ -1006,13 +999,23 @@ async function updateProfileUI() {
   renderFeedHeader?.();
   renderFeedList?.();
   renderMessages?.();
+
+  if (currentChatId) {
+    renderMessages?.();
+  }
 }
 
-function setMyProfileAvatar(src) {
+async function setMyProfileAvatar(src) {
   ensureProfileData();
   myProfile.avatar = src || '';
-  updateProfileUI();
   saveAll();
+
+  await updateProfileUI();
+  renderMessages?.();
+  renderChatList?.();
+  renderFeedHeader?.();
+  renderFeedList?.();
+  renderGroupList?.();
 }
 
 function setMyProfileNickname(name) {
@@ -1030,11 +1033,17 @@ function addWalletBalance(amount) {
   saveAll();
 }
 
-function toggleAvatarUnified(checked) {
+async function toggleAvatarUnified(checked) {
   ensureProfileData();
   myProfile.avatarUnified = !!checked;
-  updateProfileUI();
   saveAll();
+
+  await updateProfileUI();
+  renderMessages?.();
+  renderChatList?.();
+  renderFeedHeader?.();
+  renderFeedList?.();
+  renderGroupList?.();
 }
 
 function toggleBackgroundUnified(checked) {
@@ -1613,11 +1622,36 @@ function handleTopAdd() {
 function getChatSetting(id) {
   if (!chatSettings[id]) {
     chatSettings[id] = {
-      background: '',
-      myAvatar: appProfile.myAvatar || DEFAULT_AVATAR,
+      backgroundBase: '',
+      backgroundOverride: '',
+      myAvatarBase: '',
+      myAvatarOverride: '',
       theirAvatar: DEFAULT_AVATAR
     };
+  } else {
+    if (chatSettings[id].background && !chatSettings[id].backgroundBase) {
+      chatSettings[id].backgroundBase = chatSettings[id].background;
+    }
+    if (chatSettings[id].chatBg && !chatSettings[id].backgroundBase) {
+      chatSettings[id].backgroundBase = chatSettings[id].chatBg;
+    }
+    if (chatSettings[id].chatBgKey && !chatSettings[id].backgroundBase) {
+      chatSettings[id].backgroundBase = chatSettings[id].chatBgKey;
+    }
+    if (chatSettings[id].myAvatar && !chatSettings[id].myAvatarBase) {
+      chatSettings[id].myAvatarBase = chatSettings[id].myAvatar;
+    }
+    if (typeof chatSettings[id].backgroundOverride === 'undefined') {
+      chatSettings[id].backgroundOverride = '';
+    }
+    if (typeof chatSettings[id].myAvatarOverride === 'undefined') {
+      chatSettings[id].myAvatarOverride = '';
+    }
+    if (typeof chatSettings[id].theirAvatar === 'undefined') {
+      chatSettings[id].theirAvatar = DEFAULT_AVATAR;
+    }
   }
+
   return chatSettings[id];
 }
 
@@ -2134,9 +2168,10 @@ function openChat(id, type = 'direct') {
   if (a) a.style.display = 'none';
   if (b) b.style.display = 'block';
 
-  applyCurrentChatBackground();
   clearComposerDraft();
+  applyCurrentChatBackground();
   renderMessages();
+  renderChatList?.();
 }
 
 async function applyCurrentChatBackground() {
@@ -2152,17 +2187,6 @@ async function applyCurrentChatBackground() {
     layer.style.backgroundImage = 'none';
     layer.style.backgroundColor = '#f0f0f0';
   }
-}
-
-function getChatBackground(chatId) {
-  ensureProfileData();
-
-  if (myProfile.backgroundUnified && myProfile.globalChatBg) {
-    return myProfile.globalChatBg;
-  }
-
-  const setting = getChatSetting(chatId) || {};
-  return setting.background || setting.chatBgKey || setting.chatBg || '';
 }
 
 function openChatDetail(chatId, forceName = '') {
@@ -2207,11 +2231,17 @@ function openChatDetail(chatId, forceName = '') {
   if (!setting.theirAvatar) {
     setting.theirAvatar = DEFAULT_AVATAR;
   }
-  if (!setting.myAvatar) {
-    setting.myAvatar = getMyProfileAvatar();
+  if (typeof setting.myAvatarBase === 'undefined') {
+    setting.myAvatarBase = '';
   }
-  if (!setting.background) {
-    setting.background = '';
+  if (typeof setting.myAvatarOverride === 'undefined') {
+    setting.myAvatarOverride = '';
+  }
+  if (typeof setting.backgroundBase === 'undefined') {
+    setting.backgroundBase = '';
+  }
+  if (typeof setting.backgroundOverride === 'undefined') {
+    setting.backgroundOverride = '';
   }
 
   const titleEl = document.getElementById('chatDetailName');
@@ -2424,11 +2454,6 @@ function renderComposerPreview() {
     attachBox.style.display = 'none';
     attachBox.innerHTML = '';
   }
-}
-
-function enterStickerManageMode() {
-  stickerManageMode = true;
-  renderEmojiPanel();
 }
 
 function exitStickerManageMode() {
@@ -2917,16 +2942,24 @@ function initDefaultStickers() {
 }
 
 function toggleEmojiPanel() {
+  console.log('toggleEmojiPanel fired');
+
   const panel = document.getElementById('emojiPanel');
+  console.log('emojiPanel =', panel);
+
   if (!panel) return;
 
   const isOpen = panel.classList.contains('show');
+  console.log('isOpen =', isOpen);
 
   if (isOpen) {
-    panel.classList.remove('show');
+    closeEmojiPanel();
   } else {
     renderEmojiPanel();
-    panel.classList.add('show');
+    panel.style.display = 'block';
+    requestAnimationFrame(() => {
+      panel.classList.add('show');
+    });
   }
 }
 
@@ -2962,10 +2995,62 @@ function renderEmojiPanel() {
   hydrateMediaRefs(grid);
 }
 
+function sendStickerDirect(stickerId) {
+  if (!currentChatId) return;
+
+  const rel = getRelSetting(currentChatId);
+  if (rel.blockedByMe) {
+    alert('你已拉黑该联系人，无法发送消息');
+    return;
+  }
+  if (rel.blockedByThem) {
+    alert('对方已拉黑你，消息将被拒收');
+    return;
+  }
+
+  const sticker = stickerPacks.find(s => s.id === stickerId);
+  if (!sticker) return;
+
+  if (!messages[currentChatId]) {
+    messages[currentChatId] = [];
+  }
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[currentChatId].push({
+    id: 'm' + Date.now() + '_sticker',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
+    type: 'image',
+    src: sticker.src || '',
+    stickerName: sticker.name || '表情',
+    desc: '',
+    replyTo: null,
+    recalled: false,
+    time,
+    timeLabel,
+    pendingForReply: true
+  });
+
+  updateLastMsg(currentChatId, `[表情] ${sticker.name || '表情'}`, time, currentChatType);
+
+  pendingReplyTargets[currentChatId] = true;
+  console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
+
+  renderMessages();
+  saveAll();
+  closeEmojiPanel();
+}
+
 function closeEmojiPanel() {
   const panel = document.getElementById('emojiPanel');
-  if (!panel) return;
+  const messageArea = document.getElementById('messageArea');
+  if (!panel || !messageArea) return;
+
   panel.classList.remove('show');
+  messageArea.style.bottom = '104px';
 
   if (stickerManageMode) {
     stickerManageMode = false;
@@ -3441,28 +3526,47 @@ async function openChatSettingPage() {
   const set = getChatSetting(currentChatId);
   const rel = getRelSetting(currentChatId);
 
-  document.getElementById('profileTitleName').innerText = contact?.name || '联系人';
+  const titleEl = document.getElementById('profileTitleName');
+  if (titleEl) titleEl.innerText = contact?.name || '联系人';
 
   const profileCover = document.getElementById('profileCover');
   const theirAvatar = document.getElementById('profileTheirAvatar');
   const myPreview = document.getElementById('profileMyAvatarPreview');
   const theirPreview = document.getElementById('profileTheirAvatarPreview');
 
+  const bgSrc = getChatBackground(currentChatId);
+  const myAvatarSrc = myProfile.avatarUnified
+    ? (myProfile.avatar || DEFAULT_AVATAR)
+    : (set.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR);
+  const theirAvatarSrc = set.theirAvatar || DEFAULT_AVATAR;
+
   if (profileCover) {
-    if (set.background) {
-      profileCover.style.backgroundImage = `url(${await resolveImageRefToUrl(set.background)})`;
+    if (bgSrc) {
+      profileCover.style.backgroundImage = `url(${await resolveImageRefToUrl(bgSrc)})`;
+      profileCover.style.backgroundSize = 'cover';
+      profileCover.style.backgroundPosition = 'center';
     } else {
       profileCover.style.backgroundImage = 'linear-gradient(135deg, #f7d9e9, #d8edf7)';
     }
   }
 
-  if (theirAvatar) theirAvatar.src = await resolveImageRefToUrl(set.theirAvatar || DEFAULT_AVATAR);
-  if (myPreview) myPreview.src = await resolveImageRefToUrl(set.myAvatar || DEFAULT_AVATAR);
-  if (theirPreview) theirPreview.src = await resolveImageRefToUrl(set.theirAvatar || DEFAULT_AVATAR);
+  if (theirAvatar) {
+    theirAvatar.src = await resolveImageRefToUrl(theirAvatarSrc);
+  }
+
+  if (myPreview) {
+    myPreview.src = await resolveImageRefToUrl(myAvatarSrc);
+  }
+
+  if (theirPreview) {
+    theirPreview.src = await resolveImageRefToUrl(theirAvatarSrc);
+  }
 
   const chip = document.getElementById('blockToggleChip');
-  chip.innerText = rel.blockedByMe ? '已拉黑' : '未拉黑';
-  chip.classList.toggle('active', rel.blockedByMe);
+  if (chip) {
+    chip.innerText = rel.blockedByMe ? '已拉黑' : '未拉黑';
+    chip.classList.toggle('active', rel.blockedByMe);
+  }
 
   document.getElementById('chatDetailPage').style.display = 'none';
   document.getElementById('chatSettingPage').style.display = 'block';
@@ -3889,27 +3993,48 @@ function initEventBindings() {
     }
   });
 
-  bindFileInput('myAvatarInput', async data => {
-    if (!currentChatId) return;
-    const ref = await persistImageToIDB(data, { area: 'chat.myAvatar', chatId: currentChatId });
+  document.getElementById('profileAvatarInput')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const setting = getChatSetting(currentChatId);
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const data = ev.target?.result;
+      if (!data) return;
 
-    if (myProfile.avatarUnified) {
-      setting.myAvatarOverride = ref;
-    } else {
+      const ref = await persistImageToIDB(data, { area: 'profile.avatar' });
+      await setMyProfileAvatar(ref);
+    };
+
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+
+  document.getElementById('myAvatarInput')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file || !currentChatId) return;
+
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const data = ev.target?.result;
+      if (!data) return;
+
+      const ref = await persistImageToIDB(data, {
+        area: 'chat.myAvatar',
+        chatId: currentChatId
+      });
+
+      const setting = getChatSetting(currentChatId);
       setting.myAvatarBase = ref;
-    }
 
-    saveAll();
-    openChatSettingPage();
-    renderFeedHeader();
-    renderMessages();
-    renderChatList();
-  }, {
-    compress: true,
-    maxWidth: 512,
-    quality: 0.72
+      saveAll();
+      await openChatSettingPage();
+      renderMessages?.();
+      renderChatList?.();
+    };
+
+    reader.readAsDataURL(file);
+    e.target.value = '';
   });
 
   bindFileInput('theirAvatarInput', async data => {
@@ -3939,8 +4064,8 @@ function initEventBindings() {
     }
 
     saveAll();
-    openChatSettingPage();
-    applyCurrentChatBackground();
+    await openChatSettingPage();
+    await applyCurrentChatBackground();
   }, {
     compress: true,
     maxWidth: 1280,
@@ -3955,6 +4080,23 @@ function initEventBindings() {
     const cover = document.getElementById('profileCover');
     if (cover) {
       cover.style.backgroundImage = `url(${await resolveImageRefToUrl(ref)})`;
+    }
+  }, {
+    compress: true,
+    maxWidth: 1280,
+    quality: 0.68
+  });
+
+  bindFileInput('globalBgInput', async data => {
+    const ref = await persistImageToIDB(data, { area: 'profile.globalBg' });
+
+    ensureProfileData();
+    myProfile.globalChatBg = ref;
+    saveAll();
+
+    await updateProfileUI();
+    if (currentChatId) {
+      await applyCurrentChatBackground?.();
     }
   }, {
     compress: true,
