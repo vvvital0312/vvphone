@@ -40,6 +40,8 @@ let walletData = {
 
 let stickerManageMode = false;
 let stickerPressTimer = null;
+let stickerRenameId = null;
+let stickerRenameDraft = '';
 
 const DEFAULT_AVATAR = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMDdjMTYwIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIxOCIgcj0iNiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMTIgMzRDMTIgMjcuMzcyMyAxNy4zNzIzIDIyIDI0IDIyQzMwLjYyNzcgMjIgMzYgMjcuMzcyMyAzNiAzNEgxMloiIGZpbGw9IndoaXRlIi8+PC9zdmc+';
 
@@ -207,13 +209,20 @@ async function idbPutAsset(record) {
   return new Promise(function (resolve, reject) {
     const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
     const store = tx.objectStore(IDB_STORE_NAME);
-    const req = store.put(record);
-    req.onsuccess = function () {
+
+    tx.oncomplete = function () {
       resolve(record.id);
     };
-    req.onerror = function () {
-      reject(req.error);
+
+    tx.onerror = function () {
+      reject(tx.error || new Error('idbPutAsset transaction failed'));
     };
+
+    tx.onabort = function () {
+      reject(tx.error || new Error('idbPutAsset transaction aborted'));
+    };
+
+    store.put(record);
   });
 }
 
@@ -223,11 +232,21 @@ async function idbGetAsset(id) {
     const tx = db.transaction(IDB_STORE_NAME, 'readonly');
     const store = tx.objectStore(IDB_STORE_NAME);
     const req = store.get(id);
+
     req.onsuccess = function () {
       resolve(req.result || null);
     };
+
     req.onerror = function () {
-      reject(req.error);
+      reject(req.error || new Error('idbGetAsset request failed'));
+    };
+
+    tx.onerror = function () {
+      reject(tx.error || new Error('idbGetAsset transaction failed'));
+    };
+
+    tx.onabort = function () {
+      reject(tx.error || new Error('idbGetAsset transaction aborted'));
     };
   });
 }
@@ -291,12 +310,18 @@ async function persistImageToIDB(dataUrl, meta) {
   const id = 'asset_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
 
   await idbPutAsset({
-    id: id,
-    blob: blob,
+    id,
+    blob,
     mime: blob.type || 'image/jpeg',
     createdAt: Date.now(),
     meta: meta || {}
   });
+
+  const saved = await idbGetAsset(id);
+  if (!saved || !saved.blob) {
+    console.error('[persistImageToIDB] 写入后回读失败:', id, saved);
+    return '';
+  }
 
   return createAssetRef(id);
 }
@@ -378,9 +403,15 @@ function buildMediaSrcAttrs(ref) {
 
 async function hydrateMediaRefs(root = document) {
   const nodes = root.querySelectorAll('[data-media-ref]');
+  console.log('[hydrateMediaRefs] nodes =', nodes.length);
+
   for (const el of nodes) {
     const ref = el.getAttribute('data-media-ref') || '';
+    console.log('[hydrateMediaRefs] ref =', ref);
+
     const realSrc = await resolveImageRefToUrl(ref);
+    console.log('[hydrateMediaRefs] realSrc =', realSrc);
+
     if (realSrc) el.setAttribute('src', realSrc);
   }
 
@@ -403,10 +434,19 @@ function collectImageRefsFromState() {
     tryAdd(appProfile.feedCover);
   }
 
+  if (myProfile) {
+    tryAdd(myProfile.avatar);
+    tryAdd(myProfile.globalChatBg);
+  }
+
   Object.values(chatSettings || {}).forEach(item => {
     if (!item) return;
     tryAdd(item.background);
+    tryAdd(item.backgroundBase);
+    tryAdd(item.backgroundOverride);
     tryAdd(item.myAvatar);
+    tryAdd(item.myAvatarBase);
+    tryAdd(item.myAvatarOverride);
     tryAdd(item.theirAvatar);
   });
 
@@ -903,6 +943,14 @@ function escapeHTML(str) {
     .split(String.fromCharCode(39)).join(apos);
 }
 
+function escapeHTMLAttr(str = '') {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&')
+    .replace(/"/g, '"')
+    .replace(/</g, '<')
+    .replace(/>/g, '>');
+}
+
 function ensureProfileData() {
   if (!myProfile || typeof myProfile !== 'object') {
     myProfile = {
@@ -950,22 +998,36 @@ function getMyAvatar(chatId = null) {
   const setting = getChatSetting(chatId);
 
   if (myProfile.avatarUnified) {
-    return myProfile.avatar || DEFAULT_AVATAR;
+    return setting.myAvatarOverride
+      || myProfile.avatar
+      || DEFAULT_AVATAR;
   }
 
-  return setting.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR;
+  return setting.myAvatarBase
+    || setting.myAvatar
+    || myProfile.avatar
+    || DEFAULT_AVATAR;
 }
 
-function getChatBackground(chatId) {
+function getChatBackground(chatId = null) {
   ensureProfileData();
 
-  const setting = getChatSetting(chatId) || {};
-
-  if (myProfile.backgroundUnified) {
-    return setting.backgroundOverride || myProfile.globalChatBg || '';
+  if (!chatId) {
+    return myProfile.globalChatBg || '';
   }
 
-  return setting.backgroundOverride || setting.backgroundBase || '';
+  const setting = getChatSetting(chatId);
+
+  if (myProfile.backgroundUnified) {
+    return setting.backgroundOverride
+      || myProfile.globalChatBg
+      || '';
+  }
+
+  return setting.backgroundBase
+    || setting.background
+    || myProfile.globalChatBg
+    || '';
 }
 
 async function updateProfileUI() {
@@ -1008,6 +1070,14 @@ async function updateProfileUI() {
 async function setMyProfileAvatar(src) {
   ensureProfileData();
   myProfile.avatar = src || '';
+
+  if (myProfile.avatarUnified) {
+    Object.keys(chatSettings).forEach(chatId => {
+      const setting = getChatSetting(chatId);
+      setting.myAvatarOverride = '';
+    });
+  }
+
   saveAll();
 
   await updateProfileUI();
@@ -1036,6 +1106,14 @@ function addWalletBalance(amount) {
 async function toggleAvatarUnified(checked) {
   ensureProfileData();
   myProfile.avatarUnified = !!checked;
+
+  if (checked) {
+    Object.keys(chatSettings).forEach(chatId => {
+      const setting = getChatSetting(chatId);
+      setting.myAvatarOverride = '';
+    });
+  }
+
   saveAll();
 
   await updateProfileUI();
@@ -1046,12 +1124,25 @@ async function toggleAvatarUnified(checked) {
   renderGroupList?.();
 }
 
-function toggleBackgroundUnified(checked) {
+async function toggleBackgroundUnified(checked) {
   ensureProfileData();
   myProfile.backgroundUnified = !!checked;
-  updateProfileUI();
-  renderMessages?.();
+
+  if (checked) {
+    Object.keys(chatSettings).forEach(chatId => {
+      const setting = getChatSetting(chatId);
+      setting.backgroundOverride = '';
+    });
+  }
+
   saveAll();
+
+  await updateProfileUI?.();
+  await applyCurrentChatBackground?.();
+  renderChatList?.();
+  renderFeedHeader?.();
+  renderFeedList?.();
+  renderGroupList?.();
 }
 
 function handleWalletClick() {
@@ -1619,40 +1710,33 @@ function handleTopAdd() {
   if (currentContactTab === 'feed') showDialog('postFeedDialog');
 }
 
-function getChatSetting(id) {
-  if (!chatSettings[id]) {
-    chatSettings[id] = {
+function getChatSetting(chatId) {
+  if (!chatId) {
+    console.warn('[getChatSetting] invalid chatId:', chatId);
+    return {
+      background: '',
       backgroundBase: '',
       backgroundOverride: '',
+      myAvatar: '',
       myAvatarBase: '',
       myAvatarOverride: '',
-      theirAvatar: DEFAULT_AVATAR
+      theirAvatar: ''
     };
-  } else {
-    if (chatSettings[id].background && !chatSettings[id].backgroundBase) {
-      chatSettings[id].backgroundBase = chatSettings[id].background;
-    }
-    if (chatSettings[id].chatBg && !chatSettings[id].backgroundBase) {
-      chatSettings[id].backgroundBase = chatSettings[id].chatBg;
-    }
-    if (chatSettings[id].chatBgKey && !chatSettings[id].backgroundBase) {
-      chatSettings[id].backgroundBase = chatSettings[id].chatBgKey;
-    }
-    if (chatSettings[id].myAvatar && !chatSettings[id].myAvatarBase) {
-      chatSettings[id].myAvatarBase = chatSettings[id].myAvatar;
-    }
-    if (typeof chatSettings[id].backgroundOverride === 'undefined') {
-      chatSettings[id].backgroundOverride = '';
-    }
-    if (typeof chatSettings[id].myAvatarOverride === 'undefined') {
-      chatSettings[id].myAvatarOverride = '';
-    }
-    if (typeof chatSettings[id].theirAvatar === 'undefined') {
-      chatSettings[id].theirAvatar = DEFAULT_AVATAR;
-    }
   }
 
-  return chatSettings[id];
+  if (!chatSettings[chatId]) {
+    chatSettings[chatId] = {
+      background: '',
+      backgroundBase: '',
+      backgroundOverride: '',
+      myAvatar: '',
+      myAvatarBase: '',
+      myAvatarOverride: '',
+      theirAvatar: ''
+    };
+  }
+
+  return chatSettings[chatId];
 }
 
 function getRelSetting(id) {
@@ -1811,9 +1895,15 @@ function renderFeedList() {
   }
 
   const myName = myProfile.nickname || appProfile.myName || '我';
+  const myNames = new Set([
+    '我',
+    myProfile.nickname || '',
+    appProfile.myName || ''
+  ].filter(Boolean));
 
   dom.innerHTML = feedPosts.map(post => {
-    const isMine = post.author === myName;
+    const isMine = post.authorId === 'me' || myNames.has(post.author);
+    const postAvatar = getFeedAuthorAvatar(post);
 
     const images = (post.images || []).length ? `
       <div class="feed-image-grid">
@@ -1841,7 +1931,7 @@ function renderFeedList() {
 
     return `
       <div class="feed-card">
-        <div class="feed-post-avatar"><img ${buildMediaSrcAttrs(post.authorAvatar || DEFAULT_AVATAR)} alt=""></div>
+        <div class="feed-post-avatar"><img ${buildMediaSrcAttrs(postAvatar)} alt=""></div>
         <div class="feed-main">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div class="feed-author">${escapeHTML(post.author)}</div>
@@ -2130,15 +2220,11 @@ async function addFeedPost() {
     }));
   }
 
-  const profileAvatar = getMyProfileAvatar();
-  const authorAvatar = profileAvatar
-    ? await persistImageToIDB(profileAvatar, { area: 'feed.authorAvatar' }).catch(() => profileAvatar)
-    : DEFAULT_AVATAR;
-
   feedPosts.unshift({
     id: 'f' + Date.now(),
+    authorId: 'me',
     author: myProfile.nickname || appProfile.myName || '我',
-    authorAvatar,
+    authorAvatar: getMyProfileAvatar() || DEFAULT_AVATAR,
     bridgeName: myProfile.nickname || appProfile.myName || '我',
     content,
     time: getNowTime(),
@@ -2152,7 +2238,7 @@ async function addFeedPost() {
   closeDialog('postFeedDialog');
 }
 
-function openChat(id, type = 'direct') {
+async function openChat(id, type = 'direct') {
   currentChatId = id;
   currentChatType = type;
 
@@ -2169,8 +2255,8 @@ function openChat(id, type = 'direct') {
   if (b) b.style.display = 'block';
 
   clearComposerDraft();
-  applyCurrentChatBackground();
-  renderMessages();
+  await applyCurrentChatBackground();
+  await renderMessages();
   renderChatList?.();
 }
 
@@ -2189,7 +2275,7 @@ async function applyCurrentChatBackground() {
   }
 }
 
-function openChatDetail(chatId, forceName = '') {
+async function openChatDetail(chatId, forceName = '') {
   if (!chatId) return;
 
   if (!messages[chatId]) {
@@ -2261,11 +2347,11 @@ function openChatDetail(chatId, forceName = '') {
   renderComposerPreview();
 
   if (typeof applyCurrentChatBackground === 'function') {
-    applyCurrentChatBackground();
+    await applyCurrentChatBackground();
   }
 
   if (typeof renderMessages === 'function') {
-    renderMessages();
+    await renderMessages();
   }
 
   if (typeof renderChatList === 'function') {
@@ -2275,6 +2361,21 @@ function openChatDetail(chatId, forceName = '') {
   }
 
   saveAll();
+}
+
+async function restoreLastChatSession() {
+  const lastChatId = localStorage.getItem('st_current_chat_id') || '';
+  const lastChatType = localStorage.getItem('st_current_chat_type') || 'direct';
+
+  if (!lastChatId) return false;
+
+  if (lastChatType === 'direct') {
+    await openChatDetail(lastChatId);
+    return true;
+  }
+
+  await openChat(lastChatId, lastChatType);
+  return true;
 }
 
 function removeComposerAttachment(index) {
@@ -2329,7 +2430,9 @@ function renderMessageOriginal(m) {
   }
 }
 
-function renderMessages() {
+async function renderMessages() {
+  console.log('[renderMessages] start currentChatId =', currentChatId);
+
   const area = document.getElementById('messageArea');
   if (!area) return;
 
@@ -2353,6 +2456,8 @@ function renderMessages() {
     const avatarSrc = m.isMe
       ? getMyAvatar(currentChatId)
       : (setting.theirAvatar || DEFAULT_AVATAR);
+
+    console.log('[renderMessages] avatarSrc =', avatarSrc, 'isMe=', m.isMe);
 
     const avatar = `<div class="message-avatar"><img ${buildMediaSrcAttrs(avatarSrc)} alt=""></div>`;
 
@@ -2395,7 +2500,11 @@ function renderMessages() {
   });
 
   area.innerHTML = html;
-  hydrateMediaRefs(area);
+  console.log('[renderMessages] html injected');
+
+  await hydrateMediaRefs(area);
+  console.log('[renderMessages] hydrate done');
+
   area.scrollTop = area.scrollHeight;
 }
 
@@ -2458,14 +2567,37 @@ function renderComposerPreview() {
 
 function exitStickerManageMode() {
   stickerManageMode = false;
+  stickerRenameId = null;
+  stickerRenameDraft = '';
+  clearTimeout(stickerPressTimer);
   renderEmojiPanel();
 }
 
 function handleStickerTouchStart(stickerId) {
   clearTimeout(stickerPressTimer);
   stickerPressTimer = setTimeout(() => {
-    enterStickerManageMode();
+    enterStickerManageMode(stickerId);
   }, 450);
+}
+
+function enterStickerManageMode(stickerId = null) {
+  stickerManageMode = true;
+  stickerRenameId = stickerId;
+  stickerRenameDraft = '';
+
+  const sticker = stickerPacks.find(s => s.id === stickerId);
+  if (sticker) {
+    stickerRenameDraft = sticker.name || '表情';
+  }
+
+  renderEmojiPanel();
+
+  requestAnimationFrame(() => {
+    if (!stickerId) return;
+    const input = document.querySelector(`.sticker-rename-input[data-sticker-id="${stickerId}"]`);
+    input?.focus();
+    input?.select();
+  });
 }
 
 function handleStickerTouchEnd() {
@@ -2473,17 +2605,56 @@ function handleStickerTouchEnd() {
 }
 
 function deleteStickerById(stickerId, e) {
-  e?.stopPropagation();
+
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
 
   const index = stickerPacks.findIndex(s => s.id === stickerId);
   if (index === -1) return;
 
-  const ok = confirm('确定删除这个表情包吗？');
+  const ok = confirm('确定删除这个表情吗？');
   if (!ok) return;
 
   stickerPacks.splice(index, 1);
   saveAll();
   renderEmojiPanel();
+}
+
+function saveStickerRename(stickerId, value) {
+  const sticker = stickerPacks.find(s => s.id === stickerId);
+  if (!sticker) return;
+
+  const name = (value || '').trim() || '表情';
+  sticker.name = name;
+
+  saveAll();
+  renderEmojiPanel();
+
+  requestAnimationFrame(() => {
+    const input = document.querySelector(`.sticker-rename-input[data-sticker-id="${stickerId}"]`);
+    input?.focus();
+    input?.select();
+  });
+}
+
+function handleStickerRenameKeydown(event, stickerId) {
+  event.stopPropagation();
+
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveStickerRename(stickerId, event.target.value);
+    event.target.blur();
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    const sticker = stickerPacks.find(s => s.id === stickerId);
+    if (sticker) {
+      event.target.value = sticker.name || '表情';
+    }
+    event.target.blur();
+  }
 }
 
 function removeDraftAttachment(index) {
@@ -2974,7 +3145,7 @@ function renderEmojiPanel() {
 
   grid.innerHTML = stickerPacks.map(s => `
     <div class="emoji-item ${stickerManageMode ? 'manage-mode' : ''}"
-         oncontextmenu="event.preventDefault(); enterStickerManageMode()"
+         oncontextmenu="event.preventDefault(); enterStickerManageMode('${s.id}')"
          ontouchstart="handleStickerTouchStart('${s.id}')"
          ontouchend="handleStickerTouchEnd()"
          ontouchmove="handleStickerTouchEnd()"
@@ -2984,15 +3155,36 @@ function renderEmojiPanel() {
          onclick="${stickerManageMode ? 'return false;' : `sendStickerDirect('${s.id}')`}">
 
       <img ${buildMediaSrcAttrs(s.src)} alt="">
-      <span>${escapeHTML(s.name)}</span>
 
       ${stickerManageMode
-        ? `<button class="sticker-delete-btn" onclick="deleteStickerById('${s.id}', event)">×</button>`
-        : ''}
+        ? `<div class="sticker-delete-btn" data-sticker-id="${s.id}">×</div>`
+        : ''}     
+      ${
+        stickerManageMode
+          ? `<input
+               class="sticker-rename-input"
+               data-sticker-id="${s.id}"
+               value="${escapeHTMLAttr(s.name || '表情')}"
+               onclick="event.stopPropagation()"
+               onmousedown="event.stopPropagation()"
+               ontouchstart="event.stopPropagation()"
+               onkeydown="handleStickerRenameKeydown(event, '${s.id}')"
+               onblur="saveStickerRename('${s.id}', this.value)"
+             >`
+          : `<span>${escapeHTML(s.name || '表情')}</span>`
+      }
     </div>
   `).join('');
 
   hydrateMediaRefs(grid);
+
+  if (stickerManageMode && stickerRenameId) {
+    requestAnimationFrame(() => {
+      const input = document.querySelector(`.sticker-rename-input[data-sticker-id="${stickerRenameId}"]`);
+      input?.focus();
+      input?.select();
+    });
+  }
 }
 
 function sendStickerDirect(stickerId) {
@@ -3023,7 +3215,7 @@ function sendStickerDirect(stickerId) {
     sender: 'me',
     senderName: '我',
     isMe: true,
-    type: 'image',
+    type: 'sticker',
     src: sticker.src || '',
     stickerName: sticker.name || '表情',
     desc: '',
@@ -3035,9 +3227,7 @@ function sendStickerDirect(stickerId) {
   });
 
   updateLastMsg(currentChatId, `[表情] ${sticker.name || '表情'}`, time, currentChatType);
-
   pendingReplyTargets[currentChatId] = true;
-  console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
   renderMessages();
   saveAll();
@@ -3054,6 +3244,8 @@ function closeEmojiPanel() {
 
   if (stickerManageMode) {
     stickerManageMode = false;
+    stickerRenameId = null;
+    stickerRenameDraft = '';
     renderEmojiPanel();
   }
 }
@@ -3535,9 +3727,7 @@ async function openChatSettingPage() {
   const theirPreview = document.getElementById('profileTheirAvatarPreview');
 
   const bgSrc = getChatBackground(currentChatId);
-  const myAvatarSrc = myProfile.avatarUnified
-    ? (myProfile.avatar || DEFAULT_AVATAR)
-    : (set.myAvatarBase || myProfile.avatar || DEFAULT_AVATAR);
+  const myAvatarSrc = getMyAvatar(currentChatId);
   const theirAvatarSrc = set.theirAvatar || DEFAULT_AVATAR;
 
   if (profileCover) {
@@ -3637,51 +3827,78 @@ function openStickerImportDialog(mode) {
 async function confirmStickerImport() {
   const name = document.getElementById('stickerNameInput')?.value.trim();
   const url = document.getElementById('stickerUrlInput')?.value.trim();
+  const fileInput = document.getElementById('stickerFileInput');
 
-  if (!name) {
-    alert('请输入表情名称');
-    return;
-  }
-
-  const finishAdd = async src => {
-    if (!src) {
-      alert('请提供表情图片');
-      return;
-    }
-
-    let finalSrc = src;
-    if (isDataImage(src)) {
-      finalSrc = await persistImageToIDB(src, {
-        area: 'sticker.import',
-        name
-      });
-    }
-
-    stickerPacks.unshift({
-      id: 's' + Date.now(),
-      name,
-      src: finalSrc
-    });
-
-    saveAll();
-    renderEmojiPanel();
-    closeDialog('stickerImportDialog');
-    cleanupUnusedIDBAssets();
-  };
+  const makeStickerId = () => 's' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
   if (currentStickerImportMode === 'url') {
     if (!url) {
       alert('请输入图片URL');
       return;
     }
-    await finishAdd(url);
-  } else {
-    if (!currentUploadImage) {
-      alert('请上传图片');
-      return;
-    }
-    await finishAdd(currentUploadImage);
+
+    stickerPacks.unshift({
+      id: makeStickerId(),
+      name: name || '表情',
+      src: url
+    });
+
+    saveAll();
+    renderEmojiPanel();
+    closeDialog('stickerImportDialog');
+    cleanupUnusedIDBAssets();
+    return;
   }
+
+  const files = Array.from(fileInput?.files || []).filter(file => file.type.startsWith('image/'));
+  if (!files.length) {
+    alert('请上传图片');
+    return;
+  }
+
+  if (files.length > 20) {
+    alert('一次最多导入 20 张表情');
+    return;
+  }
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+
+    const dataUrl = await new Promise(resolve => {
+      fileToDataURL(file, data => resolve(data), {
+        compress: true,
+        maxWidth: 512,
+        quality: 0.72
+      });
+    });
+
+    const ref = await persistImageToIDB(dataUrl, {
+      area: 'sticker.import',
+      name: file.name
+    });
+
+    stickerPacks.unshift({
+      id: makeStickerId(),
+      name: files.length === 1 ? (name || '表情') : '表情',
+      src: ref
+    });
+  }
+
+  saveAll();
+  renderEmojiPanel();
+  closeDialog('stickerImportDialog');
+  cleanupUnusedIDBAssets();
+
+  const preview = document.getElementById('stickerImportPreview');
+  if (preview) {
+    preview.innerHTML = `<span>表情预览区</span>`;
+  }
+
+  if (fileInput) fileInput.value = '';
+  const nameInput = document.getElementById('stickerNameInput');
+  if (nameInput) nameInput.value = '';
+  const urlInput = document.getElementById('stickerUrlInput');
+  if (urlInput) urlInput.value = '';
 }
 
 function initStickerImportPreview() {
@@ -3690,30 +3907,75 @@ function initStickerImportPreview() {
   if (!stickerFileInput || !stickerUrlInput) return;
 
   stickerFileInput.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
-    fileToDataURL(file, data => {
-      currentUploadImage = data;
-      const box = document.getElementById('stickerImportPreview');
-      if (box) {
-        box.innerHTML = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;">`;
-      }
-    }, {
-      compress: true,
-      maxWidth: 512,
-      quality: 0.72
+    if (files.length > 20) {
+      alert('一次最多导入 20 张表情');
+      stickerFileInput.value = '';
+      return;
+    }
+
+    const box = document.getElementById('stickerImportPreview');
+    if (!box) return;
+
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+
+    const previewFiles = imageFiles.slice(0, 8);
+
+    Promise.all(previewFiles.map(file => new Promise(resolve => {
+      fileToDataURL(file, data => resolve(data), {
+        compress: true,
+        maxWidth: 256,
+        quality: 0.72
+      });
+    }))).then(results => {
+      box.innerHTML = `
+        <div style="font-size:12px;color:#666;margin-bottom:8px;">
+          已选择 ${imageFiles.length} 张图片
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+          ${results.map(src => `
+            <img src="${src}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">
+          `).join('')}
+        </div>
+      `;
     });
   });
 
   stickerUrlInput.addEventListener('input', function () {
     if (currentStickerImportMode !== 'url') return;
     const url = this.value.trim();
-    if (!url) return;
     const box = document.getElementById('stickerImportPreview');
-    if (box) {
-      box.innerHTML = `<img src="${url}" style="max-width:100%;max-height:100%;object-fit:contain;">`;
+    if (!box) return;
+
+    if (!url) {
+      box.innerHTML = `<span>表情预览区</span>`;
+      return;
     }
+
+    box.innerHTML = `<img src="${url}" style="max-width:100%;max-height:100%;object-fit:contain;">`;
+  });
+}
+
+function initStickerPanelEvents() {
+  const grid = document.getElementById('emojiPanelGrid');
+  if (!grid || grid.dataset.bindDelete === '1') return;
+
+  grid.dataset.bindDelete = '1';
+
+  grid.addEventListener('pointerdown', function (e) {
+    const btn = e.target.closest('.sticker-delete-btn');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const stickerId = btn.dataset.stickerId;
+    if (!stickerId) return;
+
+    deleteStickerById(stickerId, e);
   });
 }
 
@@ -3993,26 +4255,11 @@ function initEventBindings() {
     }
   });
 
-  document.getElementById('profileAvatarInput')?.addEventListener('change', async e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async ev => {
-      const data = ev.target?.result;
-      if (!data) return;
-
-      const ref = await persistImageToIDB(data, { area: 'profile.avatar' });
-      await setMyProfileAvatar(ref);
-    };
-
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  });
-
   document.getElementById('myAvatarInput')?.addEventListener('change', async e => {
     const file = e.target.files?.[0];
     if (!file || !currentChatId) return;
+
+    const chatId = currentChatId;
 
     const reader = new FileReader();
     reader.onload = async ev => {
@@ -4021,16 +4268,32 @@ function initEventBindings() {
 
       const ref = await persistImageToIDB(data, {
         area: 'chat.myAvatar',
-        chatId: currentChatId
+        chatId
       });
 
-      const setting = getChatSetting(currentChatId);
+      if (!ref) {
+        alert('头像保存失败，请重试');
+        return;
+      }
+
+      const setting = getChatSetting(chatId);
+
       setting.myAvatarBase = ref;
 
+      if (myProfile.avatarUnified) {
+        setting.myAvatarOverride = ref;
+      }
+
       saveAll();
-      await openChatSettingPage();
+
+      if (currentChatId === chatId && currentChatType === 'direct') {
+        await openChatSettingPage();
+      }
+
       renderMessages?.();
       renderChatList?.();
+      renderFeedHeader?.();
+      renderFeedList?.();
     };
 
     reader.readAsDataURL(file);
@@ -4053,19 +4316,31 @@ function initEventBindings() {
 
   bindFileInput('chatBgInput', async data => {
     if (!currentChatId) return;
-    const ref = await persistImageToIDB(data, { area: 'chat.background', chatId: currentChatId });
+
+    const ref = await persistImageToIDB(data, {
+      area: 'chat.background',
+      chatId: currentChatId
+    });
+
+    if (!ref) {
+      alert('背景保存失败，请重试');
+      return;
+    }
 
     const setting = getChatSetting(currentChatId);
 
+    setting.backgroundBase = ref;
+
     if (myProfile.backgroundUnified) {
       setting.backgroundOverride = ref;
-    } else {
-      setting.backgroundBase = ref;
     }
 
     saveAll();
     await openChatSettingPage();
     await applyCurrentChatBackground();
+    renderChatList?.();
+    renderFeedHeader?.();
+    renderFeedList?.();
   }, {
     compress: true,
     maxWidth: 1280,
@@ -4090,19 +4365,60 @@ function initEventBindings() {
   bindFileInput('globalBgInput', async data => {
     const ref = await persistImageToIDB(data, { area: 'profile.globalBg' });
 
+    if (!ref) {
+      alert('背景保存失败，请重试');
+      return;
+    }
+
     ensureProfileData();
     myProfile.globalChatBg = ref;
+
+    if (myProfile.backgroundUnified) {
+      Object.keys(chatSettings).forEach(chatId => {
+        const setting = getChatSetting(chatId);
+        setting.backgroundOverride = '';
+      });
+    }
+
     saveAll();
 
     await updateProfileUI();
     if (currentChatId) {
       await applyCurrentChatBackground?.();
     }
+
+    renderChatList?.();
+    renderFeedHeader?.();
+    renderFeedList?.();
+    renderGroupList?.();
   }, {
     compress: true,
     maxWidth: 1280,
     quality: 0.68
   });
+}
+
+function migrateFeedPostsAuthorId() {
+  const myNames = new Set([
+    '我',
+    myProfile.nickname || '',
+    appProfile.myName || ''
+  ].filter(Boolean));
+
+  let changed = false;
+
+  (feedPosts || []).forEach(post => {
+    if (!post) return;
+
+    if (!post.authorId && myNames.has(post.author)) {
+      post.authorId = 'me';
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveAll();
+  }
 }
 
 function getVVRouteParams() {
@@ -4200,6 +4516,24 @@ function normalizeChatSetting(chatId) {
   return setting;
 }
 
+function getFeedAuthorAvatar(post) {
+  if (!post) return DEFAULT_AVATAR;
+
+  const myNames = new Set([
+    '我',
+    myProfile.nickname || '',
+    appProfile.myName || ''
+  ].filter(Boolean));
+
+  const isMine = post.authorId === 'me' || myNames.has(post.author);
+
+  if (isMine) {
+    return getMyProfileAvatar() || DEFAULT_AVATAR;
+  }
+
+  return post.authorAvatar || DEFAULT_AVATAR;
+}
+
 function updateContactHeaderByTab(tab) {
   const titleEl = document.getElementById('contactNavTitle');
   const actionEl = document.getElementById('navAction');
@@ -4264,6 +4598,7 @@ window.onload = async function () {
   initEventBindings();
   initSendImagePreview();
   initStickerImportPreview();
+  initStickerPanelEvents();
   initFeedPostImages();
   initSwipeCall();
   initSTBridgeListener();
@@ -4276,8 +4611,10 @@ window.onload = async function () {
   saveAll('normal');
   cleanupUnusedIDBAssets();
 
+  migrateFeedPostsAuthorId();
+
   setTimeout(() => {
-    openChatByRoute();
+    !openChatByRoute()
   }, 80);
 
   // 暂时关闭随机来电，后续改为剧情触发式来电

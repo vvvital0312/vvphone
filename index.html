@@ -141,6 +141,14 @@
                 </label>
               </div>
 
+              <div class="profile-setting-item clickable" onclick="openStickerImportDialog('file')">
+                <div class="profile-setting-text">
+                  <div class="profile-setting-title">导入表情</div>
+                  <div class="profile-setting-desc">一次最多导入 20 张，可稍后在聊天里修改名称</div>
+                </div>
+                <div class="profile-setting-value">导入</div>
+              </div>
+
               <div class="profile-setting-item clickable" onclick="document.getElementById('feedCoverInput')?.click()">
                 <div class="profile-setting-text">
                   <div class="profile-setting-title">朋友圈封面</div>
@@ -308,16 +316,6 @@
                 <div class="setting-row-title">拉黑状态</div>
               </div>
               <div class="toggle-chip" id="blockToggleChip" onclick="toggleBlockCurrentContact()">未拉黑</div>
-            </div>
-          </div>
-
-          <div class="setting-group">
-            <div class="setting-group-title">表情包管理</div>
-            <div class="setting-row">
-              <div class="setting-row-left">
-                <div class="setting-row-title">导入本地表情</div>
-              </div>
-              <button onclick="openStickerImportDialog('file')">导入</button>
             </div>
           </div>
 
@@ -541,7 +539,7 @@
         <h3>添加表情包</h3>
         <input type="text" id="stickerNameInput" placeholder="表情名称 / 识别描述">
         <input type="text" id="stickerUrlInput" placeholder="图片URL（URL添加时填写）">
-        <input type="file" id="stickerFileInput" accept="image/*">
+        <input type="file" id="stickerFileInput" accept="image/*" multiple>
         <div class="preview-box" id="stickerImportPreview"><span>表情预览区</span></div>
         <div class="dialog-buttons">
           <button onclick="confirmStickerImport()">确认添加</button>

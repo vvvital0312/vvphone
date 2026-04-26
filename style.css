@@ -281,7 +281,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 }
 .message-row.me .message-group{flex-direction:row-reverse}
 .message-avatar{
-  width:32px;height:32px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#ddd;margin-top:2px
+  width:40px;height:40px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#ddd;margin-top:2px
 }
 .message-stack{display:flex;flex-direction:column;gap:4px}
 .message-sender{font-size:11px;color:#888;margin:0 6px}
@@ -295,13 +295,30 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   word-break:break-word;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)
 }
 .message-row.me .message-bubble{background:#95ec69}
+.message-row.me .sticker-bubble {
+  background: transparent !important;
+}
 .recalled-tip{
   display:inline-block;background:rgba(255,255,255,.78);color:#888;padding:8px 12px;border-radius:14px;
   font-size:12px;border:1px dashed #d2d2d2;cursor:pointer
 }
 .hidden-original{display:none;margin-top:4px}
-.sticker-bubble,.image-bubble{background:transparent!important;box-shadow:none!important;padding:0!important}
-.sticker-bubble img{width:96px;height:96px;object-fit:cover;border-radius:14px}
+.sticker-bubble,
+.image-bubble {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.sticker-bubble {
+  max-width: 96px;
+}
+.sticker-bubble img {
+  display: block;
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 12px;
+}
 .image-bubble img{width:140px;max-height:180px;object-fit:cover;border-radius:14px;display:block}
 .image-desc{margin-top:4px;padding:8px 10px;background:#fff;border-radius:12px;font-size:12px;color:#555}
 .voice-bubble{min-width:130px}
@@ -839,29 +856,41 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   position: relative;
 }
 
-.emoji-item.manage-mode {
-  transform: scale(0.98);
-}
-
 .sticker-delete-btn {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
-  border: none;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #ff4d4f;
   color: #fff;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 22px;
   text-align: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,.18);
-  padding: 0;
-  z-index: 5;
+  z-index: 100;
+  user-select: none;
 }
 
 .emoji-item.manage-mode img {
   opacity: 0.92;
+}
+
+.emoji-item.manage-mode {
+  position: relative;
+  overflow: visible;
+}
+
+.sticker-rename-input {
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 4px 2px;
+  font-size: 12px;
+  box-sizing: border-box;
+  background: #fff;
+  position: relative;
+  z-index: 1;
 }
