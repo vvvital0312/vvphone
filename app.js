@@ -82,16 +82,23 @@ const VV_BRIDGE_CONFIG = {
     const promptText = String(params.promptText || '');
     const scope = chatType === 'group' ? '[群聊回复]' : '[私聊回复]';
 
-    return [
+    const cmd = [
       '/send ' + bridgeName,
       scope,
       '聊天ID=' + chatId,
       '请忽略普通对话中用于召唤手机界面的入口词，例如“vv手机”。',
-      '当前真正需要处理的手机聊天内容，只能以本条消息内 [VV_EVENT] 中的 message、message_count、message_1、message_2 等字段为准。',
-      '你在 [聊天界面] 与 [VV_CHAT_SYNC] 中展开的 side=right 用户消息，必须严格来自 [VV_EVENT]，不要引用旧对话里的召唤词。',
+      '当前真正需要处理的手机聊天内容，只能以本条消息中的 [VV_EVENT] 为准。',
+      '你必须严格根据 [VV_EVENT] 中的 message_count、message_1、message_2 等字段展开用户消息。',
+      '不要把旧对话中的“vv手机”当成 side=right 用户消息。',
       promptText,
       '/trigger'
     ].join('\n');
+
+    console.log('[VV] buildReplyCommand cmd >>>');
+    console.log(cmd);
+    console.log('<<< [VV] buildReplyCommand cmd');
+
+    return cmd;
   },
 
   buildCallCommand: function (params) {
@@ -2943,7 +2950,7 @@ function sendMessage() {
 }
 
 function buildVVEventPayload(chatId) {
-  console.log('>>> buildVVEventPayload RUNNING');
+  console.log('>>> buildVVEventPayload RUNNING 20260428-TRANSFER-FIX-04');
 
   const list = messages[chatId] || [];
   const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
@@ -2959,35 +2966,19 @@ function buildVVEventPayload(chatId) {
   const targetName = rel.name || chatSetting.name || getBridgeNameByChatId(chatId, currentChatType) || '未知联系人';
 
   const messageLines = myPending.map(m => {
-    if (m.type === 'text') {
-      return (m.chunks || []).join('\n');
-    }
-
-    if (m.type === 'sticker') {
-      return `[表情] ${m.stickerName || '表情'}`;
-    }
-
-    if (m.type === 'image') {
-      return `[图片] ${m.desc || ''}`.trim();
-    }
-
-    if (m.type === 'voice') {
-      return `[语音] ${m.transcript || ''}`.trim();
-    }
+    if (m.type === 'text') return (m.chunks || []).join('\n');
+    if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
+    if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
+    if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
 
     if (m.type === 'transfer') {
       const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
       return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
     }
 
-    if (m.type === 'system') {
-      return `[系统] ${(m.chunks || []).join(' / ')}`;
-    }
-
+    if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
   });
-
-  const mergedMessageText = messageLines.join('\\n');
 
   const myAvatarKey = 'current_my_avatar';
   const targetAvatarId = chatSetting.theirAvatar
@@ -3000,26 +2991,34 @@ function buildVVEventPayload(chatId) {
     : 'current_chat_bg';
 
   const result = [
-    '以下是一次手机聊天事件。',
+    '[VV_PHONE_CHAT_TASK]',
     '你正在回复一次手机私聊事件。',
-    '你必须输出两个纯文本块：',
+    '必须严格只根据下方 [VV_EVENT] 中的字段生成回复。',
+    '忽略普通对话中的旧文本、召唤词、入口词，例如“vv手机”。',
+    '真正的用户本轮消息，只能来自 [VV_EVENT] 中的 message_count、message_1、message_2 等字段。',
+    '',
+    '你必须输出两个纯文本块，且顺序固定：',
     '1. [聊天界面] ... [/聊天界面]',
-    '2. <div class="vv-chat-sync-hidden" style="display:none !important; white-space:pre-wrap;">[VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]</div>',
-    '不要输出 HTML，不要输出 <div>、<span>、iframe 等标签。',
-    '所有字段必须严格使用 key=value 格式，不允许使用 key:value。',
-    '[消息] 块内必须使用 text=消息内容。',
-    '[消息] 块内建议包含 side= 与 state=。',
-    '你必须先展开用户本轮消息，再输出角色回复。',
-    '如果有多条用户消息，必须逐条展开多个 side=right 的 [消息] 块。',
-    '角色回复必须使用 side=left。',
-    '[聊天界面] 与 [VV_CHAT_SYNC] 中，本轮新增消息的内容、顺序、字段值必须一致。',
-    '[VV_CHAT_SYNC] 只允许包含本轮新增消息，不要重复历史消息。',
-    '如果用户发送的是转账消息，你可以选择接受、拒绝或退回。',
-    '如果你接受用户转账，必须额外输出：[wallet_action:accept_transfer|id=对应转账id]',
-    '如果你拒绝用户转账，必须额外输出：[wallet_action:reject_transfer|id=对应转账id]',
-    '如果你退回用户转账，必须额外输出：[wallet_action:refund_transfer|id=对应转账id]',
-    '如果你主动给用户转账，必须额外输出：[wallet_action:send_transfer|id=唯一id|amount=金额|note=备注]',
-    '机器标记可以和正常对话一起输出，但字段名不能改，方括号结构不能改。',
+    '2. [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]',
+    '',
+    '严格规则：',
+    '1. 所有字段必须使用 key=value，禁止 key:value。',
+    '2. 不允许输出任何 HTML 标签，包括 <div>、<span>、iframe。',
+    '3. [消息] 块内必须使用 text=消息内容。',
+    '4. 每个 [消息] 块都必须完整闭合为 [消息] ... [/消息]。',
+    '5. 你必须先把用户本轮消息逐条展开为 side=right 的 [消息] 块。',
+    '6. 然后再输出角色自己的 side=left 回复块。',
+    '7. [聊天界面] 与 [VV_CHAT_SYNC] 中的本轮新增消息内容、顺序、字段值必须一致。',
+    '8. [VV_CHAT_SYNC] 只允许包含本轮新增消息，不要重复历史消息。',
+    '9. 如果继续回复线上聊天，则 [聊天界面] 中必须至少有一个 side=right 的 [消息] 块。',
+    '10. 如果继续回复线上聊天，则 [VV_CHAT_SYNC] 中也必须至少有一个 side=right 的 [消息] 块。',
+    '11. side=right 的消息内容必须严格来自 [VV_EVENT] 中的 message_1、message_2 等字段。',
+    '12. 不允许把“vv手机”写成 side=right 用户消息，除非它真的出现在 [VV_EVENT] 里。',
+    '13. 如果用户发送的是转账消息，你可以接受、拒绝或退回。',
+    '14. 如果你接受用户转账，必须额外输出：[wallet_action action=accept_transfer id=对应转账id]',
+    '15. 如果你拒绝用户转账，必须额外输出：[wallet_action action=reject_transfer id=对应转账id]',
+    '16. 如果你退回用户转账，必须额外输出：[wallet_action action=refund_transfer id=对应转账id]',
+    '17. 如果你主动给用户转账，必须额外输出：[wallet_action action=send_transfer id=唯一id amount=金额 note=备注]',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -3031,8 +3030,7 @@ function buildVVEventPayload(chatId) {
     'myBubble=' + myBubble,
     'targetBubble=' + targetBubble,
     'chatBgKey=' + chatBgKey,
-    'message_count=' + messageLines.length,
-    'message=' + mergedMessageText
+    'message_count=' + messageLines.length
   ]
     .concat(
       messageLines.map((line, index) =>
@@ -3930,29 +3928,32 @@ function parseWalletActions(text) {
   const actions = [];
   if (!text) return actions;
 
-  const regex = /\[wallet_action:([a-z_]+)(\|[^\]]+)?\]/g;
+  const regex = /\[wallet_action\s+([^\]]+)\]/g;
   let match;
 
   while ((match = regex.exec(text))) {
-    const action = match[1];
-    const rawParams = match[2] || '';
+    const raw = match[1] || '';
     const params = {};
 
-    rawParams.split('|').forEach(part => {
-      if (!part) return;
+    raw.split(/\s+/).forEach(part => {
       const [key, ...rest] = part.split('=');
-      if (!key) return;
-      params[key] = rest.join('=');
+      if (!key || !rest.length) return;
+      params[key.trim()] = rest.join('=').trim();
     });
 
-    actions.push({ action, params });
+    if (params.action) {
+      actions.push({
+        action: params.action,
+        params
+      });
+    }
   }
 
   return actions;
 }
 
 function stripWalletActions(text) {
-  return String(text || '').replace(/\[wallet_action:[^\]]+\]/g, '').trim();
+  return String(text || '').replace(/\[wallet_action\s+[^\]]+\]/g, '').trim();
 }
 
 function applyWalletActions(chatId, actions) {
