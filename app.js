@@ -2918,10 +2918,6 @@ function buildVVEventPayload(chatId) {
   const list = messages[chatId] || [];
   const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
-  console.log('[VV] buildVVEventPayload chatId=', chatId);
-  console.log('[VV] buildVVEventPayload all messages=', list);
-  console.log('[VV] buildVVEventPayload myPending=', myPending);
-
   if (!myPending.length) return '';
 
   const chatSetting = getChatSetting(chatId) || {};
