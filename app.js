@@ -2541,22 +2541,51 @@ function renderMessageOriginal(m) {
     case 'transfer': {
       const isIncoming = m.transferDirection === 'in';
       const isPendingIncoming = isIncoming && m.transferState === 'pending';
+      const isAccepted = m.transferState === 'accepted' || m.status === '已收款';
+      const isRejected = m.transferState === 'rejected' || m.status === '已拒收';
+      const isRefunded = m.transferState === 'refunded' || m.status === '已退回';
+
+      let stateClass = '';
+      let stateText = m.status || '待处理';
+      let iconText = '¥';
+
+      if (isAccepted) {
+        stateClass = 'received';
+        stateText = '已收款';
+        iconText = '✓';
+      } else if (isRejected) {
+        stateClass = 'rejected';
+        stateText = '已拒收';
+        iconText = '✕';
+      } else if (isRefunded) {
+        stateClass = 'refunded';
+        stateText = '已退回';
+        iconText = '↩';
+      } else if (isPendingIncoming) {
+        stateClass = 'pending';
+        stateText = '待领取';
+        iconText = '¥';
+      } else {
+        stateClass = 'pending';
+        stateText = m.status || '待收款';
+        iconText = '¥';
+      }
 
       return `
-        <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
+        <div class="transfer-card ${stateClass}">
           <div class="transfer-card-top">
-            <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
+            <div class="transfer-icon">${iconText}</div>
             <div class="transfer-text">
               <div class="transfer-amount">¥${escapeHTML(Number(m.amount || 0).toFixed(2))}</div>
               <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
             </div>
           </div>
-          <div class="transfer-card-bottom">${escapeHTML(m.status || '待处理')}</div>
+          <div class="transfer-card-bottom">${escapeHTML(stateText)}</div>
           ${
             isPendingIncoming
               ? `<div class="transfer-card-actions">
-                  <button onclick="playClickSound();acceptIncomingTransfer('${escapeHTML(m.chatId || currentChatId)}','${escapeHTML(m.id)}')">收下</button>
-                  <button onclick="playClickSound();rejectIncomingTransfer('${escapeHTML(m.chatId || currentChatId)}','${escapeHTML(m.id)}')">拒收</button>
+                  <button onclick="playClickSound();acceptIncomingTransfer('${m.chatId || currentChatId}','${m.id}')">收下</button>
+                  <button onclick="playClickSound();rejectIncomingTransfer('${m.chatId || currentChatId}','${m.id}')">拒收</button>
                 </div>`
               : ''
           }
@@ -3789,13 +3818,20 @@ function appendSystemMessage(chatId, text) {
 }
 
 function markOutgoingTransferAccepted(chatId, msgId) {
+  console.log('[Wallet] markOutgoingTransferAccepted:', chatId, msgId);
+
   const msg = findMessageById(chatId, msgId);
+  console.log('[Wallet] matched msg =', msg);
+
   if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
   if (msg.transferState !== 'pending') return false;
 
   msg.transferState = 'accepted';
   msg.status = '已收款';
   msg.pendingForReply = false;
+
+  console.log('[Wallet] accepted msg after change =', msg);
+
   saveAll();
   renderMessages?.();
   return true;

@@ -331,7 +331,30 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   width:220px;border-radius:16px;overflow:hidden;background:linear-gradient(135deg,#f8a93e 0%,#f38b27 100%);
   color:#fff;box-shadow:0 6px 12px rgba(243,139,39,.25)
 }
-.transfer-card.received{background:linear-gradient(135deg,#25c46b 0%,#18a957 100%)}
+.transfer-card.received {
+  opacity: 0.75;
+  background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+}
+.transfer-card.received .transfer-card-bottom {
+  color: #16a34a;
+  font-weight: 600;
+}
+.transfer-card.rejected {
+  opacity: 0.75;
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+}
+.transfer-card.rejected .transfer-card-bottom {
+  color: #dc2626;
+  font-weight: 600;
+}
+.transfer-card.refunded {
+  opacity: 0.8;
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+}
+.transfer-card.refunded .transfer-card-bottom {
+  color: #2563eb;
+  font-weight: 600;
+}
 .transfer-card-top{display:flex;align-items:center;gap:10px;padding:14px}
 .transfer-icon{
   width:40px;height:40px;background:rgba(255,255,255,.18);border-radius:12px;display:flex;justify-content:center;align-items:center;font-size:22px
