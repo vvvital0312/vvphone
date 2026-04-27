@@ -77,22 +77,40 @@ const VV_BRIDGE_CONFIG = {
     const bridgeName = params.bridgeName;
     const chatId = params.chatId;
     const chatType = params.chatType;
-    const promptText = params.promptText;
+    const promptText = String(params.promptText || '');
     const scope = chatType === 'group' ? '[群聊回复]' : '[私聊回复]';
-    return '/send ' + bridgeName + '\n' + scope + '\n聊天ID:' + chatId + '\n' + promptText + '|/trigger';
+
+    return [
+      '/send ' + bridgeName,
+      scope,
+      '聊天ID=' + chatId,
+      promptText,
+      '/trigger'
+    ].join('\n');
   },
 
   buildCallCommand: function (params) {
     const bridgeName = params.bridgeName;
-    const promptText = params.promptText;
-    return '/send ' + bridgeName + '\n[电话模式]\n' + promptText + '|/trigger';
+    const promptText = String(params.promptText || '');
+    return [
+      '/send ' + bridgeName,
+      '[电话模式]',
+      promptText,
+      '/trigger'
+    ].join('\n');
   },
 
   buildFeedCommentCommand: function (params) {
     const bridgeName = params.bridgeName;
     const postId = params.postId;
-    const promptText = params.promptText;
-    return '/send ' + bridgeName + '\n[朋友圈互动]\n动态ID:' + postId + '\n' + promptText + '|/trigger';
+    const promptText = String(params.promptText || '');
+    return [
+      '/send ' + bridgeName,
+      '[朋友圈互动]',
+      '动态ID=' + postId,
+      promptText,
+      '/trigger'
+    ].join('\n');
   }
 };
 
@@ -914,6 +932,10 @@ function handleVVChatSyncRaw(raw) {
 }
 
 async function triggerSlash(cmd) {
+  console.log('[VV] triggerSlash input cmd >>>');
+  console.log(cmd);
+  console.log('<<< [VV] triggerSlash input cmd');
+
   if (!cmd) return false;
 
   if (VV_BRIDGE_CONFIG.debug) {
@@ -930,11 +952,11 @@ async function triggerSlash(cmd) {
         if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
           return;
         }
-        
+
         if (data.viewId && viewId && data.viewId !== viewId) {
           console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
           return;
-        }        
+        }
 
         window.removeEventListener('message', onMessage);
 
@@ -1853,9 +1875,11 @@ function getBridgeNameByChatId(chatId, type = 'direct') {
 
 function buildLatestUserPayload(chatId) {
   const list = messages[chatId] || [];
-  const myRecent = [...list].reverse().filter(m => m.isMe && !m.recalled).slice(0, 8).reverse();
+  const myRecent = [...list]
+    .filter(m => m.isMe && !m.recalled && (m.pendingForReply || m.type === 'text' || m.type === 'transfer'))
+    .slice(-8);
 
-  if (!myRecent.length) return '请继续回复刚才的话题。';
+  if (!myRecent.length) return '';
 
   return myRecent.map(m => {
     if (m.type === 'text') return (m.chunks || []).join('\n');
@@ -1863,12 +1887,10 @@ function buildLatestUserPayload(chatId) {
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
     if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
     if (m.type === 'transfer') {
-      return `[转账] id=${m.id} 金额=${m.amount} 备注=${m.note || '无'} 状态=${m.status || '待处理'} 方向=${m.transferDirection || 'out'}`;
-    }
-    if (m.type === 'transfer') {
       const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
       return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
     }
+    if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
   }).join('\n');
 }
@@ -2918,7 +2940,14 @@ function buildVVEventPayload(chatId) {
   const list = messages[chatId] || [];
   const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
-  if (!myPending.length) return '';
+  console.log('[VV] buildVVEventPayload chatId =', chatId);
+  console.log('[VV] buildVVEventPayload list =', list);
+  console.log('[VV] buildVVEventPayload myPending =', myPending);
+
+  if (!myPending.length) {
+    console.log('[VV] buildVVEventPayload return empty: no myPending');
+    return '';
+  }
 
   const chatSetting = getChatSetting(chatId) || {};
   const rel = getRelSetting(chatId) || {};
@@ -2938,17 +2967,19 @@ function buildVVEventPayload(chatId) {
     return '[消息]';
   }).join('\\n');
 
+  console.log('[VV] buildVVEventPayload messageText =', messageText);
+
   const myAvatarKey = 'current_my_avatar';
   const targetAvatarId = chatSetting.theirAvatar ? String(chatSetting.theirAvatar) : 'contact_unknown_avatar';
   const myBubble = chatSetting.myBubble || '#5B86FF';
   const targetBubble = chatSetting.theirBubble || '#F8F8F8';
   const chatBgKey = chatSetting.background ? String(chatSetting.background) : 'current_chat_bg';
 
-  return [
+  const result = [
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
     '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
-    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 <div class="vv-chat-sync-hidden" style="display:none !important; white-space:pre-wrap;">[VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]</div> 同步块。',
     '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
     '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
     '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
@@ -2961,16 +2992,16 @@ function buildVVEventPayload(chatId) {
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
     '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
+    '所有字段必须严格使用 key=value 格式，不允许使用 key:value。',
+    '[消息] 块内必须使用 text=消息内容，不允许使用 content=、message=、msg=。',
+    '不要输出任何 HTML 标签，不要输出 <div>、<span> 等包裹。',
+    '[VV_CHAT_SYNC] 必须直接输出纯文本块。',
     '如果用户发送的是转账消息，你可以选择接受、拒绝或退回。',
     '如果你接受用户转账，必须在回复正文中原样输出：[wallet_action:accept_transfer|id=对应转账id]',
     '如果你拒绝用户转账，必须在回复正文中原样输出：[wallet_action:reject_transfer|id=对应转账id]',
     '如果你退回用户转账，必须在回复正文中原样输出：[wallet_action:refund_transfer|id=对应转账id]',
     '如果你主动给用户转账，必须在回复正文中原样输出：[wallet_action:send_transfer|id=唯一id|amount=金额|note=备注]',
     '机器标记可以和正常对话一起输出，但字段名不能改，方括号结构不能改。',
-    '所有字段必须严格使用 key=value 格式，不允许使用 key:value。',
-    '[消息] 块内必须使用 text=消息内容，不允许使用 content=、message=、msg=。',
-    '不要输出任何 HTML 标签，不要输出 <div>、<span> 等包裹。',
-    '[VV_CHAT_SYNC] 必须直接输出纯文本块。',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -2985,6 +3016,13 @@ function buildVVEventPayload(chatId) {
     'chatBgKey=' + chatBgKey,
     '[/VV_EVENT]'
   ].join('\n');
+
+  console.log('[VV] buildVVEventPayload result length =', result.length);
+  console.log('[VV] buildVVEventPayload result >>>');
+  console.log(result);
+  console.log('<<< [VV] buildVVEventPayload result');
+
+  return result;
 }
 
 let isTriggeringAIReply = false;
@@ -2999,24 +3037,41 @@ async function triggerAIReply() {
     if (!currentChatId) return;
 
     if (!pendingReplyTargets[currentChatId]) {
+      console.log('[VV] pendingReplyTargets false, skip');
       return;
     }
 
     const thread = messages[currentChatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
+    console.log('[VV] current thread >>>', thread);
+    console.log('[VV] pendingMessages >>>', pendingMessages);
+
     if (!pendingMessages.length) {
+      console.log('[VV] no pendingMessages, clear target flag');
       pendingReplyTargets[currentChatId] = false;
       saveAll();
       return;
     }
 
     const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
+    const vvPayload = buildVVEventPayload(currentChatId);
+    const latestPayload = buildLatestUserPayload(currentChatId);
+    const promptText = vvPayload || latestPayload;
 
-    console.log('[VV] triggerAIReply promptText >>>');
-    console.log(promptText);
-    console.log('<<< [VV] triggerAIReply promptText');
+    if (!promptText || !String(promptText).trim()) {
+      console.warn('[VV] promptText is empty, abort triggerAIReply');
+      return;
+    }
+
+    console.log('[VV] buildVVEventPayload length =', vvPayload ? vvPayload.length : 0);
+    console.log('[VV] buildVVEventPayload JSON =', JSON.stringify(vvPayload));
+
+    console.log('[VV] buildLatestUserPayload length =', latestPayload ? latestPayload.length : 0);
+    console.log('[VV] buildLatestUserPayload JSON =', JSON.stringify(latestPayload));
+
+    console.log('[VV] triggerAIReply promptText length =', promptText ? promptText.length : 0);
+    console.log('[VV] triggerAIReply promptText JSON =', JSON.stringify(promptText));
 
     let slashOk = false;
 
@@ -3027,6 +3082,11 @@ async function triggerAIReply() {
         chatType: currentChatType,
         promptText
       });
+
+      console.log('[VV] buildReplyCommand cmd >>>');
+      console.log(cmd);
+      console.log('<<< [VV] buildReplyCommand cmd');
+
       slashOk = await triggerSlash(cmd);
     }
 
