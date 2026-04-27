@@ -1,3 +1,5 @@
+console.log('===== VV SCRIPT VERSION 20260428-TRANSFER-FIX-01 =====');
+
 let currentUploadImage = '';
 let currentActiveContactId = '';
 let currentChatId = '';
@@ -932,6 +934,7 @@ function handleVVChatSyncRaw(raw) {
 }
 
 async function triggerSlash(cmd) {
+  console.log('>>> triggerSlash RUNNING 20260428-TRANSFER-FIX-01');
   console.log('[VV] triggerSlash input cmd >>>');
   console.log(cmd);
   console.log('<<< [VV] triggerSlash input cmd');
@@ -2937,6 +2940,8 @@ function sendMessage() {
 }
 
 function buildVVEventPayload(chatId) {
+  console.log('>>> buildVVEventPayload RUNNING 20260428-TRANSFER-FIX-01');
+
   const list = messages[chatId] || [];
   const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
@@ -3028,6 +3033,8 @@ function buildVVEventPayload(chatId) {
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
+  console.log('>>> triggerAIReply RUNNING 20260428-TRANSFER-FIX-01');
+
   if (isTriggeringAIReply) return;
   isTriggeringAIReply = true;
 
