@@ -710,7 +710,10 @@ function savePhoneIconsSafely(savedIcons) {
 }
 
 function parseVVChatBlocks(raw) {
-  const text = String(raw || '');
+  const text = String(raw || '')
+    .replace(/<div[^>]*class=["']vv-chat-sync-hidden["'][^>]*>/gi, '')
+    .replace(/<\/div>/gi, '')
+    .trim();
   console.log('[VV] parseVVChatBlocks input full >>>');
   console.log(text);
   console.log('<<< [VV] parseVVChatBlocks input full');
@@ -2945,7 +2948,7 @@ function buildVVEventPayload(chatId) {
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
     '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
-    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 <div class="vv-chat-sync-hidden" style="display:none !important; white-space:pre-wrap;">[VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]</div> 同步块。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
     '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
     '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
     '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
@@ -2964,6 +2967,10 @@ function buildVVEventPayload(chatId) {
     '如果你退回用户转账，必须在回复正文中原样输出：[wallet_action:refund_transfer|id=对应转账id]',
     '如果你主动给用户转账，必须在回复正文中原样输出：[wallet_action:send_transfer|id=唯一id|amount=金额|note=备注]',
     '机器标记可以和正常对话一起输出，但字段名不能改，方括号结构不能改。',
+    '所有字段必须严格使用 key=value 格式，不允许使用 key:value。',
+    '[消息] 块内必须使用 text=消息内容，不允许使用 content=、message=、msg=。',
+    '不要输出任何 HTML 标签，不要输出 <div>、<span> 等包裹。',
+    '[VV_CHAT_SYNC] 必须直接输出纯文本块。',
     '',
     '[VV_EVENT]',
     'type=chat',
