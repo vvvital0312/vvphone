@@ -115,7 +115,7 @@
                 <input id="profileAvatarInput" type="file" accept="image/*" hidden />
               </label>
 
-              <div id="profileNickname" class="profile-nickname clickable" onclick="openProfileNicknameDialog()">我</div>
+              <div id="profileNickname" class="profile-nickname clickable" onclick="playClickSound();openProfileNicknameDialog()">我</div>
             </div>
 
             <div class="profile-section">
@@ -141,7 +141,7 @@
                 </label>
               </div>
 
-              <div class="profile-setting-item clickable" onclick="openStickerImportDialog('file')">
+              <div class="profile-setting-item clickable" onclick="playClickSound();openStickerImportDialog('file')">
                 <div class="profile-setting-text">
                   <div class="profile-setting-title">导入表情</div>
                   <div class="profile-setting-desc">一次最多导入 20 张，可稍后在聊天里修改名称</div>
@@ -149,7 +149,7 @@
                 <div class="profile-setting-value">导入</div>
               </div>
 
-              <div class="profile-setting-item clickable" onclick="document.getElementById('feedCoverInput')?.click()">
+              <div class="profile-setting-item clickable" onclick="playClickSound();document.getElementById('feedCoverInput')?.click()">
                 <div class="profile-setting-text">
                   <div class="profile-setting-title">朋友圈封面</div>
                   <div class="profile-setting-desc">设置动态页顶部封面</div>
@@ -157,7 +157,7 @@
                 <div class="profile-setting-value">更换</div>
               </div>
 
-              <div class="profile-setting-item clickable" onclick="triggerGlobalBgPick()">
+              <div class="profile-setting-item clickable" onclick="playClickSound();triggerGlobalBgPick()">
                 <div class="profile-setting-text">
                   <div class="profile-setting-title">一键更换背景</div>
                   <div class="profile-setting-desc">设置统一聊天背景</div>
@@ -167,7 +167,7 @@
 
               <input id="globalBgInput" type="file" accept="image/*" hidden />
 
-              <div class="profile-setting-item clickable" onclick="handleWalletClick()">
+              <div class="profile-setting-item clickable" onclick="playClickSound();handleWalletClick()">
                 <div class="profile-setting-text">
                   <div class="profile-setting-title">钱包</div>
                   <div class="profile-setting-desc">点击可获得 10 元</div>
@@ -195,10 +195,10 @@
         </div>
 
         <div class="contact-tabs bottom-tabs">
-          <div class="contact-tab active" data-tab="direct" onclick="switchContactTab('direct')">聊天</div>
-          <div class="contact-tab" data-tab="group" onclick="switchContactTab('group')">群聊</div>
-          <div class="contact-tab" data-tab="feed" onclick="switchContactTab('feed')">动态</div>
-          <div class="contact-tab" data-tab="profile" onclick="switchContactTab('profile')">我的</div>        
+          <div class="contact-tab active" data-tab="direct" onclick="playClickSound();switchContactTab('direct')">聊天</div>
+          <div class="contact-tab" data-tab="group" onclick="playClickSound();switchContactTab('group')">群聊</div>
+          <div class="contact-tab" data-tab="feed" onclick="playClickSound();switchContactTab('feed')">动态</div>
+          <div class="contact-tab" data-tab="profile" onclick="playClickSound();switchContactTab('profile')">我的</div>        
         </div>
       </div>
     </div>
@@ -227,14 +227,14 @@
       <div class="input-toolbar">
         <div class="composer-quote-preview" id="composerQuotePreview">
           <div class="composer-quote-text" id="composerQuoteText"></div>
-          <button class="small-x-btn" onclick="clearComposerQuote()">✕</button>
+          <button class="small-x-btn" onclick="playClickSound();clearComposerQuote()">✕</button>
         </div>
 
         <div class="composer-attachments" id="composerAttachments"></div>
 
         <div class="input-row">
           <textarea id="chatInput" placeholder="输入消息，换行可拆成多个气泡..."></textarea>
-          <button onclick="sendMessage()">发送</button>
+          <button onclick="playClickSound();sendMessage()">发送</button>
         </div>
 
         <div class="toolbar-row-bottom">
@@ -245,7 +245,7 @@
             <svg onclick="playClickSound(); openCallFromChat()" viewBox="0 0 24 24"><path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.11.37 2.3.57 3.54.57a1 1 0 011 1V20a1 1 0 01-1 1C10.85 21 3 13.15 3 3a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.43.57 3.54a1 1 0 01-.24 1.01l-2.21 2.24z"/></svg>
             <svg onclick="playClickSound(); addVoiceDraft()" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5a3 3 0 10-6 0v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-1.7z"/></svg>
           </div>
-          <button type="button" class="reply-trigger-btn" onclick="triggerAIReply()">回复</button>
+          <button type="button" class="reply-trigger-btn" onclick="playClickSound();triggerAIReply()">回复</button>
         </div>
 
         <div class="emoji-panel" id="emojiPanel">
@@ -285,7 +285,7 @@
               </div>
               <div class="profile-preview-row">
                 <div class="preview-avatar"><img id="profileMyAvatarPreview" src="" alt=""></div>
-                <button type="button" onclick="document.getElementById('myAvatarInput')?.click()">更换</button>
+                <button type="button" onclick="playClickSound();document.getElementById('myAvatarInput')?.click()">更换</button>
               </div>
             </div>
             <div class="setting-row">
@@ -305,7 +305,7 @@
               <div class="setting-row-left">
                 <div class="setting-row-title">聊天背景</div>
               </div>
-              <button type="button" onclick="document.getElementById('chatBgInput')?.click()">上传</button>
+              <button type="button" onclick="playClickSound();document.getElementById('chatBgInput')?.click()">上传</button>
             </div>
           </div>
 
@@ -315,7 +315,7 @@
               <div class="setting-row-left">
                 <div class="setting-row-title">拉黑状态</div>
               </div>
-              <div class="toggle-chip" id="blockToggleChip" onclick="toggleBlockCurrentContact()">未拉黑</div>
+              <div class="toggle-chip" id="blockToggleChip" onclick="playClickSound();toggleBlockCurrentContact()">未拉黑</div>
             </div>
           </div>
 
@@ -325,13 +325,13 @@
               <div class="setting-row-left">
                 <div class="setting-row-title">清空聊天记录</div>
               </div>
-              <button onclick="clearCurrentChatHistory()">清空</button>
+              <button onclick="playClickSound();clearCurrentChatHistory()">清空</button>
             </div>
             <div class="setting-row">
               <div class="setting-row-left">
                 <div class="setting-row-title">删除聊天</div>
               </div>
-              <button onclick="deleteCurrentChatFromSetting()">删除</button>
+              <button onclick="playClickSound();deleteCurrentChatFromSetting()">删除</button>
             </div>
           </div>
 
@@ -366,12 +366,12 @@
 
         <div class="call-input-area">
           <textarea id="callInput" placeholder="对TA说点什么，换行可拆成多句..."></textarea>
-          <button onclick="sendCallMessage()">发送</button>
+          <button onclick="playClickSound();sendCallMessage()">发送</button>
         </div>
 
         <div class="call-actions">
-          <button class="call-action-btn sms" onclick="jumpCallToChat()">发短信</button>
-          <button class="call-action-btn end" onclick="endCall()">挂断</button>
+          <button class="call-action-btn sms" onclick="playClickSound();jumpCallToChat()">发短信</button>
+          <button class="call-action-btn end" onclick="playClickSound();endCall()">挂断</button>
         </div>
       </div>
     </div>
@@ -439,8 +439,8 @@
         <input type="file" id="imageUpload" accept="image/*">
         <div class="preview-box"><span>图片预览区</span></div>
         <div class="dialog-buttons">
-          <button onclick="confirmReplace()">确认替换</button>
-          <button onclick="closeDialog('settingDialog')">关闭</button>
+          <button onclick="playClickSound();confirmReplace()">确认替换</button>
+          <button onclick="playClickSound();closeDialog('settingDialog')">关闭</button>
         </div>
       </div>
     </div>
@@ -451,8 +451,8 @@
         <input type="text" id="contactName" placeholder="请输入角色名称">
         <input type="text" id="contactBridgeName" placeholder="绑定角色名（可与上面相同）">
         <div class="dialog-buttons">
-          <button onclick="addContact()">确认添加</button>
-          <button onclick="closeDialog('addContactDialog')">取消</button>
+          <button onclick="playClickSound();addContact()">确认添加</button>
+          <button onclick="playClickSound();closeDialog('addContactDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -462,8 +462,8 @@
         <h3>拨打电话</h3>
         <input type="text" id="callTargetName" placeholder="请输入要拨打的角色名称">
         <div class="dialog-buttons">
-          <button onclick="startCallFromDialog()">拨出</button>
-          <button onclick="closeDialog('addCallDialog')">取消</button>
+          <button onclick="playClickSound();startCallFromDialog()">拨出</button>
+          <button onclick="playClickSound();closeDialog('addCallDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -474,8 +474,8 @@
         <input type="text" id="groupName" placeholder="请输入群聊名称">
         <textarea id="groupMembers" placeholder="输入成员名称，换行分隔"></textarea>
         <div class="dialog-buttons">
-          <button onclick="addGroup()">创建群聊</button>
-          <button onclick="closeDialog('addGroupDialog')">取消</button>
+          <button onclick="playClickSound();addGroup()">创建群聊</button>
+          <button onclick="playClickSound();closeDialog('addGroupDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -487,13 +487,13 @@
         <input type="file" id="feedPostImages" accept="image/*" multiple>
         <div class="preview-box" id="feedPostPreview"><span>最多9张图片</span></div>
         <div class="dialog-buttons">
-          <button onclick="addFeedPost()">发布</button>
-          <button onclick="closeDialog('postFeedDialog')">取消</button>
+          <button onclick="playClickSound();addFeedPost()">发布</button>
+          <button onclick="playClickSound();closeDialog('postFeedDialog')">取消</button>
         </div>
       </div>
     </div>
 
-    <div id="feedImageViewer" class="feed-image-viewer" onclick="closeFeedImageViewer()">
+    <div id="feedImageViewer" class="feed-image-viewer" onclick="playClickSound();closeFeedImageViewer()">
       <img id="feedImageViewerImg" src="" alt="">
     </div>
 
@@ -503,8 +503,8 @@
         <input type="number" id="transferAmount" placeholder="请输入金额">
         <input type="text" id="transferNote" placeholder="备注（可选）">
         <div class="dialog-buttons">
-          <button onclick="confirmTransfer()">确认转账</button>
-          <button onclick="closeDialog('transferDialog')">取消</button>
+          <button onclick="playClickSound();confirmTransfer()">确认转账</button>
+          <button onclick="playClickSound();closeDialog('transferDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -516,8 +516,8 @@
         <div class="preview-box" id="sendImagePreviewBox"><span>图片预览区</span></div>
         <input type="text" id="sendImageDesc" placeholder="图片描述（可选）">
         <div class="dialog-buttons">
-          <button onclick="confirmImageDraft()">确认</button>
-          <button onclick="closeDialog('imageSendDialog')">取消</button>
+          <button onclick="playClickSound();confirmImageDraft()">确认</button>
+          <button onclick="playClickSound();closeDialog('imageSendDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -528,8 +528,8 @@
         <textarea id="voiceTextInput" placeholder="请输入语音转文字内容..."></textarea>
         <input type="number" id="voiceDurationInput" placeholder="语音时长（秒，可选）">
         <div class="dialog-buttons">
-          <button onclick="confirmVoiceDraft()">确认</button>
-          <button onclick="closeDialog('voiceDialog')">取消</button>
+          <button onclick="playClickSound();confirmVoiceDraft()">确认</button>
+          <button onclick="playClickSound();closeDialog('voiceDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -542,8 +542,8 @@
         <input type="file" id="stickerFileInput" accept="image/*" multiple>
         <div class="preview-box" id="stickerImportPreview"><span>表情预览区</span></div>
         <div class="dialog-buttons">
-          <button onclick="confirmStickerImport()">确认添加</button>
-          <button onclick="closeDialog('stickerImportDialog')">取消</button>
+          <button onclick="playClickSound();confirmStickerImport()">确认添加</button>
+          <button onclick="playClickSound();closeDialog('stickerImportDialog')">取消</button>
         </div>
       </div>
     </div>
@@ -553,21 +553,21 @@
         <h3>修改昵称</h3>
         <input type="text" id="profileNicknameDialogInput" maxlength="20" placeholder="请输入昵称">
         <div class="dialog-buttons">
-          <button onclick="confirmProfileNicknameChange()">确认</button>
-          <button onclick="closeDialog('profileNicknameDialog')">取消</button>
+          <button onclick="playClickSound();confirmProfileNicknameChange()">确认</button>
+          <button onclick="playClickSound();closeDialog('profileNicknameDialog')">取消</button>
         </div>
       </div>
     </div>
 
     <div id="operationMenu" class="operation-menu">
-      <div class="menu-item" id="stickyBtn" onclick="toggleSticky()">置顶</div>
-      <div class="menu-item danger" onclick="deleteContact()">删除联系人</div>
+      <div class="menu-item" id="stickyBtn" onclick="playClickSound();toggleSticky()">置顶</div>
+      <div class="menu-item danger" onclick="playClickSound();deleteContact()">删除联系人</div>
     </div>
 
     <div id="messageOperationMenu" class="message-operation-menu">
-      <div class="menu-item" onclick="quoteCurrentMessage()">引用</div>
-      <div class="menu-item" onclick="recallCurrentMessage()">撤回</div>
-      <div class="menu-item danger" onclick="deleteCurrentMessage()">删除</div>
+      <div class="menu-item" onclick="playClickSound();quoteCurrentMessage()">引用</div>
+      <div class="menu-item" onclick="playClickSound();recallCurrentMessage()">撤回</div>
+      <div class="menu-item danger" onclick="playClickSound();deleteCurrentMessage()">删除</div>
     </div>
 
     <input type="file" id="myAvatarInput" class="hidden-file" accept="image/*">
