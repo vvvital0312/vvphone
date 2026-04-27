@@ -926,21 +926,29 @@ function appendVVChatReplyToLocal(chatData) {
 
 function handleVVChatSyncRaw(raw) {
   console.log('[VV] handleVVChatSyncRaw raw full >>>');
-  console.log(String(raw || ''));
+  console.log(raw);
   console.log('<<< [VV] handleVVChatSyncRaw raw full');
+
+  if (!raw) return;
+
+  // 先解析整段原文里的钱包动作（哪怕它在 VV_CHAT_SYNC 外面）
+  const rawActions = parseWalletActions(raw);
+  console.log('[VV] raw wallet actions:', rawActions);
 
   const parsed = parseVVChatBlocks(raw);
   console.log('[VV] parseVVChatBlocks result:', parsed);
 
-  if (!parsed) {
-    console.warn('[VV] parseVVChatBlocks returned null');
-    return;
+  if (!parsed) return;
+
+  // 先执行动作：改右侧原卡片状态、补左侧结果卡片
+  if (parsed.chatId && rawActions.length) {
+    applyWalletActions(parsed.chatId, rawActions);
   }
 
+  // 再追加普通左侧文本消息
   appendVVChatReplyToLocal(parsed);
-  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 
-  renderMessages();
+  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 }
 
 async function triggerSlash(cmd) {
@@ -2539,36 +2547,59 @@ function renderMessageOriginal(m) {
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
     case 'transfer': {
-      const isIncoming = m.transferDirection === 'in';
+      const dir = m.transferDirection || '';
+      const isIncoming = dir === 'in';
       const isPendingIncoming = isIncoming && m.transferState === 'pending';
+
       const isAccepted = m.transferState === 'accepted' || m.status === '已收款';
       const isRejected = m.transferState === 'rejected' || m.status === '已拒收';
       const isRefunded = m.transferState === 'refunded' || m.status === '已退回';
 
-      let stateClass = '';
+      let stateClass = 'pending';
       let stateText = m.status || '待处理';
       let iconText = '¥';
+      let titleText = m.note || '转账';
 
-      if (isAccepted) {
-        stateClass = 'received';
-        stateText = '已收款';
-        iconText = '✓';
-      } else if (isRejected) {
-        stateClass = 'rejected';
-        stateText = '已拒收';
-        iconText = '✕';
-      } else if (isRefunded) {
-        stateClass = 'refunded';
-        stateText = '已退回';
-        iconText = '↩';
-      } else if (isPendingIncoming) {
-        stateClass = 'pending';
-        stateText = '待领取';
-        iconText = '¥';
+      // AI 接收/拒收/退回 结果卡片（左侧）
+      if (dir === 'out_result') {
+        if (isAccepted) {
+          stateClass = 'received';
+          stateText = '已收款';
+          iconText = '✓';
+          titleText = m.note || '已收款';
+        } else if (isRejected) {
+          stateClass = 'rejected';
+          stateText = '已拒收';
+          iconText = '✕';
+          titleText = m.note || '已拒收';
+        } else if (isRefunded) {
+          stateClass = 'refunded';
+          stateText = '已退回';
+          iconText = '↩';
+          titleText = m.note || '已退回';
+        }
       } else {
-        stateClass = 'pending';
-        stateText = m.status || '待收款';
-        iconText = '¥';
+        if (isAccepted) {
+          stateClass = 'received';
+          stateText = '已收款';
+          iconText = '✓';
+        } else if (isRejected) {
+          stateClass = 'rejected';
+          stateText = '已拒收';
+          iconText = '✕';
+        } else if (isRefunded) {
+          stateClass = 'refunded';
+          stateText = '已退回';
+          iconText = '↩';
+        } else if (isPendingIncoming) {
+          stateClass = 'pending';
+          stateText = '待领取';
+          iconText = '¥';
+        } else {
+          stateClass = 'pending';
+          stateText = m.status || '待收款';
+          iconText = '¥';
+        }
       }
 
       return `
@@ -2577,7 +2608,7 @@ function renderMessageOriginal(m) {
             <div class="transfer-icon">${iconText}</div>
             <div class="transfer-text">
               <div class="transfer-amount">¥${escapeHTML(Number(m.amount || 0).toFixed(2))}</div>
-              <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
+              <div class="transfer-note">${escapeHTML(titleText)}</div>
             </div>
           </div>
           <div class="transfer-card-bottom">${escapeHTML(stateText)}</div>
@@ -2596,6 +2627,47 @@ function renderMessageOriginal(m) {
     default:
       return `<div class="message-bubble">未知消息</div>`;
   }
+}
+
+function appendTransferResultMessage(chatId, sourceMsg, resultType) {
+  if (!chatId || !sourceMsg) return null;
+  if (!messages[chatId]) messages[chatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  let status = '已收款';
+  let transferState = 'accepted';
+
+  if (resultType === 'rejected') {
+    status = '已拒收';
+    transferState = 'rejected';
+  } else if (resultType === 'refunded') {
+    status = '已退回';
+    transferState = 'refunded';
+  }
+
+  const msg = {
+    id: 'm' + Date.now() + '_transfer_result_' + Math.random().toString(36).slice(2),
+    chatId: chatId,
+    sender: 'them',
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer',
+    amount: Number(sourceMsg.amount || 0),
+    note: sourceMsg.note || '转账',
+    status: status,
+    recalled: false,
+    time,
+    timeLabel,
+    transferDirection: 'out_result',
+    transferState: transferState,
+    walletSettled: true,
+    relatedTransferId: sourceMsg.id
+  };
+
+  messages[chatId].push(msg);
+  return msg;
 }
 
 async function renderMessages() {
@@ -3818,11 +3890,7 @@ function appendSystemMessage(chatId, text) {
 }
 
 function markOutgoingTransferAccepted(chatId, msgId) {
-  console.log('[Wallet] markOutgoingTransferAccepted:', chatId, msgId);
-
   const msg = findMessageById(chatId, msgId);
-  console.log('[Wallet] matched msg =', msg);
-
   if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
   if (msg.transferState !== 'pending') return false;
 
@@ -3830,7 +3898,7 @@ function markOutgoingTransferAccepted(chatId, msgId) {
   msg.status = '已收款';
   msg.pendingForReply = false;
 
-  console.log('[Wallet] accepted msg after change =', msg);
+  appendTransferResultMessage(chatId, msg, 'accepted');
 
   saveAll();
   renderMessages?.();
@@ -3843,11 +3911,11 @@ function markOutgoingTransferRejected(chatId, msgId) {
   if (msg.transferState !== 'pending') return false;
 
   msg.transferState = 'rejected';
-  msg.status = '已拒收';
+  msg.status = '已退回';
   msg.pendingForReply = false;
 
   addWalletBalance(Number(msg.amount || 0));
-  appendSystemMessage(chatId, `对方拒收了你的转账：¥${Number(msg.amount || 0).toFixed(2)}`);
+  appendTransferResultMessage(chatId, msg, 'rejected');
 
   saveAll();
   renderMessages?.();
@@ -3864,7 +3932,7 @@ function markOutgoingTransferRefunded(chatId, msgId) {
   msg.pendingForReply = false;
 
   addWalletBalance(Number(msg.amount || 0));
-  appendSystemMessage(chatId, `对方退回了你的转账：¥${Number(msg.amount || 0).toFixed(2)}`);
+  appendTransferResultMessage(chatId, msg, 'refunded');
 
   saveAll();
   renderMessages?.();

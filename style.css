@@ -332,7 +332,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   color:#fff;box-shadow:0 6px 12px rgba(243,139,39,.25)
 }
 .transfer-card.received {
-  opacity: 0.75;
+  opacity: 0.82;
   background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
 }
 .transfer-card.received .transfer-card-bottom {
@@ -340,7 +340,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   font-weight: 600;
 }
 .transfer-card.rejected {
-  opacity: 0.75;
+  opacity: 0.82;
   background: linear-gradient(135deg, #fef2f2, #fee2e2);
 }
 .transfer-card.rejected .transfer-card-bottom {
@@ -348,7 +348,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   font-weight: 600;
 }
 .transfer-card.refunded {
-  opacity: 0.8;
+  opacity: 0.82;
   background: linear-gradient(135deg, #eff6ff, #dbeafe);
 }
 .transfer-card.refunded .transfer-card-bottom {
