@@ -154,7 +154,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   box-sizing: border-box;
 }
 .contact-nav{height:40px}
-.back-btn{display:flex;align-items:center;gap:4px;color:#111;font-size:15px;cursor:pointer;min-width:60px}
+.back-btn{display:flex;align-items:center;gap:4px;color:#111;font-size:16px;cursor:pointer;min-width:30px}
 .nav-title,.chat-title,.call-title,.setting-title{flex:1;text-align:center;font-size:16px;font-weight:600;color:#111}
 .nav-action,.chat-action{min-width:36px;display:flex;justify-content:flex-end;align-items:center;font-size:24px;color:#111;cursor:pointer}
 .contact-body {

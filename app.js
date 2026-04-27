@@ -43,6 +43,17 @@ let stickerPressTimer = null;
 let stickerRenameId = null;
 let stickerRenameDraft = '';
 
+// ==================== 图片裁剪功能模块 ====================
+let currentCropper = null;
+let cropCallback = null;
+
+/**
+ * 打开裁剪弹窗
+ * @param {string} dataUrl - 原图的 DataURL
+ * @param {number} aspectRatio - 裁剪比例 (头像 1, 背景 16/9)
+ * @param {function} callback - 裁剪完成后的回调，传回新的 DataURL
+ */
+
 const DEFAULT_AVATAR = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMDdjMTYwIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIxOCIgcj0iNiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMTIgMzRDMTIgMjcuMzcyMyAxNy4zNzIzIDIyIDI0IDIyQzMwLjYyNzcgMjIgMzYgMjcuMzcyMyAzNiAzNEgxMloiIGZpbGw9IndoaXRlIi8+PC9zdmc+';
 
 const STORAGE_DEBUG = true;
@@ -326,22 +337,41 @@ async function persistImageToIDB(dataUrl, meta) {
   return createAssetRef(id);
 }
 
-async function handleProfileAvatarFile(file) {
-  if (!file) return;
+async function handleProfileAvatarFile(fileOrDataUrl) {
+  let dataUrl = '';
 
+  if (typeof fileOrDataUrl === 'string') {
+    dataUrl = fileOrDataUrl;
+  } else if (fileOrDataUrl instanceof File || fileOrDataUrl instanceof Blob) {
+    dataUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target?.result || '');
+      reader.readAsDataURL(fileOrDataUrl);
+    });
+  }
+
+  if (!dataUrl) return;
+
+  let finalSrc = dataUrl;
+  if (typeof persistImageToIDB === 'function') {
+    finalSrc = await persistImageToIDB(dataUrl, {
+      area: 'profile.avatar'
+    });
+  }
+
+  setMyProfileAvatar(finalSrc);
+}
+
+function handleProfileAvatarCrop(file) {
+  if (!file) return;
   const reader = new FileReader();
-  reader.onload = async e => {
+  reader.onload = e => {
     const dataUrl = e.target?.result;
     if (!dataUrl) return;
-
-    let finalSrc = dataUrl;
-    if (typeof persistImageToIDB === 'function') {
-      finalSrc = await persistImageToIDB(dataUrl, {
-        area: 'profile.avatar'
-      });
-    }
-
-    setMyProfileAvatar(finalSrc);
+    // 拦截！打开裁剪框，比例 1:1
+    openCropDialog(dataUrl, 1, (croppedUrl) => {
+      handleProfileAvatarFile(croppedUrl); // 裁剪后走原存储
+    });
   };
   reader.readAsDataURL(file);
 }
@@ -1004,7 +1034,6 @@ function getMyAvatar(chatId = null) {
   }
 
   return setting.myAvatarBase
-    || setting.myAvatar
     || myProfile.avatar
     || DEFAULT_AVATAR;
 }
@@ -4219,6 +4248,28 @@ function initEventBindings() {
   document.getElementById('bgOpacity')?.addEventListener('input', updateBgStyle);
   document.getElementById('bgBlur')?.addEventListener('input', updateBgStyle);
   document.getElementById('imageUpload')?.addEventListener('change', handleImageUpload);
+    // --- 拦截主页头像上传 ---
+  document.getElementById('profileAvatarInput')?.addEventListener('change', async e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const dataUrl = ev.target?.result;
+      if (!dataUrl) return;
+
+      // 拦截！打开裁剪框，比例 1:1 (头像)
+      openCropDialog(dataUrl, 1, async (croppedUrl) => {
+        // 裁剪完成后，直接把 DataURL 传给原有的处理函数
+        await handleProfileAvatarFile(croppedUrl);
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }, true); // 清空 input，允许重复选同一张图
 
   document.addEventListener('click', e => {
     const menu = document.getElementById('operationMenu');
@@ -4274,34 +4325,37 @@ function initEventBindings() {
       const data = ev.target?.result;
       if (!data) return;
 
-      const ref = await persistImageToIDB(data, {
-        area: 'chat.myAvatar',
-        chatId
+      // 拦截：打开裁剪框，比例 1:1 (头像)
+      openCropDialog(data, 1, async (croppedUrl) => {
+        const ref = await persistImageToIDB(croppedUrl, {
+          area: 'chat.myAvatar',
+          chatId
+        });
+
+        if (!ref) {
+          alert('头像保存失败，请重试');
+          return;
+        }
+
+        const setting = getChatSetting(chatId);
+
+        setting.myAvatarBase = ref;
+
+        if (myProfile.avatarUnified) {
+          setting.myAvatarOverride = ref;
+        }
+
+        saveAll();
+
+        if (currentChatId === chatId && currentChatType === 'direct') {
+          await openChatSettingPage();
+        }
+
+        renderMessages?.();
+        renderChatList?.();
+        renderFeedHeader?.();
+        renderFeedList?.();
       });
-
-      if (!ref) {
-        alert('头像保存失败，请重试');
-        return;
-      }
-
-      const setting = getChatSetting(chatId);
-
-      setting.myAvatarBase = ref;
-
-      if (myProfile.avatarUnified) {
-        setting.myAvatarOverride = ref;
-      }
-
-      saveAll();
-
-      if (currentChatId === chatId && currentChatType === 'direct') {
-        await openChatSettingPage();
-      }
-
-      renderMessages?.();
-      renderChatList?.();
-      renderFeedHeader?.();
-      renderFeedList?.();
     };
 
     reader.readAsDataURL(file);
@@ -4310,12 +4364,15 @@ function initEventBindings() {
 
   bindFileInput('theirAvatarInput', async data => {
     if (!currentChatId) return;
-    const ref = await persistImageToIDB(data, { area: 'chat.theirAvatar', chatId: currentChatId });
-    getChatSetting(currentChatId).theirAvatar = ref;
-    saveAll();
-    openChatSettingPage();
-    renderMessages();
-    renderChatList();
+    // 拦截：打开裁剪框，比例 1:1 (头像)
+    openCropDialog(data, 1, async (croppedUrl) => {
+      const ref = await persistImageToIDB(croppedUrl, { area: 'chat.theirAvatar', chatId: currentChatId });
+      getChatSetting(currentChatId).theirAvatar = ref;
+      saveAll();
+      openChatSettingPage();
+      renderMessages();
+      renderChatList();
+    });
   }, {
     compress: true,
     maxWidth: 512,
@@ -4325,30 +4382,33 @@ function initEventBindings() {
   bindFileInput('chatBgInput', async data => {
     if (!currentChatId) return;
 
-    const ref = await persistImageToIDB(data, {
-      area: 'chat.background',
-      chatId: currentChatId
+    // 拦截：打开裁剪框，比例 16:9 (背景)
+    openCropDialog(data, 9 / 16, async (croppedUrl) => {
+      const ref = await persistImageToIDB(croppedUrl, {
+        area: 'chat.background',
+        chatId: currentChatId
+      });
+
+      if (!ref) {
+        alert('背景保存失败，请重试');
+        return;
+      }
+
+      const setting = getChatSetting(currentChatId);
+
+      setting.backgroundBase = ref;
+
+      if (myProfile.backgroundUnified) {
+        setting.backgroundOverride = ref;
+      }
+
+      saveAll();
+      await openChatSettingPage();
+      await applyCurrentChatBackground();
+      renderChatList?.();
+      renderFeedHeader?.();
+      renderFeedList?.();
     });
-
-    if (!ref) {
-      alert('背景保存失败，请重试');
-      return;
-    }
-
-    const setting = getChatSetting(currentChatId);
-
-    setting.backgroundBase = ref;
-
-    if (myProfile.backgroundUnified) {
-      setting.backgroundOverride = ref;
-    }
-
-    saveAll();
-    await openChatSettingPage();
-    await applyCurrentChatBackground();
-    renderChatList?.();
-    renderFeedHeader?.();
-    renderFeedList?.();
   }, {
     compress: true,
     maxWidth: 1280,
@@ -4356,14 +4416,17 @@ function initEventBindings() {
   });
 
   bindFileInput('feedCoverInput', async data => {
-    const ref = await persistImageToIDB(data, { area: 'feed.cover' });
-    appProfile.feedCover = ref;
-    saveAll();
-    renderFeedHeader();
-    const cover = document.getElementById('profileCover');
-    if (cover) {
-      cover.style.backgroundImage = `url(${await resolveImageRefToUrl(ref)})`;
-    }
+    // 拦截：打开裁剪框，比例 16:9 (背景)
+    openCropDialog(data, 16 / 9, async (croppedUrl) => {
+      const ref = await persistImageToIDB(croppedUrl, { area: 'feed.cover' });
+      appProfile.feedCover = ref;
+      saveAll();
+      renderFeedHeader();
+      const cover = document.getElementById('profileCover');
+      if (cover) {
+        cover.style.backgroundImage = `url(${await resolveImageRefToUrl(ref)})`;
+      }
+    });
   }, {
     compress: true,
     maxWidth: 1280,
@@ -4371,34 +4434,37 @@ function initEventBindings() {
   });
 
   bindFileInput('globalBgInput', async data => {
-    const ref = await persistImageToIDB(data, { area: 'profile.globalBg' });
+    // 拦截：打开裁剪框，比例 16:9 (背景)
+    openCropDialog(data, 9 / 16, async (croppedUrl) => {
+      const ref = await persistImageToIDB(croppedUrl, { area: 'profile.globalBg' });
 
-    if (!ref) {
-      alert('背景保存失败，请重试');
-      return;
-    }
+      if (!ref) {
+        alert('背景保存失败，请重试');
+        return;
+      }
 
-    ensureProfileData();
-    myProfile.globalChatBg = ref;
+      ensureProfileData();
+      myProfile.globalChatBg = ref;
 
-    if (myProfile.backgroundUnified) {
-      Object.keys(chatSettings).forEach(chatId => {
-        const setting = getChatSetting(chatId);
-        setting.backgroundOverride = '';
-      });
-    }
+      if (myProfile.backgroundUnified) {
+        Object.keys(chatSettings).forEach(chatId => {
+          const setting = getChatSetting(chatId);
+          setting.backgroundOverride = '';
+        });
+      }
 
-    saveAll();
+      saveAll();
 
-    await updateProfileUI();
-    if (currentChatId) {
-      await applyCurrentChatBackground?.();
-    }
+      await updateProfileUI();
+      if (currentChatId) {
+        await applyCurrentChatBackground?.();
+      }
 
-    renderChatList?.();
-    renderFeedHeader?.();
-    renderFeedList?.();
-    renderGroupList?.();
+      renderChatList?.();
+      renderFeedHeader?.();
+      renderFeedList?.();
+      renderGroupList?.();
+    });
   }, {
     compress: true,
     maxWidth: 1280,
@@ -4584,6 +4650,103 @@ function updateContactHeaderByTab(tab) {
       actionEl.onclick = null;
     }
   }
+}
+
+function openCropDialog(dataUrl, aspectRatio, callback) {
+  const dialog = document.getElementById('imageCropDialog');
+  const image = document.getElementById('cropTargetImage');
+
+  if (!dialog || !image) return;
+
+  // 记录回调
+  cropCallback = callback;
+
+  // 如果有旧的裁剪实例，先销毁
+  if (currentCropper) {
+    currentCropper.destroy();
+    currentCropper = null;
+  }
+
+  // 设置图片源并显示弹窗
+  image.src = dataUrl;
+  dialog.style.display = 'flex';
+
+  // 【关键新增】屏蔽底层所有页面的点击/触摸事件，防止误触触发文件选择
+  document.querySelectorAll('.page, .app-container, .tab-bar').forEach(el => {
+    el.style.pointerEvents = 'none';
+  });
+
+  // 等图片加载完再初始化 Cropper
+  image.onload = () => {
+    currentCropper = new Cropper(image, {
+      aspectRatio: aspectRatio || 1,
+      viewMode: 1,
+      autoCropArea: 0.8,
+      responsive: true,
+      background: true,
+      zoomable: true,
+      movable: true,
+    });
+  };
+}
+
+async function confirmCrop() {
+  if (!currentCropper || !cropCallback) {
+    closeCropDialog();
+    return;
+  }
+
+  const isAvatar = currentCropper.options.aspectRatio === 1;
+  const maxWidth = isAvatar ? 512 : 1280;
+
+  try {
+    const canvas = currentCropper.getCroppedCanvas({
+      maxWidth: maxWidth,
+      maxHeight: maxWidth,
+      fillColor: '#fff',
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: 'high',
+    });
+
+    if (!canvas) {
+      console.error('[Cropper] 裁剪画布生成失败');
+      closeCropDialog();
+      return;
+    }
+
+    const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+    // 【调试神器】在执行回调前，看看我们要传进去的到底是啥
+    console.log('[Cropper] 准备传给回调的数据类型:', typeof croppedDataUrl, '长度:', croppedDataUrl?.length, '前50字符:', String(croppedDataUrl).substring(0, 50));
+
+    // 执行原来的保存回调
+    await cropCallback(croppedDataUrl);
+
+    // 【关键修改】只有回调完全执行成功，没有报错，才关闭弹窗！
+    closeCropDialog();
+
+  } catch (err) {
+    console.error('[Cropper] 裁剪确认时发生错误:', err);
+    // 报错了弹窗不关闭，方便你多点几次或者看控制台
+  }
+}
+
+/**
+ * 关闭裁剪弹窗
+ */
+function closeCropDialog() {
+  const dialog = document.getElementById('imageCropDialog');
+  if (currentCropper) {
+    currentCropper.destroy();
+    currentCropper = null;
+  }
+  cropCallback = null;
+  if (dialog) dialog.style.display = 'none';
+
+  // 恢复底层页面的点击/触摸事件
+  document.querySelectorAll('.page, .app-container, .tab-bar').forEach(el => {
+    el.style.pointerEvents = '';
+  });
 }
 
 window.addEventListener('beforeunload', () => {
