@@ -812,8 +812,18 @@ function appendVVChatReplyToLocal(chatData) {
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
 
+  const allWalletActions = [];
+
   leftMsgs.forEach(msg => {
-    const normalizedContent = String(msg.content || '').trim();
+    const rawContent = String(msg.content || '').trim();
+    if (!rawContent) return;
+
+    const actions = parseWalletActions(rawContent);
+    if (actions.length) {
+      allWalletActions.push(...actions);
+    }
+
+    const normalizedContent = stripWalletActions(rawContent);
     if (!normalizedContent) return;
 
     const duplicated = thread.some(item =>
@@ -833,6 +843,7 @@ function appendVVChatReplyToLocal(chatData) {
 
     thread.push({
       id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+      chatId: chatId,
       sender: 'them',
       senderName: msg.sender || chatData.target || '对方',
       isMe: false,
@@ -846,6 +857,10 @@ function appendVVChatReplyToLocal(chatData) {
       state: msg.state || 'reply'
     });
   });
+
+  if (allWalletActions.length) {
+    applyWalletActions(chatId, allWalletActions);
+  }
 
   const rel = getRelSetting(chatId);
   if (chatData.target && rel && !rel.name) {
@@ -862,7 +877,8 @@ function appendVVChatReplyToLocal(chatData) {
 
   if (leftMsgs.length) {
     const last = leftMsgs[leftMsgs.length - 1];
-    updateLastMsg(chatId, last.content, time, currentChatType);
+    const lastContent = stripWalletActions(last.content || '') || '[转账消息]';
+    updateLastMsg(chatId, lastContent, time, currentChatType);
   }
 
   console.log('[VV] thread after append:', thread);
@@ -1124,12 +1140,51 @@ function setMyProfileNickname(name) {
   saveAll();
 }
 
-function addWalletBalance(amount) {
+function getWalletBalance() {
   ensureProfileData();
-  walletData.balance = Number(walletData.balance || 0) + Number(amount || 0);
-  if (walletData.balance < 0) walletData.balance = 0;
+  const n = Number(walletData.balance || 0);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function setWalletBalance(amount) {
+  ensureProfileData();
+  const n = Number(amount || 0);
+  walletData.balance = Number.isFinite(n) ? Math.max(0, n) : 0;
   updateProfileUI();
   saveAll();
+  return walletData.balance;
+}
+
+function addWalletBalance(amount) {
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n) || n <= 0) return getWalletBalance();
+  return setWalletBalance(getWalletBalance() + n);
+}
+
+function subtractWalletBalance(amount) {
+  const n = Number(amount || 0);
+
+  if (!Number.isFinite(n) || n <= 0) {
+    return {
+      success: false,
+      balance: getWalletBalance(),
+      message: '金额无效'
+    };
+  }
+
+  const current = getWalletBalance();
+  if (current < n) {
+    return {
+      success: false,
+      balance: current,
+      message: '金额不足'
+    };
+  }
+
+  return {
+    success: true,
+    balance: setWalletBalance(current - n)
+  };
 }
 
 async function toggleAvatarUnified(checked) {
@@ -1804,8 +1859,13 @@ function buildLatestUserPayload(chatId) {
     if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
     if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
-    if (m.type === 'transfer') return `[转账] 金额${m.amount}，备注${m.note || '无'}`;
-    if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
+    if (m.type === 'transfer') {
+      return `[转账] id=${m.id} 金额=${m.amount} 备注=${m.note || '无'} 状态=${m.status || '待处理'} 方向=${m.transferDirection || 'out'}`;
+    }
+    if (m.type === 'transfer') {
+      const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
+      return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
+    }
     return '[消息]';
   }).join('\n');
 }
@@ -2440,18 +2500,30 @@ function renderMessageOriginal(m) {
           </div>
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
-    case 'transfer':
+    case 'transfer': {
+      const isIncoming = m.transferDirection === 'in';
+      const isPendingIncoming = isIncoming && m.transferState === 'pending';
+
       return `
         <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
           <div class="transfer-card-top">
             <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
             <div class="transfer-text">
-              <div class="transfer-amount">¥${escapeHTML(m.amount)}</div>
+              <div class="transfer-amount">¥${escapeHTML(Number(m.amount || 0).toFixed(2))}</div>
               <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
             </div>
           </div>
-          <div class="transfer-card-bottom">${escapeHTML(m.status || '待收款')}</div>
+          <div class="transfer-card-bottom">${escapeHTML(m.status || '待处理')}</div>
+          ${
+            isPendingIncoming
+              ? `<div class="transfer-card-actions">
+                  <button onclick="playClickSound();acceptIncomingTransfer('${escapeHTML(m.chatId || currentChatId)}','${escapeHTML(m.id)}')">收下</button>
+                  <button onclick="playClickSound();rejectIncomingTransfer('${escapeHTML(m.chatId || currentChatId)}','${escapeHTML(m.id)}')">拒收</button>
+                </div>`
+              : ''
+          }
         </div>`;
+    }
     case 'system':
       return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
     default:
@@ -2535,6 +2607,40 @@ async function renderMessages() {
   console.log('[renderMessages] hydrate done');
 
   area.scrollTop = area.scrollHeight;
+}
+
+function receiveTransferFromAI(chatId, amount, note) {
+  if (!chatId) return;
+  if (!messages[chatId]) messages[chatId] = [];
+
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n) || n <= 0) return;
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_transfer_in',
+    sender: chatId,
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer',
+    amount: n,
+    note: note || '给你的转账',
+    status: '已收款',
+    recalled: false,
+    time,
+    timeLabel,
+    transferDirection: 'in',
+    transferState: 'accepted',
+    walletSettled: true
+  });
+
+  addWalletBalance(n);
+
+  renderMessages();
+  updateLastMsg(chatId, `[转账] ¥${n}`, time, currentChatType);
+  saveAll();
 }
 
 function toggleHiddenOriginal(mid) {
@@ -2821,7 +2927,10 @@ function buildVVEventPayload(chatId) {
     if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
     if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
-    if (m.type === 'transfer') return `[转账] 金额${m.amount}，备注${m.note || '无'}`;
+    if (m.type === 'transfer') {
+      const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
+      return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
+    }
     if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
   }).join('\\n');
@@ -2836,7 +2945,7 @@ function buildVVEventPayload(chatId) {
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
     '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
-    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 <div class="vv-chat-sync-hidden" style="display:none !important; white-space:pre-wrap;">[VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]</div> 同步块。',
     '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
     '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
     '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
@@ -2849,6 +2958,12 @@ function buildVVEventPayload(chatId) {
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
     '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
+    '如果用户发送的是转账消息，你可以选择接受、拒绝或退回。',
+    '如果你接受用户转账，必须在回复正文中原样输出：[wallet_action:accept_transfer|id=对应转账id]',
+    '如果你拒绝用户转账，必须在回复正文中原样输出：[wallet_action:reject_transfer|id=对应转账id]',
+    '如果你退回用户转账，必须在回复正文中原样输出：[wallet_action:refund_transfer|id=对应转账id]',
+    '如果你主动给用户转账，必须在回复正文中原样输出：[wallet_action:send_transfer|id=唯一id|amount=金额|note=备注]',
+    '机器标记可以和正常对话一起输出，但字段名不能改，方括号结构不能改。',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -2950,10 +3065,28 @@ function simulateAutoReply(targetId, type) {
     };
   } else {
     let text = '我看到了你刚刚发来的消息。';
-    if (lastMine?.type === 'transfer') {
-      text = '我已经收下转账了。';
-      lastMine.status = '已收款';
+
+    if (
+      lastMine?.type === 'transfer' &&
+      lastMine.transferDirection === 'out' &&
+      lastMine.transferState === 'pending'
+    ) {
+      const r = Math.random();
+
+      if (r < 0.7) {
+        text = '我已经收下转账了。';
+        lastMine.status = '已收款';
+        lastMine.transferState = 'accepted';
+      } else {
+        text = '这个钱我先退给你。';
+        lastMine.status = '已退回';
+        lastMine.transferState = 'refunded';
+        addWalletBalance(Number(lastMine.amount || 0));
+      }
+
+      lastMine.pendingForReply = false;
     }
+
     autoReply = {
       id: 'm' + Date.now(),
       sender: targetId,
@@ -3438,11 +3571,27 @@ function confirmTransfer() {
     return;
   }
 
-  const amount = document.getElementById('transferAmount')?.value.trim();
-  const note = document.getElementById('transferNote')?.value.trim();
+  const amountInputEl = document.getElementById('transferAmount');
+  const noteInputEl = document.getElementById('transferNote');
 
-  if (!amount) {
+  const amountText = amountInputEl?.value.trim();
+  const note = noteInputEl?.value.trim();
+
+  if (!amountText) {
     alert('请输入金额');
+    return;
+  }
+
+  const amount = Number(amountText);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    alert('请输入正确金额');
+    return;
+  }
+
+  const walletResult = subtractWalletBalance(amount);
+  if (!walletResult.success) {
+    alert(walletResult.message || '金额不足');
     return;
   }
 
@@ -3450,20 +3599,24 @@ function confirmTransfer() {
 
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
+  const transferId = 'm' + Date.now() + '_transfer';
 
   messages[currentChatId].push({
-    id: 'm' + Date.now() + '_transfer',
+    id: transferId,
     sender: 'me',
     senderName: '我',
     isMe: true,
     type: 'transfer',
-    amount,
+    amount: amount,
     note: note || '转账',
     status: '待收款',
     recalled: false,
     time,
     timeLabel,
-    pendingForReply: true
+    pendingForReply: true,
+    transferDirection: 'out',
+    transferState: 'pending', // pending / accepted / rejected / refunded
+    walletSettled: true // 发出时已经扣过款
   });
 
   updateLastMsg(currentChatId, `[转账] ¥${amount}`, time, currentChatType);
@@ -3472,13 +3625,258 @@ function confirmTransfer() {
   renderMessages();
   saveAll();
 
-  const amountInput = document.getElementById('transferAmount');
-  if (amountInput) amountInput.value = '';
-  const noteInput = document.getElementById('transferNote');
-  if (noteInput) noteInput.value = '';
+  if (amountInputEl) amountInputEl.value = '';
+  if (noteInputEl) noteInputEl.value = '';
 
   closeDialog('transferDialog');
   closeEmojiPanel?.();
+}
+
+function appendMyTextMessage(chatId, text, options = {}) {
+  if (!chatId || !text) return null;
+  if (!messages[chatId]) messages[chatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  const msg = {
+    id: 'm' + Date.now() + '_mytxt',
+    chatId: chatId,
+    sender: 'me',
+    senderName: myProfile?.nickname || '我',
+    isMe: true,
+    type: 'text',
+    chunks: [String(text)],
+    text: String(text),
+    replyTo: null,
+    recalled: false,
+    time,
+    timeLabel,
+    pendingForReply: !!options.pendingForReply
+  };
+
+  messages[chatId].push(msg);
+  updateLastMsg(chatId, text, time, currentChatType);
+  if (options.markPendingTarget) {
+    pendingReplyTargets[chatId] = true;
+  }
+
+  saveAll();
+  renderMessages?.();
+  return msg;
+}
+
+function findMessageById(chatId, msgId) {
+  const list = messages[chatId] || [];
+  return list.find(m => String(m.id) === String(msgId)) || null;
+}
+
+function appendSystemMessage(chatId, text) {
+  if (!chatId || !text) return;
+
+  if (!messages[chatId]) messages[chatId] = [];
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_sys',
+    chatId: chatId,
+    sender: 'system',
+    senderName: '系统',
+    isMe: false,
+    type: 'system',
+    chunks: [String(text)],
+    recalled: false,
+    time,
+    timeLabel
+  });
+}
+
+function markOutgoingTransferAccepted(chatId, msgId) {
+  const msg = findMessageById(chatId, msgId);
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
+  if (msg.transferState !== 'pending') return false;
+
+  msg.transferState = 'accepted';
+  msg.status = '已收款';
+  msg.pendingForReply = false;
+  saveAll();
+  renderMessages?.();
+  return true;
+}
+
+function markOutgoingTransferRejected(chatId, msgId) {
+  const msg = findMessageById(chatId, msgId);
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
+  if (msg.transferState !== 'pending') return false;
+
+  msg.transferState = 'rejected';
+  msg.status = '已拒收';
+  msg.pendingForReply = false;
+
+  addWalletBalance(Number(msg.amount || 0));
+  appendSystemMessage(chatId, `对方拒收了你的转账：¥${Number(msg.amount || 0).toFixed(2)}`);
+
+  saveAll();
+  renderMessages?.();
+  return true;
+}
+
+function markOutgoingTransferRefunded(chatId, msgId) {
+  const msg = findMessageById(chatId, msgId);
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
+  if (msg.transferState !== 'pending') return false;
+
+  msg.transferState = 'refunded';
+  msg.status = '已退回';
+  msg.pendingForReply = false;
+
+  addWalletBalance(Number(msg.amount || 0));
+  appendSystemMessage(chatId, `对方退回了你的转账：¥${Number(msg.amount || 0).toFixed(2)}`);
+
+  saveAll();
+  renderMessages?.();
+  return true;
+}
+
+function createIncomingTransfer(chatId, amount, note, transferId) {
+  if (!chatId) return null;
+  if (!messages[chatId]) messages[chatId] = [];
+
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  const existed = transferId
+    ? (messages[chatId] || []).some(m => String(m.id) === String(transferId))
+    : false;
+
+  if (existed) return findMessageById(chatId, transferId);
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  const msg = {
+    id: transferId || ('m' + Date.now() + '_transfer_in'),
+    chatId: chatId,
+    sender: chatId,
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer',
+    amount: n,
+    note: note || '给你的转账',
+    status: '待领取',
+    recalled: false,
+    time,
+    timeLabel,
+    transferDirection: 'in',
+    transferState: 'pending',
+    walletSettled: false
+  };
+
+  messages[chatId].push(msg);
+  updateLastMsg(chatId, `[转账] ¥${n}`, time, currentChatType);
+  saveAll();
+  renderMessages?.();
+  return msg;
+}
+
+function acceptIncomingTransfer(chatId, msgId) {
+  const msg = findMessageById(chatId, msgId);
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'in') return false;
+  if (msg.transferState !== 'pending') return false;
+
+  msg.transferState = 'accepted';
+  msg.status = '已收款';
+  msg.walletSettled = true;
+
+  addWalletBalance(Number(msg.amount || 0));
+
+  appendMyTextMessage(
+    chatId,
+    `收下转账 ${Number(msg.amount || 0).toFixed(2)}元 备注：${msg.note || '无'}`,
+    {
+      pendingForReply: true,
+      markPendingTarget: true
+    }
+  );
+
+  saveAll();
+  renderMessages?.();
+  return true;
+}
+
+function rejectIncomingTransfer(chatId, msgId) {
+  const msg = findMessageById(chatId, msgId);
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'in') return false;
+  if (msg.transferState !== 'pending') return false;
+
+  msg.transferState = 'rejected';
+  msg.status = '已拒收';
+  msg.walletSettled = false;
+
+  appendMyTextMessage(
+    chatId,
+    `拒收转账 ${Number(msg.amount || 0).toFixed(2)}元 备注：${msg.note || '无'}`,
+    {
+      pendingForReply: true,
+      markPendingTarget: true
+    }
+  );
+
+  saveAll();
+  renderMessages?.();
+  return true;
+}
+
+function parseWalletActions(text) {
+  const actions = [];
+  if (!text) return actions;
+
+  const regex = /\[wallet_action:([a-z_]+)(\|[^\]]+)?\]/g;
+  let match;
+
+  while ((match = regex.exec(text))) {
+    const action = match[1];
+    const rawParams = match[2] || '';
+    const params = {};
+
+    rawParams.split('|').forEach(part => {
+      if (!part) return;
+      const [key, ...rest] = part.split('=');
+      if (!key) return;
+      params[key] = rest.join('=');
+    });
+
+    actions.push({ action, params });
+  }
+
+  return actions;
+}
+
+function stripWalletActions(text) {
+  return String(text || '').replace(/\[wallet_action:[^\]]+\]/g, '').trim();
+}
+
+function applyWalletActions(chatId, actions) {
+  if (!chatId || !Array.isArray(actions) || !actions.length) return;
+
+  actions.forEach(({ action, params }) => {
+    if (action === 'accept_transfer') {
+      markOutgoingTransferAccepted(chatId, params.id);
+    } else if (action === 'reject_transfer') {
+      markOutgoingTransferRejected(chatId, params.id);
+    } else if (action === 'refund_transfer') {
+      markOutgoingTransferRefunded(chatId, params.id);
+    } else if (action === 'send_transfer') {
+      createIncomingTransfer(
+        chatId,
+        Number(params.amount || 0),
+        params.note || '给你的转账',
+        params.id || undefined
+      );
+    }
+  });
 }
 
 function startCallFromDialog() {
