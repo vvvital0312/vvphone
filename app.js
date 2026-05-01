@@ -3065,17 +3065,24 @@ function sendMessage() {
     });
   });
 
-  const lastContent = hasText ? chunks[chunks.length - 1] : getAttachmentSummary(attachments[attachments.length - 1]);
+  const lastContent = hasText
+    ? chunks[chunks.length - 1]
+    : getAttachmentSummary(attachments[attachments.length - 1]);
+
   updateLastMsg(currentChatId, lastContent, time, currentChatType);
 
   pendingReplyTargets[currentChatId] = true;
   console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-    input.value = '';
-    clearComposerDraft();
-    renderMessages();
-    saveAll();
-    closeEmojiPanel();
+  input.value = '';
+  clearComposerDraft();
+  renderMessages();
+  saveAll();
+  closeEmojiPanel();
+
+  triggerAIReply();
+
+  console.log('[SEND] sendMessage finished, now triggerAIReply');
 }
 
 function buildVVEventPayload(chatId) {
