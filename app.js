@@ -931,22 +931,21 @@ function handleVVChatSyncRaw(raw) {
 
   if (!raw) return;
 
-  // 先解析整段原文里的钱包动作（哪怕它在 VV_CHAT_SYNC 外面）
-  const rawActions = parseWalletActions(raw);
-  console.log('[VV] raw wallet actions:', rawActions);
-
   const parsed = parseVVChatBlocks(raw);
   console.log('[VV] parseVVChatBlocks result:', parsed);
 
-  if (!parsed) return;
-
-  // 先执行动作：改右侧原卡片状态、补左侧结果卡片
-  if (parsed.chatId && rawActions.length) {
-    applyWalletActions(parsed.chatId, rawActions);
+  // 先把普通聊天内容追加进去
+  if (parsed) {
+    appendVVChatReplyToLocal(parsed);
   }
 
-  // 再追加普通左侧文本消息
-  appendVVChatReplyToLocal(parsed);
+  // 再从整段原文中解析钱包动作
+  const rawActions = parseWalletActions(raw);
+  console.log('[VV] raw wallet actions:', rawActions);
+
+  if (parsed?.chatId && rawActions.length) {
+    applyWalletActions(parsed.chatId, rawActions);
+  }
 
   console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 }
@@ -2633,18 +2632,35 @@ function appendTransferResultMessage(chatId, sourceMsg, resultType) {
   if (!chatId || !sourceMsg) return null;
   if (!messages[chatId]) messages[chatId] = [];
 
+  const existed = messages[chatId].some(m =>
+    m &&
+    m.type === 'transfer' &&
+    m.transferDirection === 'out_result' &&
+    m.relatedTransferId === sourceMsg.id &&
+    (
+      (resultType === 'accepted' && m.transferState === 'accepted') ||
+      (resultType === 'rejected' && m.transferState === 'rejected') ||
+      (resultType === 'refunded' && m.transferState === 'refunded')
+    )
+  );
+
+  if (existed) return null;
+
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
 
   let status = '已收款';
   let transferState = 'accepted';
+  let note = '已收款';
 
   if (resultType === 'rejected') {
     status = '已拒收';
     transferState = 'rejected';
+    note = '已拒收';
   } else if (resultType === 'refunded') {
     status = '已退回';
     transferState = 'refunded';
+    note = '已退回';
   }
 
   const msg = {
@@ -2655,7 +2671,7 @@ function appendTransferResultMessage(chatId, sourceMsg, resultType) {
     isMe: false,
     type: 'transfer',
     amount: Number(sourceMsg.amount || 0),
-    note: sourceMsg.note || '转账',
+    note: note,
     status: status,
     recalled: false,
     time,
