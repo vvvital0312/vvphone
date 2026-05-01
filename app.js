@@ -2629,7 +2629,13 @@ function renderMessageOriginal(m) {
 }
 
 function appendTransferResultMessage(chatId, sourceMsg, resultType) {
-  if (!chatId || !sourceMsg) return null;
+  console.log('[Wallet] appendTransferResultMessage chatId=', chatId, 'sourceMsg=', sourceMsg, 'resultType=', resultType);
+
+  if (!chatId || !sourceMsg) {
+    console.log('[Wallet] appendTransferResultMessage blocked: missing chatId or sourceMsg');
+    return null;
+  }
+
   if (!messages[chatId]) messages[chatId] = [];
 
   const existed = messages[chatId].some(m =>
@@ -2643,6 +2649,8 @@ function appendTransferResultMessage(chatId, sourceMsg, resultType) {
       (resultType === 'refunded' && m.transferState === 'refunded')
     )
   );
+
+  console.log('[Wallet] appendTransferResultMessage existed=', existed);
 
   if (existed) return null;
 
@@ -2683,6 +2691,10 @@ function appendTransferResultMessage(chatId, sourceMsg, resultType) {
   };
 
   messages[chatId].push(msg);
+
+  console.log('[Wallet] appendTransferResultMessage pushed msg=', msg);
+  console.log('[Wallet] thread after push=', messages[chatId]);
+
   return msg;
 }
 
@@ -3906,15 +3918,31 @@ function appendSystemMessage(chatId, text) {
 }
 
 function markOutgoingTransferAccepted(chatId, msgId) {
+  console.log('[Wallet] markOutgoingTransferAccepted chatId=', chatId, 'msgId=', msgId);
+
   const msg = findMessageById(chatId, msgId);
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
-  if (msg.transferState !== 'pending') return false;
+  console.log('[Wallet] found source transfer msg=', msg);
+
+  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') {
+    console.log('[Wallet] accept blocked: source msg invalid');
+    return false;
+  }
+
+  if (msg.transferState !== 'pending') {
+    console.log('[Wallet] accept blocked: transferState is not pending, current=', msg.transferState);
+    return false;
+  }
 
   msg.transferState = 'accepted';
   msg.status = '已收款';
   msg.pendingForReply = false;
 
-  appendTransferResultMessage(chatId, msg, 'accepted');
+  console.log('[Wallet] source transfer after accept=', msg);
+
+  const resultMsg = appendTransferResultMessage(chatId, msg, 'accepted');
+  console.log('[Wallet] appended transfer result msg=', resultMsg);
+
+  console.log('[Wallet] thread after append result=', messages[chatId]);
 
   saveAll();
   renderMessages?.();
@@ -4077,22 +4105,30 @@ function stripWalletActions(text) {
 }
 
 function applyWalletActions(chatId, actions) {
+  console.log('[Wallet] applyWalletActions chatId=', chatId, 'actions=', actions);
+
   if (!chatId || !Array.isArray(actions) || !actions.length) return;
 
   actions.forEach(({ action, params }) => {
+    console.log('[Wallet] processing action=', action, 'params=', params);
+
     if (action === 'accept_transfer') {
-      markOutgoingTransferAccepted(chatId, params.id);
+      const ok = markOutgoingTransferAccepted(chatId, params.id);
+      console.log('[Wallet] accept_transfer result=', ok);
     } else if (action === 'reject_transfer') {
-      markOutgoingTransferRejected(chatId, params.id);
+      const ok = markOutgoingTransferRejected(chatId, params.id);
+      console.log('[Wallet] reject_transfer result=', ok);
     } else if (action === 'refund_transfer') {
-      markOutgoingTransferRefunded(chatId, params.id);
+      const ok = markOutgoingTransferRefunded(chatId, params.id);
+      console.log('[Wallet] refund_transfer result=', ok);
     } else if (action === 'send_transfer') {
-      createIncomingTransfer(
+      const msg = createIncomingTransfer(
         chatId,
         Number(params.amount || 0),
         params.note || '给你的转账',
         params.id || undefined
       );
+      console.log('[Wallet] send_transfer created msg=', msg);
     }
   });
 }
