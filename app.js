@@ -1,5 +1,3 @@
-console.log('===== VV SCRIPT VERSION 20260428-TRANSFER-FIX-01 =====');
-
 let currentUploadImage = '';
 let currentActiveContactId = '';
 let currentChatId = '';
@@ -79,50 +77,22 @@ const VV_BRIDGE_CONFIG = {
     const bridgeName = params.bridgeName;
     const chatId = params.chatId;
     const chatType = params.chatType;
-    const promptText = String(params.promptText || '');
+    const promptText = params.promptText;
     const scope = chatType === 'group' ? '[群聊回复]' : '[私聊回复]';
-
-    const cmd = [
-      '/send ' + bridgeName,
-      scope,
-      '聊天ID=' + chatId,
-      '请忽略普通对话中用于召唤手机界面的入口词，例如“vv手机”。',
-      '当前真正需要处理的手机聊天内容，只能以本条消息中的 [VV_EVENT] 为准。',
-      '你必须严格根据 [VV_EVENT] 中的 message_count、message_1、message_2 等字段展开用户消息。',
-      '不要把旧对话中的“vv手机”当成 side=right 用户消息。',
-      promptText,
-      '/trigger'
-    ].join('\n');
-
-    console.log('[VV] buildReplyCommand cmd >>>');
-    console.log(cmd);
-    console.log('<<< [VV] buildReplyCommand cmd');
-
-    return cmd;
+    return '/send ' + bridgeName + '\n' + scope + '\n聊天ID:' + chatId + '\n' + promptText + '|/trigger';
   },
 
   buildCallCommand: function (params) {
     const bridgeName = params.bridgeName;
-    const promptText = String(params.promptText || '');
-    return [
-      '/send ' + bridgeName,
-      '[电话模式]',
-      promptText,
-      '/trigger'
-    ].join('\n');
+    const promptText = params.promptText;
+    return '/send ' + bridgeName + '\n[电话模式]\n' + promptText + '|/trigger';
   },
 
   buildFeedCommentCommand: function (params) {
     const bridgeName = params.bridgeName;
     const postId = params.postId;
-    const promptText = String(params.promptText || '');
-    return [
-      '/send ' + bridgeName,
-      '[朋友圈互动]',
-      '动态ID=' + postId,
-      promptText,
-      '/trigger'
-    ].join('\n');
+    const promptText = params.promptText;
+    return '/send ' + bridgeName + '\n[朋友圈互动]\n动态ID:' + postId + '\n' + promptText + '|/trigger';
   }
 };
 
@@ -740,10 +710,7 @@ function savePhoneIconsSafely(savedIcons) {
 }
 
 function parseVVChatBlocks(raw) {
-  const text = String(raw || '')
-    .replace(/<div[^>]*class=["']vv-chat-sync-hidden["'][^>]*>/gi, '')
-    .replace(/<\/div>/gi, '')
-    .trim();
+  const text = String(raw || '');
   console.log('[VV] parseVVChatBlocks input full >>>');
   console.log(text);
   console.log('<<< [VV] parseVVChatBlocks input full');
@@ -845,18 +812,8 @@ function appendVVChatReplyToLocal(chatData) {
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
 
-  const allWalletActions = [];
-
   leftMsgs.forEach(msg => {
-    const rawContent = String(msg.content || '').trim();
-    if (!rawContent) return;
-
-    const actions = parseWalletActions(rawContent);
-    if (actions.length) {
-      allWalletActions.push(...actions);
-    }
-
-    const normalizedContent = stripWalletActions(rawContent);
+    const normalizedContent = String(msg.content || '').trim();
     if (!normalizedContent) return;
 
     const duplicated = thread.some(item =>
@@ -876,7 +833,6 @@ function appendVVChatReplyToLocal(chatData) {
 
     thread.push({
       id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-      chatId: chatId,
       sender: 'them',
       senderName: msg.sender || chatData.target || '对方',
       isMe: false,
@@ -890,10 +846,6 @@ function appendVVChatReplyToLocal(chatData) {
       state: msg.state || 'reply'
     });
   });
-
-  if (allWalletActions.length) {
-    applyWalletActions(chatId, allWalletActions);
-  }
 
   const rel = getRelSetting(chatId);
   if (chatData.target && rel && !rel.name) {
@@ -910,8 +862,7 @@ function appendVVChatReplyToLocal(chatData) {
 
   if (leftMsgs.length) {
     const last = leftMsgs[leftMsgs.length - 1];
-    const lastContent = stripWalletActions(last.content || '') || '[转账消息]';
-    updateLastMsg(chatId, lastContent, time, currentChatType);
+    updateLastMsg(chatId, last.content, time, currentChatType);
   }
 
   console.log('[VV] thread after append:', thread);
@@ -926,36 +877,24 @@ function appendVVChatReplyToLocal(chatData) {
 
 function handleVVChatSyncRaw(raw) {
   console.log('[VV] handleVVChatSyncRaw raw full >>>');
-  console.log(raw);
+  console.log(String(raw || ''));
   console.log('<<< [VV] handleVVChatSyncRaw raw full');
-
-  if (!raw) return;
 
   const parsed = parseVVChatBlocks(raw);
   console.log('[VV] parseVVChatBlocks result:', parsed);
 
-  // 先把普通聊天内容追加进去
-  if (parsed) {
-    appendVVChatReplyToLocal(parsed);
+  if (!parsed) {
+    console.warn('[VV] parseVVChatBlocks returned null');
+    return;
   }
 
-  // 再从整段原文中解析钱包动作
-  const rawActions = parseWalletActions(raw);
-  console.log('[VV] raw wallet actions:', rawActions);
-
-  if (parsed?.chatId && rawActions.length) {
-    applyWalletActions(parsed.chatId, rawActions);
-  }
-
+  appendVVChatReplyToLocal(parsed);
   console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
+
+  renderMessages();
 }
 
 async function triggerSlash(cmd) {
-  console.log('>>> triggerSlash RUNNING 20260428-TRANSFER-FIX-01');
-  console.log('[VV] triggerSlash input cmd >>>');
-  console.log(cmd);
-  console.log('<<< [VV] triggerSlash input cmd');
-
   if (!cmd) return false;
 
   if (VV_BRIDGE_CONFIG.debug) {
@@ -967,20 +906,16 @@ async function triggerSlash(cmd) {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       const viewId = window.__vv_view_id || '';
 
-      console.log('[VV] triggerSlash requestId=', requestId, 'viewId=', viewId);
-
       function onMessage(event) {
         const data = event.data;
-        console.log('[VV] triggerSlash got message:', data);
-
         if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
           return;
         }
-
+        
         if (data.viewId && viewId && data.viewId !== viewId) {
           console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
           return;
-        }
+        }        
 
         window.removeEventListener('message', onMessage);
 
@@ -996,17 +931,14 @@ async function triggerSlash(cmd) {
 
       window.addEventListener('message', onMessage);
 
-      console.log('[VV] postMessage -> parent VVPHONE_SLASH');
       window.parent.postMessage({
-        type: 'VVPHONE_SLASH',
+        type: 'VV_EXECUTE_SLASH',
         requestId,
-        viewId,
         command: cmd
       }, '*');
 
       setTimeout(() => {
         window.removeEventListener('message', onMessage);
-        console.warn('[VV] triggerSlash timeout, requestId=', requestId);
         resolve({
           ok: false,
           error: 'timeout'
@@ -1014,14 +946,11 @@ async function triggerSlash(cmd) {
       }, 15000);
     });
 
-    console.log('[VV] triggerSlash final result=', result);
-
     if (!result.ok) {
       console.warn('[VV] slash 执行失败:', result.error);
       return false;
     }
 
-    console.log('[VV] slash 执行成功');
     return true;
   } catch (err) {
     console.error('[VV] slash 执行异常:', err);
@@ -1195,51 +1124,12 @@ function setMyProfileNickname(name) {
   saveAll();
 }
 
-function getWalletBalance() {
+function addWalletBalance(amount) {
   ensureProfileData();
-  const n = Number(walletData.balance || 0);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function setWalletBalance(amount) {
-  ensureProfileData();
-  const n = Number(amount || 0);
-  walletData.balance = Number.isFinite(n) ? Math.max(0, n) : 0;
+  walletData.balance = Number(walletData.balance || 0) + Number(amount || 0);
+  if (walletData.balance < 0) walletData.balance = 0;
   updateProfileUI();
   saveAll();
-  return walletData.balance;
-}
-
-function addWalletBalance(amount) {
-  const n = Number(amount || 0);
-  if (!Number.isFinite(n) || n <= 0) return getWalletBalance();
-  return setWalletBalance(getWalletBalance() + n);
-}
-
-function subtractWalletBalance(amount) {
-  const n = Number(amount || 0);
-
-  if (!Number.isFinite(n) || n <= 0) {
-    return {
-      success: false,
-      balance: getWalletBalance(),
-      message: '金额无效'
-    };
-  }
-
-  const current = getWalletBalance();
-  if (current < n) {
-    return {
-      success: false,
-      balance: current,
-      message: '金额不足'
-    };
-  }
-
-  return {
-    success: true,
-    balance: setWalletBalance(current - n)
-  };
 }
 
 async function toggleAvatarUnified(checked) {
@@ -1905,21 +1795,16 @@ function getBridgeNameByChatId(chatId, type = 'direct') {
 
 function buildLatestUserPayload(chatId) {
   const list = messages[chatId] || [];
-  const myRecent = [...list]
-    .filter(m => m.isMe && !m.recalled && (m.pendingForReply || m.type === 'text' || m.type === 'transfer'))
-    .slice(-8);
+  const myRecent = [...list].reverse().filter(m => m.isMe && !m.recalled).slice(0, 8).reverse();
 
-  if (!myRecent.length) return '';
+  if (!myRecent.length) return '请继续回复刚才的话题。';
 
   return myRecent.map(m => {
     if (m.type === 'text') return (m.chunks || []).join('\n');
     if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
     if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
-    if (m.type === 'transfer') {
-      const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
-      return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
-    }
+    if (m.type === 'transfer') return `[转账] 金额${m.amount}，备注${m.note || '无'}`;
     if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
   }).join('\n');
@@ -2555,157 +2440,23 @@ function renderMessageOriginal(m) {
           </div>
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
-    case 'transfer': {
-      const dir = m.transferDirection || '';
-      const isIncoming = dir === 'in';
-      const isPendingIncoming = isIncoming && m.transferState === 'pending';
-
-      const isAccepted = m.transferState === 'accepted' || m.status === '已收款';
-      const isRejected = m.transferState === 'rejected' || m.status === '已拒收';
-      const isRefunded = m.transferState === 'refunded' || m.status === '已退回';
-
-      let stateClass = 'pending';
-      let stateText = m.status || '待处理';
-      let iconText = '¥';
-      let titleText = m.note || '转账';
-
-      // AI 接收/拒收/退回 结果卡片（左侧）
-      if (dir === 'out_result') {
-        if (isAccepted) {
-          stateClass = 'received';
-          stateText = '已收款';
-          iconText = '✓';
-          titleText = m.note || '已收款';
-        } else if (isRejected) {
-          stateClass = 'rejected';
-          stateText = '已拒收';
-          iconText = '✕';
-          titleText = m.note || '已拒收';
-        } else if (isRefunded) {
-          stateClass = 'refunded';
-          stateText = '已退回';
-          iconText = '↩';
-          titleText = m.note || '已退回';
-        }
-      } else {
-        if (isAccepted) {
-          stateClass = 'received';
-          stateText = '已收款';
-          iconText = '✓';
-        } else if (isRejected) {
-          stateClass = 'rejected';
-          stateText = '已拒收';
-          iconText = '✕';
-        } else if (isRefunded) {
-          stateClass = 'refunded';
-          stateText = '已退回';
-          iconText = '↩';
-        } else if (isPendingIncoming) {
-          stateClass = 'pending';
-          stateText = '待领取';
-          iconText = '¥';
-        } else {
-          stateClass = 'pending';
-          stateText = m.status || '待收款';
-          iconText = '¥';
-        }
-      }
-
+    case 'transfer':
       return `
-        <div class="transfer-card ${stateClass}">
+        <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
           <div class="transfer-card-top">
-            <div class="transfer-icon">${iconText}</div>
+            <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
             <div class="transfer-text">
-              <div class="transfer-amount">¥${escapeHTML(Number(m.amount || 0).toFixed(2))}</div>
-              <div class="transfer-note">${escapeHTML(titleText)}</div>
+              <div class="transfer-amount">¥${escapeHTML(m.amount)}</div>
+              <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
             </div>
           </div>
-          <div class="transfer-card-bottom">${escapeHTML(stateText)}</div>
-          ${
-            isPendingIncoming
-              ? `<div class="transfer-card-actions">
-                  <button onclick="playClickSound();acceptIncomingTransfer('${m.chatId || currentChatId}','${m.id}')">收下</button>
-                  <button onclick="playClickSound();rejectIncomingTransfer('${m.chatId || currentChatId}','${m.id}')">拒收</button>
-                </div>`
-              : ''
-          }
+          <div class="transfer-card-bottom">${escapeHTML(m.status || '待收款')}</div>
         </div>`;
-    }
     case 'system':
       return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
     default:
       return `<div class="message-bubble">未知消息</div>`;
   }
-}
-
-function appendTransferResultMessage(chatId, sourceMsg, resultType) {
-  console.log('[Wallet] appendTransferResultMessage chatId=', chatId, 'sourceMsg=', sourceMsg, 'resultType=', resultType);
-
-  if (!chatId || !sourceMsg) {
-    console.log('[Wallet] appendTransferResultMessage blocked: missing chatId or sourceMsg');
-    return null;
-  }
-
-  if (!messages[chatId]) messages[chatId] = [];
-
-  const existed = messages[chatId].some(m =>
-    m &&
-    m.type === 'transfer' &&
-    m.transferDirection === 'out_result' &&
-    m.relatedTransferId === sourceMsg.id &&
-    (
-      (resultType === 'accepted' && m.transferState === 'accepted') ||
-      (resultType === 'rejected' && m.transferState === 'rejected') ||
-      (resultType === 'refunded' && m.transferState === 'refunded')
-    )
-  );
-
-  console.log('[Wallet] appendTransferResultMessage existed=', existed);
-
-  if (existed) return null;
-
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  let status = '已收款';
-  let transferState = 'accepted';
-  let note = '已收款';
-
-  if (resultType === 'rejected') {
-    status = '已拒收';
-    transferState = 'rejected';
-    note = '已拒收';
-  } else if (resultType === 'refunded') {
-    status = '已退回';
-    transferState = 'refunded';
-    note = '已退回';
-  }
-
-  const msg = {
-    id: 'm' + Date.now() + '_transfer_result_' + Math.random().toString(36).slice(2),
-    chatId: chatId,
-    sender: 'them',
-    senderName: getCurrentChatName(chatId, currentChatType),
-    isMe: false,
-    type: 'transfer',
-    amount: Number(sourceMsg.amount || 0),
-    note: note,
-    status: status,
-    recalled: false,
-    time,
-    timeLabel,
-    transferDirection: 'out_result',
-    transferState: transferState,
-    walletSettled: true,
-    relatedTransferId: sourceMsg.id
-  };
-
-  messages[chatId].push(msg);
-
-  console.log('[Wallet] appendTransferResultMessage pushed msg=', msg);
-  console.log('[Wallet] thread after push=', messages[chatId]);
-
-  return msg;
 }
 
 async function renderMessages() {
@@ -2784,40 +2535,6 @@ async function renderMessages() {
   console.log('[renderMessages] hydrate done');
 
   area.scrollTop = area.scrollHeight;
-}
-
-function receiveTransferFromAI(chatId, amount, note) {
-  if (!chatId) return;
-  if (!messages[chatId]) messages[chatId] = [];
-
-  const n = Number(amount || 0);
-  if (!Number.isFinite(n) || n <= 0) return;
-
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  messages[chatId].push({
-    id: 'm' + Date.now() + '_transfer_in',
-    sender: chatId,
-    senderName: getCurrentChatName(chatId, currentChatType),
-    isMe: false,
-    type: 'transfer',
-    amount: n,
-    note: note || '给你的转账',
-    status: '已收款',
-    recalled: false,
-    time,
-    timeLabel,
-    transferDirection: 'in',
-    transferState: 'accepted',
-    walletSettled: true
-  });
-
-  addWalletBalance(n);
-
-  renderMessages();
-  updateLastMsg(chatId, `[转账] ¥${n}`, time, currentChatType);
-  saveAll();
 }
 
 function toggleHiddenOriginal(mid) {
@@ -3075,10 +2792,7 @@ function sendMessage() {
     });
   });
 
-  const lastContent = hasText
-    ? chunks[chunks.length - 1]
-    : getAttachmentSummary(attachments[attachments.length - 1]);
-
+  const lastContent = hasText ? chunks[chunks.length - 1] : getAttachmentSummary(attachments[attachments.length - 1]);
   updateLastMsg(currentChatId, lastContent, time, currentChatType);
 
   pendingReplyTargets[currentChatId] = true;
@@ -3092,13 +2806,8 @@ function sendMessage() {
 }
 
 function buildVVEventPayload(chatId) {
-  console.log('>>> buildVVEventPayload RUNNING 20260428-TRANSFER-FIX-04');
-
   const list = messages[chatId] || [];
   const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
-
-  console.log('[VV] buildVVEventPayload chatId =', chatId);
-  console.log('[VV] buildVVEventPayload myPending =', myPending);
 
   if (!myPending.length) return '';
 
@@ -3107,93 +2816,58 @@ function buildVVEventPayload(chatId) {
   const time = typeof getNowFullLabel === 'function' ? getNowFullLabel() : getNowTime();
   const targetName = rel.name || chatSetting.name || getBridgeNameByChatId(chatId, currentChatType) || '未知联系人';
 
-  const messageLines = myPending.map(m => {
+  const messageText = myPending.map(m => {
     if (m.type === 'text') return (m.chunks || []).join('\n');
     if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
     if (m.type === 'voice') return `[语音] ${m.transcript || ''}`.trim();
-
-    if (m.type === 'transfer') {
-      const directionText = m.transferDirection === 'in' ? '对方向我转账' : '我向对方转账';
-      return `发出转账 ${Number(m.amount || 0).toFixed(2)}元 备注：${m.note || '无'} 状态：${m.status || '待处理'} id=${m.id} 方向：${directionText}`;
-    }
-
+    if (m.type === 'transfer') return `[转账] 金额${m.amount}，备注${m.note || '无'}`;
     if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
-  });
+  }).join('\\n');
 
   const myAvatarKey = 'current_my_avatar';
-  const targetAvatarId = chatSetting.theirAvatar
-    ? String(chatSetting.theirAvatar)
-    : 'contact_unknown_avatar';
+  const targetAvatarId = chatSetting.theirAvatar ? String(chatSetting.theirAvatar) : 'contact_unknown_avatar';
   const myBubble = chatSetting.myBubble || '#5B86FF';
   const targetBubble = chatSetting.theirBubble || '#F8F8F8';
-  const chatBgKey = chatSetting.background
-    ? String(chatSetting.background)
-    : 'current_chat_bg';
+  const chatBgKey = chatSetting.background ? String(chatSetting.background) : 'current_chat_bg';
 
-  const result = [
-    '[VV_PHONE_CHAT_TASK]',
-    '你正在回复一次手机私聊事件。',
-    '必须严格只根据下方 [VV_EVENT] 中的字段生成回复。',
-    '忽略普通对话中的旧文本、召唤词、入口词，例如“vv手机”。',
-    '真正的用户本轮消息，只能来自 [VV_EVENT] 中的 message_count、message_1、message_2 等字段。',
-    '',
-    '你必须输出两个纯文本块，且顺序固定：',
-    '1. [聊天界面] ... [/聊天界面]',
-    '2. [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC]',
-    '',
-    '严格规则：',
-    '1. 所有字段必须使用 key=value，禁止 key:value。',
-    '2. 不允许输出任何 HTML 标签，包括 <div>、<span>、iframe。',
-    '3. [消息] 块内必须使用 text=消息内容。',
-    '4. 每个 [消息] 块都必须完整闭合为 [消息] ... [/消息]。',
-    '5. 你必须先把用户本轮消息逐条展开为 side=right 的 [消息] 块。',
-    '6. 然后再输出角色自己的 side=left 回复块。',
-    '7. [聊天界面] 与 [VV_CHAT_SYNC] 中的本轮新增消息内容、顺序、字段值必须一致。',
-    '8. [VV_CHAT_SYNC] 只允许包含本轮新增消息，不要重复历史消息。',
-    '9. 如果继续回复线上聊天，则 [聊天界面] 中必须至少有一个 side=right 的 [消息] 块。',
-    '10. 如果继续回复线上聊天，则 [VV_CHAT_SYNC] 中也必须至少有一个 side=right 的 [消息] 块。',
-    '11. side=right 的消息内容必须严格来自 [VV_EVENT] 中的 message_1、message_2 等字段。',
-    '12. 不允许把“vv手机”写成 side=right 用户消息，除非它真的出现在 [VV_EVENT] 里。',
-    '13. 如果用户发送的是转账消息，你可以接受、拒绝或退回。',
-    '14. 如果你接受用户转账，必须额外输出：[wallet_action action=accept_transfer id=对应转账id],并在 [消息] 块内输出对应的消息',
-    '15. 如果你拒绝用户转账，必须额外输出：[wallet_action action=reject_transfer id=对应转账id]，并在 [消息] 块内输出对应的消息',
-    '16. 如果你退回用户转账，必须额外输出：[wallet_action action=refund_transfer id=对应转账id]，并在 [消息] 块内输出对应的消息',
-    '17. 如果你主动给用户转账，必须额外输出：[wallet_action action=send_transfer id=唯一id amount=金额 note=备注]，并在 [消息] 块内输出对应的消息',
+  return [
+    '以下是一次手机聊天事件。',
+    '不要复述事件字段，不要解释字段内容，不要引用字段名。',
+    '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
+    '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
+    '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
+    '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
+    '然后再输出角色自己的 side=left 的 [消息] 回复块。',
+    '如果有多条用户消息，必须逐条展开，不可合并成一条。',
+    '聊天展示必须保留以下字段：chatId、target、time、myAvatarKey、targetAvatarId、myBubble、targetBubble、chatBgKey。',
+    'time 只在 [聊天界面] 顶部显示一次，消息块内部默认不要重复输出 time。',
+    '用户消息必须使用 side=right，角色消息必须使用 side=left。',
+    '每条消息都要单独成块。',
+    '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
+    '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
+    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
     '',
     '[VV_EVENT]',
     'type=chat',
     'chatId=' + chatId,
     'target=' + targetName,
     'time=' + time,
+    'message=' + String(messageText || '').replace(/\n/g, '\\n'),
     'myAvatarKey=' + myAvatarKey,
     'targetAvatarId=' + targetAvatarId,
     'myBubble=' + myBubble,
     'targetBubble=' + targetBubble,
     'chatBgKey=' + chatBgKey,
-    'message_count=' + messageLines.length
-  ]
-    .concat(
-      messageLines.map((line, index) =>
-        'message_' + (index + 1) + '=' + String(line).replace(/\n/g, '\\n')
-      )
-    )
-    .concat('[/VV_EVENT]')
-    .join('\n');
-
-  console.log('[VV] buildVVEventPayload result >>>');
-  console.log(result);
-  console.log('<<< [VV] buildVVEventPayload result');
-
-  return result;
+    '[/VV_EVENT]'
+  ].join('\n');
 }
 
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
-  console.log('>>> triggerAIReply RUNNING 20260428-TRANSFER-FIX-01');
-
   if (isTriggeringAIReply) return;
   isTriggeringAIReply = true;
 
@@ -3203,41 +2877,20 @@ async function triggerAIReply() {
     if (!currentChatId) return;
 
     if (!pendingReplyTargets[currentChatId]) {
-      console.log('[VV] pendingReplyTargets false, skip');
       return;
     }
 
     const thread = messages[currentChatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
-    console.log('[VV] current thread >>>', thread);
-    console.log('[VV] pendingMessages >>>', pendingMessages);
-
     if (!pendingMessages.length) {
-      console.log('[VV] no pendingMessages, clear target flag');
       pendingReplyTargets[currentChatId] = false;
       saveAll();
       return;
     }
 
     const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const vvPayload = buildVVEventPayload(currentChatId);
-    const latestPayload = buildLatestUserPayload(currentChatId);
-    const promptText = vvPayload || latestPayload;
-
-    if (!promptText || !String(promptText).trim()) {
-      console.warn('[VV] promptText is empty, abort triggerAIReply');
-      return;
-    }
-
-    console.log('[VV] buildVVEventPayload length =', vvPayload ? vvPayload.length : 0);
-    console.log('[VV] buildVVEventPayload JSON =', JSON.stringify(vvPayload));
-
-    console.log('[VV] buildLatestUserPayload length =', latestPayload ? latestPayload.length : 0);
-    console.log('[VV] buildLatestUserPayload JSON =', JSON.stringify(latestPayload));
-
-    console.log('[VV] triggerAIReply promptText length =', promptText ? promptText.length : 0);
-    console.log('[VV] triggerAIReply promptText JSON =', JSON.stringify(promptText));
+    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
 
     let slashOk = false;
 
@@ -3248,11 +2901,6 @@ async function triggerAIReply() {
         chatType: currentChatType,
         promptText
       });
-
-      console.log('[VV] buildReplyCommand cmd >>>');
-      console.log(cmd);
-      console.log('<<< [VV] buildReplyCommand cmd');
-
       slashOk = await triggerSlash(cmd);
     }
 
@@ -3302,28 +2950,10 @@ function simulateAutoReply(targetId, type) {
     };
   } else {
     let text = '我看到了你刚刚发来的消息。';
-
-    if (
-      lastMine?.type === 'transfer' &&
-      lastMine.transferDirection === 'out' &&
-      lastMine.transferState === 'pending'
-    ) {
-      const r = Math.random();
-
-      if (r < 0.7) {
-        text = '我已经收下转账了。';
-        lastMine.status = '已收款';
-        lastMine.transferState = 'accepted';
-      } else {
-        text = '这个钱我先退给你。';
-        lastMine.status = '已退回';
-        lastMine.transferState = 'refunded';
-        addWalletBalance(Number(lastMine.amount || 0));
-      }
-
-      lastMine.pendingForReply = false;
+    if (lastMine?.type === 'transfer') {
+      text = '我已经收下转账了。';
+      lastMine.status = '已收款';
     }
-
     autoReply = {
       id: 'm' + Date.now(),
       sender: targetId,
@@ -3808,27 +3438,11 @@ function confirmTransfer() {
     return;
   }
 
-  const amountInputEl = document.getElementById('transferAmount');
-  const noteInputEl = document.getElementById('transferNote');
+  const amount = document.getElementById('transferAmount')?.value.trim();
+  const note = document.getElementById('transferNote')?.value.trim();
 
-  const amountText = amountInputEl?.value.trim();
-  const note = noteInputEl?.value.trim();
-
-  if (!amountText) {
+  if (!amount) {
     alert('请输入金额');
-    return;
-  }
-
-  const amount = Number(amountText);
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    alert('请输入正确金额');
-    return;
-  }
-
-  const walletResult = subtractWalletBalance(amount);
-  if (!walletResult.success) {
-    alert(walletResult.message || '金额不足');
     return;
   }
 
@@ -3836,24 +3450,20 @@ function confirmTransfer() {
 
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
-  const transferId = 'm' + Date.now() + '_transfer';
 
   messages[currentChatId].push({
-    id: transferId,
+    id: 'm' + Date.now() + '_transfer',
     sender: 'me',
     senderName: '我',
     isMe: true,
     type: 'transfer',
-    amount: amount,
+    amount,
     note: note || '转账',
     status: '待收款',
     recalled: false,
     time,
     timeLabel,
-    pendingForReply: true,
-    transferDirection: 'out',
-    transferState: 'pending', // pending / accepted / rejected / refunded
-    walletSettled: true // 发出时已经扣过款
+    pendingForReply: true
   });
 
   updateLastMsg(currentChatId, `[转账] ¥${amount}`, time, currentChatType);
@@ -3862,288 +3472,13 @@ function confirmTransfer() {
   renderMessages();
   saveAll();
 
-  if (amountInputEl) amountInputEl.value = '';
-  if (noteInputEl) noteInputEl.value = '';
+  const amountInput = document.getElementById('transferAmount');
+  if (amountInput) amountInput.value = '';
+  const noteInput = document.getElementById('transferNote');
+  if (noteInput) noteInput.value = '';
 
   closeDialog('transferDialog');
   closeEmojiPanel?.();
-}
-
-function appendMyTextMessage(chatId, text, options = {}) {
-  if (!chatId || !text) return null;
-  if (!messages[chatId]) messages[chatId] = [];
-
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  const msg = {
-    id: 'm' + Date.now() + '_mytxt',
-    chatId: chatId,
-    sender: 'me',
-    senderName: myProfile?.nickname || '我',
-    isMe: true,
-    type: 'text',
-    chunks: [String(text)],
-    text: String(text),
-    replyTo: null,
-    recalled: false,
-    time,
-    timeLabel,
-    pendingForReply: !!options.pendingForReply
-  };
-
-  messages[chatId].push(msg);
-  updateLastMsg(chatId, text, time, currentChatType);
-  if (options.markPendingTarget) {
-    pendingReplyTargets[chatId] = true;
-  }
-
-  saveAll();
-  renderMessages?.();
-  return msg;
-}
-
-function findMessageById(chatId, msgId) {
-  const list = messages[chatId] || [];
-  return list.find(m => String(m.id) === String(msgId)) || null;
-}
-
-function appendSystemMessage(chatId, text) {
-  if (!chatId || !text) return;
-
-  if (!messages[chatId]) messages[chatId] = [];
-
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  messages[chatId].push({
-    id: 'm' + Date.now() + '_sys',
-    chatId: chatId,
-    sender: 'system',
-    senderName: '系统',
-    isMe: false,
-    type: 'system',
-    chunks: [String(text)],
-    recalled: false,
-    time,
-    timeLabel
-  });
-}
-
-function markOutgoingTransferAccepted(chatId, msgId) {
-  console.log('[Wallet] markOutgoingTransferAccepted chatId=', chatId, 'msgId=', msgId);
-
-  const msg = findMessageById(chatId, msgId);
-  console.log('[Wallet] found source transfer msg=', msg);
-
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') {
-    console.log('[Wallet] accept blocked: source msg invalid');
-    return false;
-  }
-
-  if (msg.transferState !== 'pending') {
-    console.log('[Wallet] accept blocked: transferState is not pending, current=', msg.transferState);
-    return false;
-  }
-
-  msg.transferState = 'accepted';
-  msg.status = '已收款';
-  msg.pendingForReply = false;
-
-  console.log('[Wallet] source transfer after accept=', msg);
-
-  const resultMsg = appendTransferResultMessage(chatId, msg, 'accepted');
-  console.log('[Wallet] appended transfer result msg=', resultMsg);
-
-  console.log('[Wallet] thread after append result=', messages[chatId]);
-
-  saveAll();
-  renderMessages?.();
-  return true;
-}
-
-function markOutgoingTransferRejected(chatId, msgId) {
-  const msg = findMessageById(chatId, msgId);
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
-  if (msg.transferState !== 'pending') return false;
-
-  msg.transferState = 'rejected';
-  msg.status = '已退回';
-  msg.pendingForReply = false;
-
-  addWalletBalance(Number(msg.amount || 0));
-  appendTransferResultMessage(chatId, msg, 'rejected');
-
-  saveAll();
-  renderMessages?.();
-  return true;
-}
-
-function markOutgoingTransferRefunded(chatId, msgId) {
-  const msg = findMessageById(chatId, msgId);
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'out') return false;
-  if (msg.transferState !== 'pending') return false;
-
-  msg.transferState = 'refunded';
-  msg.status = '已退回';
-  msg.pendingForReply = false;
-
-  addWalletBalance(Number(msg.amount || 0));
-  appendTransferResultMessage(chatId, msg, 'refunded');
-
-  saveAll();
-  renderMessages?.();
-  return true;
-}
-
-function createIncomingTransfer(chatId, amount, note, transferId) {
-  if (!chatId) return null;
-  if (!messages[chatId]) messages[chatId] = [];
-
-  const n = Number(amount || 0);
-  if (!Number.isFinite(n) || n <= 0) return null;
-
-  const existed = transferId
-    ? (messages[chatId] || []).some(m => String(m.id) === String(transferId))
-    : false;
-
-  if (existed) return findMessageById(chatId, transferId);
-
-  const time = getNowTime();
-  const timeLabel = getNowFullLabel();
-
-  const msg = {
-    id: transferId || ('m' + Date.now() + '_transfer_in'),
-    chatId: chatId,
-    sender: chatId,
-    senderName: getCurrentChatName(chatId, currentChatType),
-    isMe: false,
-    type: 'transfer',
-    amount: n,
-    note: note || '给你的转账',
-    status: '待领取',
-    recalled: false,
-    time,
-    timeLabel,
-    transferDirection: 'in',
-    transferState: 'pending',
-    walletSettled: false
-  };
-
-  messages[chatId].push(msg);
-  updateLastMsg(chatId, `[转账] ¥${n}`, time, currentChatType);
-  saveAll();
-  renderMessages?.();
-  return msg;
-}
-
-function acceptIncomingTransfer(chatId, msgId) {
-  const msg = findMessageById(chatId, msgId);
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'in') return false;
-  if (msg.transferState !== 'pending') return false;
-
-  msg.transferState = 'accepted';
-  msg.status = '已收款';
-  msg.walletSettled = true;
-
-  addWalletBalance(Number(msg.amount || 0));
-
-  appendMyTextMessage(
-    chatId,
-    `收下转账 ${Number(msg.amount || 0).toFixed(2)}元 备注：${msg.note || '无'}`,
-    {
-      pendingForReply: true,
-      markPendingTarget: true
-    }
-  );
-
-  saveAll();
-  renderMessages?.();
-  return true;
-}
-
-function rejectIncomingTransfer(chatId, msgId) {
-  const msg = findMessageById(chatId, msgId);
-  if (!msg || msg.type !== 'transfer' || msg.transferDirection !== 'in') return false;
-  if (msg.transferState !== 'pending') return false;
-
-  msg.transferState = 'rejected';
-  msg.status = '已拒收';
-  msg.walletSettled = false;
-
-  appendMyTextMessage(
-    chatId,
-    `拒收转账 ${Number(msg.amount || 0).toFixed(2)}元 备注：${msg.note || '无'}`,
-    {
-      pendingForReply: true,
-      markPendingTarget: true
-    }
-  );
-
-  saveAll();
-  renderMessages?.();
-  return true;
-}
-
-function parseWalletActions(text) {
-  const actions = [];
-  if (!text) return actions;
-
-  const regex = /\[wallet_action\s+([^\]]+)\]/g;
-  let match;
-
-  while ((match = regex.exec(text))) {
-    const raw = match[1] || '';
-    const params = {};
-
-    raw.split(/\s+/).forEach(part => {
-      const [key, ...rest] = part.split('=');
-      if (!key || !rest.length) return;
-      params[key.trim()] = rest.join('=').trim();
-    });
-
-    if (params.action) {
-      actions.push({
-        action: params.action,
-        params
-      });
-    }
-  }
-
-  return actions;
-}
-
-function stripWalletActions(text) {
-  return String(text || '').replace(/\[wallet_action\s+[^\]]+\]/g, '').trim();
-}
-
-function applyWalletActions(chatId, actions) {
-  console.log('[Wallet] applyWalletActions chatId=', chatId, 'actions=', actions);
-
-  if (!chatId || !Array.isArray(actions) || !actions.length) return;
-
-  actions.forEach(({ action, params }) => {
-    console.log('[Wallet] processing action=', action, 'params=', params);
-
-    if (action === 'accept_transfer') {
-      const ok = markOutgoingTransferAccepted(chatId, params.id);
-      console.log('[Wallet] accept_transfer result=', ok);
-    } else if (action === 'reject_transfer') {
-      const ok = markOutgoingTransferRejected(chatId, params.id);
-      console.log('[Wallet] reject_transfer result=', ok);
-    } else if (action === 'refund_transfer') {
-      const ok = markOutgoingTransferRefunded(chatId, params.id);
-      console.log('[Wallet] refund_transfer result=', ok);
-    } else if (action === 'send_transfer') {
-      const msg = createIncomingTransfer(
-        chatId,
-        Number(params.amount || 0),
-        params.note || '给你的转账',
-        params.id || undefined
-      );
-      console.log('[Wallet] send_transfer created msg=', msg);
-    }
-  });
 }
 
 function startCallFromDialog() {
