@@ -22,7 +22,34 @@
         if (!data || typeof data !== 'object') return;
 
         if (data.type === 'VVPHONE_SLASH') {
-          await this.handleSlashRequest(data);
+          this.log('收到 VVPHONE_SLASH', 'ok', data);
+
+          try {
+            await this.handleSlashRequest(data);
+
+            event.source?.postMessage({
+              type: 'VV_EXECUTE_RESULT',
+              requestId: data.requestId || '',
+              viewId: data.viewId || '',
+              ok: true,
+              error: null
+            }, '*');
+
+            this.log('已回传 VV_EXECUTE_RESULT', 'ok', {
+              requestId: data.requestId || '',
+              viewId: data.viewId || ''
+            });
+          } catch (err) {
+            event.source?.postMessage({
+              type: 'VV_EXECUTE_RESULT',
+              requestId: data.requestId || '',
+              viewId: data.viewId || '',
+              ok: false,
+              error: String(err?.message || err || 'unknown_error')
+            }, '*');
+
+            this.log('回传 VV_EXECUTE_RESULT 失败', 'err', err);
+          }
         }
       });
     },
@@ -77,13 +104,13 @@
       }
 
       let chatId = '';
-      const chatIdMatch = text.match(/聊天ID:([^\n]+)/);
+      const chatIdMatch = text.match(/聊天ID=([^\n]+)/);
       if (chatIdMatch) {
         chatId = chatIdMatch[1].trim();
       }
 
       let postId = '';
-      const postIdMatch = text.match(/动态ID:([^\n]+)/);
+      const postIdMatch = text.match(/动态ID=([^\n]+)/);
       if (postIdMatch) {
         postId = postIdMatch[1].trim();
       }
@@ -206,8 +233,9 @@
         if (t === '[群聊回复]') return false;
         if (t === '[电话模式]') return false;
         if (t === '[朋友圈互动]') return false;
-        if (t.startsWith('聊天ID:')) return false;
-        if (t.startsWith('动态ID:')) return false;
+        if (t.startsWith('聊天ID=')) return false;
+        if (t.startsWith('动态ID=')) return false;
+        if (t === '/trigger') return false;
         if (t.includes('|/trigger')) return false;
         return true;
       });

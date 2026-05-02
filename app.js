@@ -967,8 +967,12 @@ async function triggerSlash(cmd) {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       const viewId = window.__vv_view_id || '';
 
+      console.log('[VV] triggerSlash requestId=', requestId, 'viewId=', viewId);
+
       function onMessage(event) {
         const data = event.data;
+        console.log('[VV] triggerSlash got message:', data);
+
         if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
           return;
         }
@@ -992,14 +996,17 @@ async function triggerSlash(cmd) {
 
       window.addEventListener('message', onMessage);
 
+      console.log('[VV] postMessage -> parent VVPHONE_SLASH');
       window.parent.postMessage({
-        type: 'VV_EXECUTE_SLASH',
+        type: 'VVPHONE_SLASH',
         requestId,
+        viewId,
         command: cmd
       }, '*');
 
       setTimeout(() => {
         window.removeEventListener('message', onMessage);
+        console.warn('[VV] triggerSlash timeout, requestId=', requestId);
         resolve({
           ok: false,
           error: 'timeout'
@@ -1007,11 +1014,14 @@ async function triggerSlash(cmd) {
       }, 15000);
     });
 
+    console.log('[VV] triggerSlash final result=', result);
+
     if (!result.ok) {
       console.warn('[VV] slash 执行失败:', result.error);
       return false;
     }
 
+    console.log('[VV] slash 执行成功');
     return true;
   } catch (err) {
     console.error('[VV] slash 执行异常:', err);
@@ -3079,8 +3089,6 @@ function sendMessage() {
   renderMessages();
   saveAll();
   closeEmojiPanel();
-
-  triggerAIReply();
 
   console.log('[SEND] sendMessage finished, now triggerAIReply');
 }
