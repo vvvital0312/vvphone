@@ -22,10 +22,11 @@
         if (!data || typeof data !== 'object') return;
 
         if (data.type === 'VVPHONE_SLASH') {
-          this.log('收到 VVPHONE_SLASH', 'ok', data);
+          console.log('[HOST] recv VVPHONE_SLASH >>>', data);
 
           try {
-            await this.handleSlashRequest(data);
+            const result = await this.handleSlashRequest(data);
+            console.log('[HOST] handleSlashRequest ok, result=', result);
 
             event.source?.postMessage({
               type: 'VV_EXECUTE_RESULT',
@@ -35,11 +36,10 @@
               error: null
             }, '*');
 
-            this.log('已回传 VV_EXECUTE_RESULT', 'ok', {
-              requestId: data.requestId || '',
-              viewId: data.viewId || ''
-            });
+            console.log('[HOST] sent VV_EXECUTE_RESULT success');
           } catch (err) {
+            console.error('[HOST] handleSlashRequest failed:', err);
+
             event.source?.postMessage({
               type: 'VV_EXECUTE_RESULT',
               requestId: data.requestId || '',
@@ -48,7 +48,7 @@
               error: String(err?.message || err || 'unknown_error')
             }, '*');
 
-            this.log('回传 VV_EXECUTE_RESULT 失败', 'err', err);
+            console.log('[HOST] sent VV_EXECUTE_RESULT fail');
           }
         }
       });
