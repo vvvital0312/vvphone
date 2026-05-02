@@ -104,10 +104,20 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .app-block:hover,.bottom-bar .app:hover{transform:scale(1.05)}
 .app-block img,.bottom-bar .app img{
   width:50px;height:50px;background-color:rgba(255,255,255,.9);border-radius:14px;
-  margin-bottom:6px;object-fit:cover
+  margin-bottom:0px;object-fit:cover
 }
-.app-block span,.bottom-bar .app span{
-  font-size:16px;color:var(--text-color);text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5)
+.app-block span,
+.bottom-bar .app span{
+  display:block;
+  width:100%;
+  font-size:16px;
+  line-height:1.2;
+  color:var(--text-color, #fff);
+  text-align:center;
+  text-shadow:0 1px 2px rgba(0,0,0,.5);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .bottom-bar{
   position:absolute;left:6px;right:6px;bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px
@@ -328,40 +338,72 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 }
 .voice-text{font-size:12px;color:#666;margin-top:6px}
 .transfer-card{
-  width:220px;border-radius:16px;overflow:hidden;background:linear-gradient(135deg,#f8a93e 0%,#f38b27 100%);
-  color:#fff;box-shadow:0 6px 12px rgba(243,139,39,.25)
+  width:220px;
+  border-radius:16px;
+  overflow:hidden;
+  color:#fff;
+  box-shadow:0 6px 12px rgba(0,0,0,.18);
+  cursor:pointer;
+  user-select:none;
+  transition:transform .15s ease, opacity .2s ease, box-shadow .2s ease;
 }
-.transfer-card.received {
-  opacity: 0.82;
-  background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+
+.transfer-card:active{
+  transform:scale(.98);
 }
-.transfer-card.received .transfer-card-bottom {
-  color: #16a34a;
-  font-weight: 600;
+
+.transfer-card.pending{
+  background:linear-gradient(135deg,#f8a93e 0%,#f38b27 100%);
+  box-shadow:0 6px 12px rgba(243,139,39,.25);
 }
-.transfer-card.rejected {
-  opacity: 0.82;
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+
+.transfer-card.success{
+  background:linear-gradient(135deg,#34c759 0%,#18a84a 100%);
+  box-shadow:0 6px 12px rgba(24,168,74,.25);
 }
-.transfer-card.rejected .transfer-card-bottom {
-  color: #dc2626;
-  font-weight: 600;
+
+.transfer-card.returned{
+  background:linear-gradient(135deg,#4f8df7 0%,#2f6fe4 100%);
+  box-shadow:0 6px 12px rgba(47,111,228,.22);
 }
-.transfer-card.refunded {
-  opacity: 0.82;
-  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+
+.transfer-card-top{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:14px;
 }
-.transfer-card.refunded .transfer-card-bottom {
-  color: #2563eb;
-  font-weight: 600;
-}
-.transfer-card-top{display:flex;align-items:center;gap:10px;padding:14px}
+
 .transfer-icon{
-  width:40px;height:40px;background:rgba(255,255,255,.18);border-radius:12px;display:flex;justify-content:center;align-items:center;font-size:22px
+  width:40px;
+  height:40px;
+  background:rgba(255,255,255,.18);
+  border-radius:12px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-size:22px;
+  font-weight:700;
 }
-.transfer-text .transfer-amount{font-size:18px;font-weight:700}
-.transfer-text .transfer-note{font-size:12px;opacity:.9;margin-top:2px}
-.transfer-card-bottom{background:rgba(255,255,255,.14);padding:8px 14px;font-size:11px}
+
+.transfer-text .transfer-amount{
+  font-size:18px;
+  font-weight:700;
+  line-height:1.2;
+}
+
+.transfer-text .transfer-note{
+  font-size:12px;
+  opacity:.92;
+  margin-top:2px;
+  word-break:break-word;
+}
+
+.transfer-card-bottom{
+  background:rgba(255,255,255,.14);
+  padding:8px 14px;
+  font-size:12px;
+}
 .composer-quote-preview{
   display:none;align-items:center;justify-content:space-between;gap:8px;background:#f3f4f6;
   border-left:3px solid #7d8fb3;border-radius:10px;padding:8px 10px;margin-bottom:8px

@@ -47,6 +47,9 @@ let stickerRenameDraft = '';
 let currentCropper = null;
 let cropCallback = null;
 
+let currentTransferMessageRef = null;
+let currentTransferChatId = null;
+
 /**
  * 打开裁剪弹窗
  * @param {string} dataUrl - 原图的 DataURL
@@ -1130,6 +1133,30 @@ function addWalletBalance(amount) {
   if (walletData.balance < 0) walletData.balance = 0;
   updateProfileUI();
   saveAll();
+}
+
+function getWalletBalance() {
+  ensureProfileData();
+  return Number(walletData.balance || 0);
+}
+
+function canAfford(amount) {
+  return getWalletBalance() >= Number(amount || 0);
+}
+
+function subtractWalletBalance(amount) {
+  ensureProfileData();
+  const value = Number(amount || 0);
+
+  if (value <= 0) return false;
+  if (getWalletBalance() < value) return false;
+
+  walletData.balance = Number(walletData.balance || 0) - value;
+  if (walletData.balance < 0) walletData.balance = 0;
+
+  updateProfileUI();
+  saveAll();
+  return true;
 }
 
 async function toggleAvatarUnified(checked) {
@@ -2413,7 +2440,100 @@ function removeComposerAttachment(index) {
   renderComposerPreview();
 }
 
+function getTransferStatusClass(status) {
+  switch (status) {
+    case '待收款':
+      return 'transfer-card pending';
+    case '已收款':
+    case '已被接收':
+      return 'transfer-card success';
+    case '已退回':
+      return 'transfer-card returned';
+    default:
+      return 'transfer-card pending';
+  }
+}
+
+function getTransferStatusText(status) {
+  switch (status) {
+    case '待收款':
+      return '待收款';
+    case '已收款':
+      return '✓ 已收款';
+    case '已被接收':
+      return '✓ 已被接收';
+    case '已退回':
+      return '已退回';
+    default:
+      return status || '待收款';
+  }
+}
+
+function getTransferIconText(status) {
+  switch (status) {
+    case '已收款':
+    case '已被接收':
+      return '✓';
+    case '已退回':
+      return '↩';
+    default:
+      return '¥';
+  }
+}
+
+function renderTransferMessage(m) {
+  console.log('[renderTransferMessage]', m.id, m.status, m.isMe);
+
+  const cls = getTransferStatusClass(m.status);
+  const amount = Number(m.amount || 0);
+  const note = m.note || '转账';
+  const statusText = getTransferStatusText(m.status);
+  const icon = getTransferIconText(m.status);
+
+  return `
+    <div class="${cls}" onclick="openTransferReceiveDialog('${m.id}')">
+      <div class="transfer-card-top">
+        <div class="transfer-icon">${icon}</div>
+        <div class="transfer-text">
+          <div class="transfer-amount">¥${escapeHTML(String(amount))}</div>
+          <div class="transfer-note">${escapeHTML(note)}</div>
+        </div>
+      </div>
+      <div class="transfer-card-bottom">${escapeHTML(statusText)}</div>
+    </div>
+  `;
+}
+
+function renderTransferNoticeMessage(m) {
+  const cls = getTransferStatusClass(m.status);
+  const amount = Number(m.amount || 0);
+  const note = m.note || '转账';
+  const statusText = getTransferStatusText(m.status);
+  const icon = getTransferIconText(m.status);
+
+  return `
+    <div class="${cls}">
+      <div class="transfer-card-top">
+        <div class="transfer-icon">${icon}</div>
+        <div class="transfer-text">
+          <div class="transfer-amount">¥${escapeHTML(String(amount))}</div>
+          <div class="transfer-note">${escapeHTML(note)}</div>
+        </div>
+      </div>
+      <div class="transfer-card-bottom">${escapeHTML(statusText)}</div>
+    </div>
+  `;
+}
+
 function renderMessageOriginal(m) {
+  if (m.type === 'transfer') {
+    return renderTransferMessage(m);
+  }
+
+  if (m.type === 'transfer_notice') {
+    return renderTransferNoticeMessage(m);
+  }
+
   switch (m.type) {
     case 'text': {
       const chunks = Array.isArray(m.chunks) && m.chunks.length
@@ -2423,14 +2543,17 @@ function renderMessageOriginal(m) {
             : []);
       return chunks.map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
     }
+
     case 'sticker':
       return `<div class="message-bubble sticker-bubble"><img ${buildMediaSrcAttrs(m.src)} alt="${escapeHTML(m.stickerName || '表情')}"></div>`;
+
     case 'image':
       return `
         <div class="message-bubble image-bubble">
           <img ${buildMediaSrcAttrs(m.src)} alt="">
           ${m.desc ? `<div class="image-desc">${escapeHTML(m.desc)}</div>` : ''}
         </div>`;
+
     case 'voice':
       return `
         <div class="message-bubble voice-bubble">
@@ -2440,20 +2563,10 @@ function renderMessageOriginal(m) {
           </div>
           <div class="voice-text">转文字：${escapeHTML(m.transcript || '')}</div>
         </div>`;
-    case 'transfer':
-      return `
-        <div class="transfer-card ${m.status === '已收款' ? 'received' : ''}">
-          <div class="transfer-card-top">
-            <div class="transfer-icon">${m.status === '已收款' ? '✓' : '¥'}</div>
-            <div class="transfer-text">
-              <div class="transfer-amount">¥${escapeHTML(m.amount)}</div>
-              <div class="transfer-note">${escapeHTML(m.note || '转账')}</div>
-            </div>
-          </div>
-          <div class="transfer-card-bottom">${escapeHTML(m.status || '待收款')}</div>
-        </div>`;
+
     case 'system':
       return (m.chunks || []).map(chunk => `<div class="message-bubble">${escapeHTML(chunk)}</div>`).join('');
+
     default:
       return `<div class="message-bubble">未知消息</div>`;
   }
@@ -2973,17 +3086,315 @@ function simulateAutoReply(targetId, type) {
   saveAll();
 }
 
-function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
+function findLastPendingMyTransfer(chatId) {
+  const thread = messages[chatId] || [];
+  for (let i = thread.length - 1; i >= 0; i--) {
+    const msg = thread[i];
+    if (msg && msg.isMe && msg.type === 'transfer' && msg.status === '待收款') {
+      return msg;
+    }
+  }
+  return null;
+}
+
+function acceptMyTransferByAI(chatId, transferMsg) {
+  if (!chatId || !transferMsg) return;
+  if (transferMsg.status !== '待收款') return;
+
+  transferMsg.status = '已被接收';
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_accept',
+    sender: chatId,
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer_notice',
+    amount: Number(transferMsg.amount || 0),
+    note: transferMsg.note || '转账',
+    status: '已收款',
+    relatedTransferId: transferMsg.id,
+    recalled: false,
+    time,
+    timeLabel
+  });
+
+  updateLastMsg(chatId, `[收款] ¥${transferMsg.amount}`, time, currentChatType);
+  renderMessages();
+  saveAll();
+}
+
+function returnMyTransferByAI(chatId, transferMsg) {
+  if (!chatId || !transferMsg) return;
+
+  console.log('[AI退回前]', transferMsg.id, transferMsg.status);
+
+  if (transferMsg.status !== '待收款') return;
+
+  transferMsg.status = '已退回';
+  console.log('[AI退回后]', transferMsg.id, transferMsg.status);
+
+  if (!transferMsg.refunded) {
+    addWalletBalance(Number(transferMsg.amount || 0));
+    transferMsg.refunded = true;
+  }
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_return',
+    sender: chatId,
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer_notice',
+    amount: Number(transferMsg.amount || 0),
+    note: transferMsg.note || '转账',
+    status: '已退回',
+    relatedTransferId: transferMsg.id,
+    recalled: false,
+    time,
+    timeLabel
+  });
+
+  updateLastMsg(chatId, `[退回转账] ¥${transferMsg.amount}`, time, currentChatType);
+  renderMessages();
+  saveAll();
+}
+
+function receiveTransferFromAI(chatId, amount, note = '给你的转账') {
   if (!chatId) return;
+
+  const money = Number(amount || 0);
+  if (!Number.isFinite(money) || money <= 0) return;
+
   if (!messages[chatId]) messages[chatId] = [];
 
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
 
-  const lastMine = [...messages[chatId]].reverse().find(m => m.isMe);
-  if (lastMine?.type === 'transfer' && lastMine.status !== '已收款') {
-    lastMine.status = '已收款';
+  const newMsg = {
+    id: 'm' + Date.now() + '_ai_transfer',
+    sender: chatId,
+    senderName: getCurrentChatName(chatId, currentChatType),
+    isMe: false,
+    type: 'transfer',
+    amount: money,
+    note,
+    status: '待收款',
+    recalled: false,
+    time,
+    timeLabel,
+    settled: false,
+    refunded: false
+  };
+
+  console.log('[receiveTransferFromAI] push', newMsg.id, newMsg.status, newMsg.amount, newMsg.note);
+
+  messages[chatId].push(newMsg);
+
+  updateLastMsg(chatId, `[转账] ¥${money}`, time, currentChatType);
+  renderMessages();
+  saveAll();
+}
+
+function openTransferReceiveDialog(messageId) {
+  if (!currentChatId || !messageId) return;
+
+  const thread = messages[currentChatId] || [];
+  const msg = thread.find(m => m.id === messageId);
+  if (!msg || msg.type !== 'transfer') return;
+
+  currentTransferMessageRef = msg;
+  currentTransferChatId = currentChatId;
+
+  const amountEl = document.getElementById('receiveTransferAmount');
+  const noteEl = document.getElementById('receiveTransferNote');
+  const actionEl = document.getElementById('receiveTransferActions');
+  const stateEl = document.getElementById('receiveTransferState');
+
+  if (amountEl) amountEl.textContent = `¥${Number(msg.amount || 0)}`;
+  if (noteEl) noteEl.textContent = msg.note || '转账';
+
+  const isPending = msg.status === '待收款';
+  const canOperate = !msg.isMe && isPending;
+
+  if (stateEl) {
+    stateEl.textContent = isPending ? '待收款' : (msg.status || '');
   }
+
+  if (actionEl) {
+    actionEl.style.display = canOperate ? 'flex' : 'none';
+  }
+
+  showDialog('receiveTransferDialog');
+}
+
+function acceptIncomingTransfer() {
+  const msg = currentTransferMessageRef;
+  const chatId = currentTransferChatId;
+  if (!msg || !chatId) return;
+
+  if (msg.isMe) {
+    closeDialog('receiveTransferDialog');
+    return;
+  }
+
+  const thread = messages[chatId] || [];
+  const idx = thread.findIndex(item => item.id === msg.id);
+  if (idx === -1) {
+    closeDialog('receiveTransferDialog');
+    return;
+  }
+
+  const targetMsg = thread[idx];
+
+  console.log('[接收AI转账前]', targetMsg.id, targetMsg.status);
+
+  if (targetMsg.type !== 'transfer' || targetMsg.status !== '待收款') {
+    closeDialog('receiveTransferDialog');
+    return;
+  }
+
+  if (!targetMsg.settled) {
+    addWalletBalance(Number(targetMsg.amount || 0));
+    targetMsg.settled = true;
+  }
+
+  // 关键：直接回写到消息数组里
+  messages[chatId][idx] = {
+    ...targetMsg,
+    status: '已收款'
+  };
+
+  console.log('[接收AI转账后]', messages[chatId][idx].id, messages[chatId][idx].status);
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_accepted_notice',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
+    type: 'transfer_notice',
+    amount: Number(targetMsg.amount || 0),
+    note: targetMsg.note || '转账',
+    status: '已收款',
+    relatedTransferId: targetMsg.id,
+    recalled: false,
+    time,
+    timeLabel
+  });
+
+  currentTransferMessageRef = messages[chatId][idx];
+
+  updateLastMsg(chatId, `[已收款] ¥${targetMsg.amount}`, time, currentChatType);
+
+  console.log('[当前会话transfer消息]', (messages[chatId] || []).filter(x => x.type === 'transfer').map(x => ({
+    id: x.id,
+    status: x.status,
+    amount: x.amount,
+    note: x.note,
+    isMe: x.isMe
+  })));
+
+  renderMessages();
+  saveAll();
+  closeDialog('receiveTransferDialog');
+}
+
+function returnIncomingTransfer() {
+  const msg = currentTransferMessageRef;
+  const chatId = currentTransferChatId;
+  if (!msg || !chatId) return;
+
+  if (msg.isMe) {
+    closeDialog('receiveTransferDialog');
+    return;
+  }
+
+  if (msg.type !== 'transfer' || msg.status !== '待收款') {
+    closeDialog('receiveTransferDialog');
+    return;
+  }
+
+  msg.status = '已退回';
+  msg.refunded = true;
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
+
+  messages[chatId].push({
+    id: 'm' + Date.now() + '_return_notice',
+    sender: 'me',
+    senderName: '我',
+    isMe: true,
+    type: 'transfer_notice',
+    amount: Number(msg.amount || 0),
+    note: msg.note || '转账',
+    status: '已退回',
+    relatedTransferId: msg.id,
+    recalled: false,
+    time,
+    timeLabel
+  });
+
+  updateLastMsg(chatId, `[已退回转账] ¥${msg.amount}`, time, currentChatType);
+  renderMessages();
+  saveAll();
+  closeDialog('receiveTransferDialog');
+}
+
+function handleAITransferDirectives(chatId, text) {
+  if (!chatId || !text) return text;
+
+  let cleanText = text;
+
+  if (cleanText.includes('[TRANSFER_ACCEPT]')) {
+    const transferMsg = findLastPendingMyTransfer(chatId);
+    if (transferMsg) {
+      acceptMyTransferByAI(chatId, transferMsg);
+    }
+    cleanText = cleanText.replace(/\[TRANSFER_ACCEPT\]/g, '').trim();
+  }
+
+  if (cleanText.includes('[TRANSFER_RETURN]')) {
+    const transferMsg = findLastPendingMyTransfer(chatId);
+    if (transferMsg) {
+      returnMyTransferByAI(chatId, transferMsg);
+    }
+    cleanText = cleanText.replace(/\[TRANSFER_RETURN\]/g, '').trim();
+  }
+
+  cleanText = cleanText.replace(/\[TRANSFER_SEND:(\d+(?:\.\d+)?)\|?(.*?)\]/g, (_, amount, note) => {
+    receiveTransferFromAI(chatId, Number(amount), note || '给你的转账');
+    return '';
+  }).trim();
+
+  return cleanText;
+}
+
+function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
+  if (!chatId) return;
+  if (!messages[chatId]) messages[chatId] = [];
+
+  let finalText = text || '...';
+
+  if (type === 'text') {
+    finalText = handleAITransferDirectives(chatId, finalText);
+  }
+
+  if (type === 'text' && !finalText.trim()) {
+    renderMessages();
+    saveAll();
+    return;
+  }
+
+  const time = getNowTime();
+  const timeLabel = getNowFullLabel();
 
   messages[chatId].push({
     id: 'm' + Date.now(),
@@ -2991,14 +3402,14 @@ function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' 
     senderName: senderName || getCurrentChatName(chatId, currentChatType),
     isMe: false,
     type,
-    chunks: type === 'text' ? splitInputToChunks(text || '...') : [text || '...'],
+    chunks: type === 'text' ? splitInputToChunks(finalText || '...') : [finalText || '...'],
     recalled: false,
     time,
     timeLabel
   });
 
   renderMessages();
-  updateLastMsg(chatId, text || '新消息', time, currentChatType);
+  updateLastMsg(chatId, finalText || '新消息', time, currentChatType);
   saveAll();
 }
 
@@ -3438,11 +3849,28 @@ function confirmTransfer() {
     return;
   }
 
-  const amount = document.getElementById('transferAmount')?.value.trim();
+  const amountText = document.getElementById('transferAmount')?.value.trim();
   const note = document.getElementById('transferNote')?.value.trim();
 
-  if (!amount) {
+  if (!amountText) {
     alert('请输入金额');
+    return;
+  }
+
+  const amount = Number(amountText);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    alert('请输入正确的金额');
+    return;
+  }
+
+  if (!canAfford(amount)) {
+    alert('余额不足');
+    return;
+  }
+
+  const ok = subtractWalletBalance(amount);
+  if (!ok) {
+    alert('余额不足');
     return;
   }
 
@@ -3457,13 +3885,15 @@ function confirmTransfer() {
     senderName: '我',
     isMe: true,
     type: 'transfer',
-    amount,
+    amount: amount,
     note: note || '转账',
     status: '待收款',
     recalled: false,
     time,
     timeLabel,
-    pendingForReply: true
+    pendingForReply: true,
+    settled: true,
+    refunded: false
   });
 
   updateLastMsg(currentChatId, `[转账] ¥${amount}`, time, currentChatType);

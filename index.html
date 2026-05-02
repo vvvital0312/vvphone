@@ -510,6 +510,26 @@
       </div>
     </div>
 
+    <div id="receiveTransferDialog" class="dialog">
+      <div class="dialog-content transfer-receive-panel">
+        <div class="transfer-popup-card">
+          <div class="transfer-popup-title">转账</div>
+          <div id="receiveTransferAmount" class="transfer-popup-amount">¥0</div>
+          <div id="receiveTransferNote" class="transfer-popup-note">备注</div>
+          <div id="receiveTransferState" class="transfer-popup-state">待收款</div>
+        </div>
+
+        <div id="receiveTransferActions" class="dialog-buttons transfer-popup-actions">
+          <button onclick="playClickSound();returnIncomingTransfer()">退回</button>
+          <button onclick="playClickSound();acceptIncomingTransfer()">确认接受</button>
+        </div>
+
+        <div class="dialog-buttons">
+          <button onclick="playClickSound();closeDialog('receiveTransferDialog')">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <div id="imageSendDialog" class="dialog">
       <div class="dialog-content">
         <h3>发送图片</h3>
