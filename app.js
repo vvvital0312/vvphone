@@ -3084,11 +3084,11 @@ function sendMessage() {
   pendingReplyTargets[currentChatId] = true;
   console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-  input.value = '';
-  clearComposerDraft();
-  renderMessages();
-  saveAll();
-  closeEmojiPanel();
+    input.value = '';
+    clearComposerDraft();
+    renderMessages();
+    saveAll();
+    closeEmojiPanel();
 
   console.log('[SEND] sendMessage finished, now triggerAIReply');
 }
