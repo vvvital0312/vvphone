@@ -3089,8 +3089,6 @@ function sendMessage() {
     renderMessages();
     saveAll();
     closeEmojiPanel();
-
-  console.log('[SEND] sendMessage finished, now triggerAIReply');
 }
 
 function buildVVEventPayload(chatId) {
