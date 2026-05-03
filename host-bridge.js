@@ -21,7 +21,7 @@
         const data = event.data;
         if (!data || typeof data !== 'object') return;
 
-        if (data.type === 'VVPHONE_SLASH') {
+        if (data.type === 'VV_EXECUTE_SLASH' || data.type === 'VVPHONE_SLASH') {
           await this.handleSlashRequest(data);
         }
       });
@@ -29,6 +29,9 @@
 
     async handleSlashRequest(data) {
       const command = data.command || '';
+      const requestId = data.requestId || '';
+      const viewId = data.viewId || '';
+
       this.lastContext.command = command;
 
       const parsed = this.parseCommand(command);
@@ -38,29 +41,76 @@
         command
       };
 
-      this.log('收到 VVPHONE_SLASH', 'ok', {
+      this.log('收到 Slash 请求', 'ok', {
+        type: data.type,
         command,
-        parsed
+        parsed,
+        requestId,
+        viewId
       });
 
       const mode = this.getReplyMode();
 
-      // 这里是未来你真正接 ST 的地方
-      // 目前先做模拟、手动、透传三种模式
-
       if (mode === 'passthrough') {
-        this.log('当前为 passthrough 模式：仅记录命令，不自动回传', 'warn');
+        this.replyExecuteResult({
+          requestId,
+          viewId,
+          ok: true,
+          error: null
+        });
+        this.log('当前为 passthrough 模式：仅记录命令，不自动回传聊天内容', 'warn');
         return;
       }
 
       if (mode === 'manual') {
+        this.replyExecuteResult({
+          requestId,
+          viewId,
+          ok: true,
+          error: null
+        });
         this.log('当前为 manual 模式：等待你点击“发送手动回传”', 'warn');
         return;
       }
 
-      // mock 模式
-      const result = await this.mockExecute(command, parsed);
-      this.handleMockResult(result, parsed);
+      try {
+        const result = await this.mockExecute(command, parsed);
+
+        this.replyExecuteResult({
+          requestId,
+          viewId,
+          ok: true,
+          error: null
+        });
+
+        this.handleMockResult(result, parsed, {
+          requestId,
+          viewId
+        });
+      } catch (err) {
+        console.error('[VVHostBridge] mockExecute error:', err);
+
+        this.replyExecuteResult({
+          requestId,
+          viewId,
+          ok: false,
+          error: err?.message || 'mockExecute failed'
+        });
+
+        this.log('mockExecute 执行失败', 'err', {
+          message: err?.message || String(err)
+        });
+      }
+    },
+
+    replyExecuteResult({ requestId, viewId, ok, error }) {
+      window.postMessage({
+        type: 'VV_EXECUTE_RESULT',
+        requestId: requestId || '',
+        viewId: viewId || '',
+        ok: !!ok,
+        error: error || null
+      }, '*');
     },
 
     parseCommand(command) {
@@ -120,23 +170,29 @@
         };
       }
 
+      const raw = this.buildMockChatReply(command, parsed);
+
       return {
         kind: 'chat',
-        text: this.buildMockChatReply(command, parsed)
+        raw,
+        text: raw
       };
     },
 
-    handleMockResult(result, parsed) {
+    handleMockResult(result, parsed, meta = {}) {
       if (!this.frame || !this.frame.contentWindow) {
         this.log('iframe 不存在，无法回传', 'err');
         return;
       }
 
+      const viewId = meta.viewId || '';
+
       if (result.kind === 'call') {
         this.frame.contentWindow.postMessage({
           type: 'VVPHONE_CALL_STATUS',
           chatId: parsed.chatId || '',
-          status: result.status
+          status: result.status,
+          viewId
         }, '*');
 
         this.log('已回传 VVPHONE_CALL_STATUS', 'ok', result);
@@ -149,10 +205,42 @@
           postId: parsed.postId || '',
           senderName: parsed.senderName || this.getDefaultSender(),
           text: result.text || '……',
-          replyTo: ''
+          replyTo: '',
+          viewId
         }, '*');
 
         this.log('已回传 VVPHONE_FEED_REPLY', 'ok', result);
+        return;
+      }
+
+      if (result.kind === 'chat') {
+        const raw = result.raw || result.text || '';
+
+        if (raw && (raw.includes('[VV_CHAT_SYNC]') || raw.includes('[聊天界面]'))) {
+          this.frame.contentWindow.postMessage({
+            type: 'VVPHONE_CHAT_SYNC',
+            chatId: parsed.chatId || '',
+            raw,
+            viewId
+          }, '*');
+
+          this.log('已回传 VVPHONE_CHAT_SYNC', 'ok', {
+            chatId: parsed.chatId || '',
+            viewId,
+            raw: raw.slice(0, 500)
+          });
+          return;
+        }
+
+        this.frame.contentWindow.postMessage({
+          type: 'VVPHONE_REPLY',
+          chatId: parsed.chatId || '',
+          senderName: parsed.senderName || this.getDefaultSender(),
+          text: result.text || '……',
+          viewId
+        }, '*');
+
+        this.log('已回传 VVPHONE_REPLY(fallback)', 'ok', result);
         return;
       }
 
@@ -160,31 +248,81 @@
         type: 'VVPHONE_REPLY',
         chatId: parsed.chatId || '',
         senderName: parsed.senderName || this.getDefaultSender(),
-        text: result.text || '……'
+        text: result.text || '……',
+        viewId
       }, '*');
 
-      this.log('已回传 VVPHONE_REPLY', 'ok', result);
+      this.log('已回传 VVPHONE_REPLY(default)', 'ok', result);
     },
 
     buildMockChatReply(command, parsed) {
       const prompt = this.extractPrompt(command);
       const sender = parsed.senderName || this.getDefaultSender();
+      const chatId = parsed.chatId || '';
+      const target = parsed.bridgeName || parsed.senderName || this.getDefaultSender();
+      const time = this.formatNowLabel();
+
+      const myAvatarKey = 'current_my_avatar';
+      const targetAvatarId = 'contact_unknown_avatar';
+      const myBubble = 'default';
+      const targetBubble = '#F8F8F8';
+      const chatBgKey = 'default';
+
+      let replyText = '我看到了，我们继续聊吧。';
+      let transferAction = '';
+      let transferAmount = '';
+      let transferNote = '';
 
       if (prompt.includes('[转账]')) {
-        return `${sender}：我收到了。`;
-      }
-      if (prompt.includes('[图片]')) {
-        return `${sender}：我看到你发来的图片了。`;
-      }
-      if (prompt.includes('[语音]')) {
-        return `${sender}：我听完了。`;
-      }
-      if (prompt.includes('[表情]')) {
-        return `${sender}：这个表情我看到了。`;
+        replyText = '我收到了，谢谢你。';
+        transferAction = 'accept';
+      } else if (prompt.includes('[图片]')) {
+        replyText = '我看到你发来的图片了。';
+      } else if (prompt.includes('[语音]')) {
+        replyText = '我听完了。';
+      } else if (prompt.includes('[表情]')) {
+        replyText = '这个表情我看到了。';
+      } else {
+        const lastLine = this.getLastMeaningfulLine(prompt);
+        replyText = `我看到了，你刚才说的是“${lastLine || '继续聊聊吧'}”。`;
       }
 
-      const lastLine = this.getLastMeaningfulLine(prompt);
-      return `${sender}：我看到了，你刚才说的是“${lastLine || '继续聊聊吧'}”。`;
+      const leftMsg = [
+        '[消息]',
+        'side=left',
+        `sender=${sender}`,
+        `content=${replyText}`,
+        'state=reply',
+        transferAction ? `transferAction=${transferAction}` : '',
+        transferAmount ? `transferAmount=${transferAmount}` : '',
+        transferNote ? `transferNote=${transferNote}` : '',
+        '[/消息]'
+      ].filter(Boolean).join('\n');
+
+      return [
+        '[聊天界面]',
+        `chatId=${chatId}`,
+        `target=${target}`,
+        `time=${time}`,
+        `myAvatarKey=${myAvatarKey}`,
+        `targetAvatarId=${targetAvatarId}`,
+        `myBubble=${myBubble}`,
+        `targetBubble=${targetBubble}`,
+        `chatBgKey=${chatBgKey}`,
+        leftMsg,
+        '[/聊天界面]',
+        '[VV_CHAT_SYNC]',
+        `chatId=${chatId}`,
+        `target=${target}`,
+        `time=${time}`,
+        `myAvatarKey=${myAvatarKey}`,
+        `targetAvatarId=${targetAvatarId}`,
+        `myBubble=${myBubble}`,
+        `targetBubble=${targetBubble}`,
+        `chatBgKey=${chatBgKey}`,
+        leftMsg,
+        '[/VV_CHAT_SYNC]'
+      ].join('\n');
     },
 
     buildMockFeedReply(command, parsed) {
@@ -229,6 +367,7 @@
       const text = document.getElementById('hostManualReply')?.value.trim();
       const manualType = document.getElementById('hostManualType')?.value || 'chat';
       const senderName = this.getDefaultSender();
+      const viewId = window.__vv_view_id || '';
 
       if (!text) {
         alert('请先填写手动回复内容');
@@ -241,7 +380,8 @@
           postId: this.lastContext.postId || '',
           senderName,
           text,
-          replyTo: ''
+          replyTo: '',
+          viewId
         }, '*');
 
         this.log('手动回传 VVPHONE_FEED_REPLY', 'ok', {
@@ -257,7 +397,8 @@
           type: 'VVPHONE_CALL_REPLY',
           chatId: this.lastContext.chatId || '',
           senderName,
-          text
+          text,
+          viewId
         }, '*');
 
         this.log('手动回传 VVPHONE_CALL_REPLY', 'ok', {
@@ -268,17 +409,52 @@
         return;
       }
 
+      const raw = [
+        '[聊天界面]',
+        `chatId=${this.lastContext.chatId || ''}`,
+        `target=${senderName}`,
+        `time=${this.formatNowLabel()}`,
+        'myAvatarKey=current_my_avatar',
+        'targetAvatarId=contact_unknown_avatar',
+        'myBubble=default',
+        'targetBubble=#F8F8F8',
+        'chatBgKey=default',
+        '[消息]',
+        'side=left',
+        `sender=${senderName}`,
+        `content=${text}`,
+        'state=reply',
+        '[/消息]',
+        '[/聊天界面]',
+        '[VV_CHAT_SYNC]',
+        `chatId=${this.lastContext.chatId || ''}`,
+        `target=${senderName}`,
+        `time=${this.formatNowLabel()}`,
+        'myAvatarKey=current_my_avatar',
+        'targetAvatarId=contact_unknown_avatar',
+        'myBubble=default',
+        'targetBubble=#F8F8F8',
+        'chatBgKey=default',
+        '[消息]',
+        'side=left',
+        `sender=${senderName}`,
+        `content=${text}`,
+        'state=reply',
+        '[/消息]',
+        '[/VV_CHAT_SYNC]'
+      ].join('\n');
+
       this.frame.contentWindow.postMessage({
-        type: 'VVPHONE_REPLY',
+        type: 'VVPHONE_CHAT_SYNC',
         chatId: this.lastContext.chatId || '',
-        senderName,
-        text
+        raw,
+        viewId
       }, '*');
 
-      this.log('手动回传 VVPHONE_REPLY', 'ok', {
+      this.log('手动回传 VVPHONE_CHAT_SYNC', 'ok', {
         chatId: this.lastContext.chatId || '',
         senderName,
-        text
+        raw: raw.slice(0, 500)
       });
     },
 
@@ -289,10 +465,13 @@
       }
 
       const status = this.getSelectedCallStatus();
+      const viewId = window.__vv_view_id || '';
+
       this.frame.contentWindow.postMessage({
         type: 'VVPHONE_CALL_STATUS',
         chatId: this.lastContext.chatId || '',
-        status
+        status,
+        viewId
       }, '*');
 
       this.log('手动回传 VVPHONE_CALL_STATUS', 'ok', {
@@ -308,11 +487,13 @@
       }
 
       const senderName = this.getDefaultSender();
+      const viewId = window.__vv_view_id || '';
 
       this.frame.contentWindow.postMessage({
         type: 'VVPHONE_INCOMING_CALL',
         senderName,
-        bridgeName: senderName
+        bridgeName: senderName,
+        viewId
       }, '*');
 
       this.log('已发送测试来电', 'ok', { senderName });
@@ -328,6 +509,11 @@
 
     getSelectedCallStatus() {
       return document.getElementById('hostCallStatus')?.value || 'accepted';
+    },
+
+    formatNowLabel() {
+      const d = new Date();
+      return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     },
 
     clearLogs() {
@@ -360,20 +546,20 @@
       box.scrollTop = box.scrollHeight;
     },
 
-escapeHTML(str) {
-  const amp = String.fromCharCode(38, 97, 109, 112, 59);
-  const lt = String.fromCharCode(38, 108, 116, 59);
-  const gt = String.fromCharCode(38, 103, 116, 59);
-  const quot = String.fromCharCode(38, 113, 117, 111, 116, 59);
-  const apos = String.fromCharCode(38, 35, 51, 57, 59);
+    escapeHTML(str) {
+      const amp = String.fromCharCode(38, 97, 109, 112, 59);
+      const lt = String.fromCharCode(38, 108, 116, 59);
+      const gt = String.fromCharCode(38, 103, 116, 59);
+      const quot = String.fromCharCode(38, 113, 117, 111, 116, 59);
+      const apos = String.fromCharCode(38, 35, 51, 57, 59);
 
-  return String(str)
-    .split(String.fromCharCode(38)).join(amp)
-    .split(String.fromCharCode(60)).join(lt)
-    .split(String.fromCharCode(62)).join(gt)
-    .split(String.fromCharCode(34)).join(quot)
-    .split(String.fromCharCode(39)).join(apos);
-},
+      return String(str)
+        .split(String.fromCharCode(38)).join(amp)
+        .split(String.fromCharCode(60)).join(lt)
+        .split(String.fromCharCode(62)).join(gt)
+        .split(String.fromCharCode(34)).join(quot)
+        .split(String.fromCharCode(39)).join(apos);
+    },
 
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
