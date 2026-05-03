@@ -779,6 +779,9 @@ function parseVVChatBlocks(raw) {
         readMsgField('msg'),
       state: readMsgField('state'),
       type: readMsgField('type') || 'text',
+      transferAction: readMsgField('transferAction'),
+      transferAmount: readMsgField('transferAmount'),
+      transferNote: readMsgField('transferNote'),
       _raw: block.trim()
     };
 
@@ -829,25 +832,63 @@ function appendVVChatReplyToLocal(chatData) {
       )
     );
 
-    if (duplicated) {
+    let appendedMessage = null;
+
+    if (!duplicated) {
+      appendedMessage = {
+        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+        sender: 'them',
+        senderName: msg.sender || chatData.target || '对方',
+        isMe: false,
+        type: 'text',
+        chunks: [normalizedContent],
+        text: normalizedContent,
+        replyTo: null,
+        recalled: false,
+        time,
+        timeLabel,
+        state: msg.state || 'reply'
+      };
+
+      thread.push(appendedMessage);
+    } else {
       console.log('[VV] skip duplicated assistant msg:', normalizedContent);
-      return;
     }
 
-    thread.push({
-      id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-      sender: 'them',
-      senderName: msg.sender || chatData.target || '对方',
-      isMe: false,
-      type: 'text',
-      chunks: [normalizedContent],
-      text: normalizedContent,
-      replyTo: null,
-      recalled: false,
-      time,
-      timeLabel,
-      state: msg.state || 'reply'
-    });
+    const action = String(msg.transferAction || '').trim().toLowerCase();
+
+    if (action === 'accept') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) {
+        acceptMyTransferByAI(chatId, transferMsg);
+      }
+    }
+
+    if (action === 'return') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) {
+        returnMyTransferByAI(chatId, transferMsg);
+      }
+    }
+
+    if (action === 'send') {
+      const amount = Number(msg.transferAmount || 0);
+      const note = String(msg.transferNote || '').trim() || '给你的转账';
+
+      if (amount > 0) {
+        const alreadyExists = thread.some(item =>
+          !item.isMe &&
+          item.type === 'transfer' &&
+          Number(item.amount || 0) === amount &&
+          String(item.note || '').trim() === note &&
+          item.status === '待收款'
+        );
+
+        if (!alreadyExists) {
+          receiveTransferFromAI(chatId, amount, note);
+        }
+      }
+    }
   });
 
   const rel = getRelSetting(chatId);
@@ -2482,8 +2523,6 @@ function getTransferIconText(status) {
 }
 
 function renderTransferMessage(m) {
-  console.log('[renderTransferMessage]', m.id, m.status, m.isMe);
-
   const cls = getTransferStatusClass(m.status);
   const amount = Number(m.amount || 0);
   const note = m.note || '转账';
@@ -2959,9 +2998,23 @@ function buildVVEventPayload(chatId) {
     'time 只在 [聊天界面] 顶部显示一次，消息块内部默认不要重复输出 time。',
     '用户消息必须使用 side=right，角色消息必须使用 side=left。',
     '每条消息都要单独成块。',
+    '所有 [消息] 块必须显式包含以下字段：side、sender、content、state。',
+    '不得使用 text 代替 content。',
+    '不得省略 sender。',
+    '不得省略 state。',
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
     '如果角色不打算继续回复线上消息，则改为正常正文，并明确交代没有继续回复手机消息。',
-    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取',
+    '无论是 [聊天界面] 还是 [VV_CHAT_SYNC]，都只输出本轮新增消息，不要重复历史消息；历史聊天由前端根据 chatId 自行读取。',
+    '当前聊天系统支持转账互动。',
+    '如果角色接受用户最近一笔待收款转账，则必须在对应的 side=left [消息] 块中加入：transferAction=accept',
+    '如果角色退回用户最近一笔待收款转账，则必须在对应的 side=left [消息] 块中加入：transferAction=return',
+    '如果角色主动向用户发起转账，则必须在对应的 side=left [消息] 块中加入：transferAction=send',
+    '当 transferAction=send 时，必须同时提供：transferAmount=正数金额',
+    '如有备注，可额外提供：transferNote=备注内容',
+    'transferAction、transferAmount、transferNote 必须写在 [消息] 块内部，和 side、sender、content、state 同级，不能写在正文里，不能写在块外。',
+    '如果只是普通聊天，没有发生转账行为，则不要添加 transferAction 字段。',
+    '如果用户消息中包含“[转账] 金额xx，备注xx”，且角色语义上表示“收到、谢谢、我收下了”，则应添加 transferAction=accept。',
+    '如果用户消息中包含“[转账] 金额xx，备注xx”，且角色语义上表示“我不能收、你拿回去、不用给我”，则应添加 transferAction=return。',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -3191,8 +3244,6 @@ function receiveTransferFromAI(chatId, amount, note = '给你的转账') {
     refunded: false
   };
 
-  console.log('[receiveTransferFromAI] push', newMsg.id, newMsg.status, newMsg.amount, newMsg.note);
-
   messages[chatId].push(newMsg);
 
   updateLastMsg(chatId, `[转账] ¥${money}`, time, currentChatType);
@@ -3251,8 +3302,6 @@ function acceptIncomingTransfer() {
 
   const targetMsg = thread[idx];
 
-  console.log('[接收AI转账前]', targetMsg.id, targetMsg.status);
-
   if (targetMsg.type !== 'transfer' || targetMsg.status !== '待收款') {
     closeDialog('receiveTransferDialog');
     return;
@@ -3268,8 +3317,6 @@ function acceptIncomingTransfer() {
     ...targetMsg,
     status: '已收款'
   };
-
-  console.log('[接收AI转账后]', messages[chatId][idx].id, messages[chatId][idx].status);
 
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
@@ -3292,15 +3339,6 @@ function acceptIncomingTransfer() {
   currentTransferMessageRef = messages[chatId][idx];
 
   updateLastMsg(chatId, `[已收款] ¥${targetMsg.amount}`, time, currentChatType);
-
-  console.log('[当前会话transfer消息]', (messages[chatId] || []).filter(x => x.type === 'transfer').map(x => ({
-    id: x.id,
-    status: x.status,
-    amount: x.amount,
-    note: x.note,
-    isMe: x.isMe
-  })));
-
   renderMessages();
   saveAll();
   closeDialog('receiveTransferDialog');
@@ -3348,33 +3386,73 @@ function returnIncomingTransfer() {
   closeDialog('receiveTransferDialog');
 }
 
+function extractVVChatSyncBlock(text) {
+  if (!text) return '';
+  const match = String(text).match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
+  return match ? match[1].trim() : '';
+}
+
+function parseVVSyncMessages(syncText) {
+  if (!syncText) return [];
+
+  const blocks = [...String(syncText).matchAll(/\[消息\]([\s\S]*?)\[\/消息\]/g)];
+
+  return blocks.map(match => {
+    const block = match[1];
+
+    const getField = (name) => {
+      const m = block.match(new RegExp(`${name}=([^\\n]*)`));
+      return m ? m[1].trim() : '';
+    };
+
+    return {
+      side: getField('side'),
+      sender: getField('sender'),
+      content: getField('content') || getField('text'),
+      state: getField('state'),
+      transferAction: getField('transferAction'),
+      transferAmount: getField('transferAmount'),
+      transferNote: getField('transferNote')
+    };
+  });
+}
+
 function handleAITransferDirectives(chatId, text) {
   if (!chatId || !text) return text;
 
-  let cleanText = text;
+  console.log('[handleAITransferDirectives] raw head=', String(text).slice(0, 500));
 
-  if (cleanText.includes('[TRANSFER_ACCEPT]')) {
-    const transferMsg = findLastPendingMyTransfer(chatId);
-    if (transferMsg) {
-      acceptMyTransferByAI(chatId, transferMsg);
+  const syncText = extractVVChatSyncBlock(text);
+  if (!syncText) return text;
+
+  const syncMessages = parseVVSyncMessages(syncText);
+
+  syncMessages.forEach(msg => {
+    if (msg.side !== 'left') return;
+
+    if (msg.transferAction === 'accept') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) {
+        acceptMyTransferByAI(chatId, transferMsg);
+      }
     }
-    cleanText = cleanText.replace(/\[TRANSFER_ACCEPT\]/g, '').trim();
-  }
 
-  if (cleanText.includes('[TRANSFER_RETURN]')) {
-    const transferMsg = findLastPendingMyTransfer(chatId);
-    if (transferMsg) {
-      returnMyTransferByAI(chatId, transferMsg);
+    if (msg.transferAction === 'return') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) {
+        returnMyTransferByAI(chatId, transferMsg);
+      }
     }
-    cleanText = cleanText.replace(/\[TRANSFER_RETURN\]/g, '').trim();
-  }
 
-  cleanText = cleanText.replace(/\[TRANSFER_SEND:(\d+(?:\.\d+)?)\|?(.*?)\]/g, (_, amount, note) => {
-    receiveTransferFromAI(chatId, Number(amount), note || '给你的转账');
-    return '';
-  }).trim();
+    if (msg.transferAction === 'send') {
+      const amount = Number(msg.transferAmount || 0);
+      if (amount > 0) {
+        receiveTransferFromAI(chatId, amount, msg.transferNote || '给你的转账');
+      }
+    }
+  });
 
-  return cleanText;
+  return text;
 }
 
 function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
