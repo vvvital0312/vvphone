@@ -1,6 +1,7 @@
 let currentUploadImage = '';
 let currentActiveContactId = '';
 let currentChatId = '';
+let isChatViewReady = false;
 let currentChatType = 'direct';
 let currentContactTab = 'direct';
 let currentCallId = '';
@@ -2354,10 +2355,15 @@ async function addFeedPost() {
 async function openChat(id, type = 'direct') {
   currentChatId = id;
   currentChatType = type;
+  isChatViewReady = false;
 
   const list = type === 'group' ? groupList : contactList;
   const item = list.find(i => i.id === id);
   if (!item) return;
+
+  if (!messages[id]) messages[id] = [];
+  getChatSetting(id);
+  getRelSetting(id);
 
   const title = document.getElementById('chatDetailName');
   const a = document.getElementById('contactPage');
@@ -2371,6 +2377,8 @@ async function openChat(id, type = 'direct') {
   await applyCurrentChatBackground();
   await renderMessages();
   renderChatList?.();
+
+  isChatViewReady = true;
 }
 
 async function applyCurrentChatBackground() {
@@ -2390,6 +2398,8 @@ async function applyCurrentChatBackground() {
 
 async function openChatDetail(chatId, forceName = '') {
   if (!chatId) return;
+
+  isChatViewReady = false;
 
   if (!messages[chatId]) {
     messages[chatId] = [];
@@ -2457,7 +2467,7 @@ async function openChatDetail(chatId, forceName = '') {
     page.style.display = 'block';
   }
 
-  renderComposerPreview();
+  renderComposerPreview?.();
 
   if (typeof applyCurrentChatBackground === 'function') {
     await applyCurrentChatBackground();
@@ -2474,6 +2484,8 @@ async function openChatDetail(chatId, forceName = '') {
   }
 
   saveAll();
+
+  isChatViewReady = true;
 }
 
 async function restoreLastChatSession() {
@@ -2898,6 +2910,10 @@ function removeRefsPossiblyUnused(refs) {
 async function sendMessage() {
   if (!currentChatId) return;
 
+  if (!isChatViewReady && typeof openChatDetail === 'function') {
+    await openChatDetail(currentChatId);
+  }
+
   const rel = getRelSetting(currentChatId);
   if (rel.blockedByMe) {
     alert('你已拉黑该联系人，无法发送消息');
@@ -2975,9 +2991,10 @@ async function sendMessage() {
   input.value = '';
   clearComposerDraft();
   saveAll();
-  closeEmojiPanel();
+  closeEmojiPanel?.();
 
   await renderMessages();
+  await triggerAIReply();
 }
 
 function buildVVEventPayload(chatId) {
@@ -3063,7 +3080,7 @@ async function triggerAIReply() {
   isTriggeringAIReply = true;
 
   try {
-    console.log('triggerAIReply check:', currentChatId, pendingReplyTargets[currentChatId]);
+    console.log('[triggerAIReply] currentChatId=', currentChatId, 'pending=', pendingReplyTargets[currentChatId], 'msgLen=', (messages[currentChatId] || []).length);
 
     if (!currentChatId) return;
 
@@ -5047,7 +5064,7 @@ function getVVRouteParams() {
   }
 }
 
-function openChatByRoute() {
+async function openChatByRoute() {
   const route = getVVRouteParams();
   if (route.view !== 'chat') return false;
   if (!route.chatId) return false;
@@ -5073,7 +5090,7 @@ function openChatByRoute() {
   }
 
   if (typeof openChatDetail === 'function') {
-    openChatDetail(chatId, route.target || '');
+    await openChatDetail(chatId, route.target || '');
     return true;
   }
 
@@ -5085,13 +5102,14 @@ function openChatByRoute() {
   }
 
   if (typeof applyCurrentChatBackground === 'function') {
-    applyCurrentChatBackground();
+    await applyCurrentChatBackground();
   }
 
   if (typeof renderMessages === 'function') {
-    renderMessages();
+    await renderMessages();
   }
 
+  isChatViewReady = true;
   return true;
 }
 
