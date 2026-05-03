@@ -3054,9 +3054,6 @@ async function sendMessage() {
     : getAttachmentSummary(attachments[attachments.length - 1]);
 
   updateLastMsg(currentChatId, lastContent, time, currentChatType);
-  pendingReplyTargets[currentChatId] = true;
-
-  console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
   input.value = '';
   clearComposerDraft();
@@ -3064,7 +3061,8 @@ async function sendMessage() {
   closeEmojiPanel?.();
 
   await renderMessages();
-  await triggerAIReply();
+
+  console.log('[sendMessage] message saved locally only, waiting for manual triggerAIReply');
 }
 
 function buildVVEventPayload(chatId) {
@@ -4814,11 +4812,27 @@ function maybeSimulateIncomingCall() {
 function initSTBridgeListener() {
   window.addEventListener('message', async event => {
     const data = event.data;
-    if (!data || typeof data !== 'object') return;
+
+    console.log('[VV][listener] raw message event:', data);
+
+    if (!data || typeof data !== 'object') {
+      console.log('[VV][listener] ignored: data invalid');
+      return;
+    }
 
     const myViewId = window.__vv_view_id || '';
+    console.log('[VV][listener] view check:', {
+      incomingType: data.type,
+      incomingViewId: data.viewId || '',
+      myViewId
+    });
+
     if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+      console.log('[VV][listener] ignore message for other viewId:', {
+        type: data.type,
+        incomingViewId: data.viewId,
+        myViewId
+      });
       return;
     }
 
@@ -4829,6 +4843,7 @@ function initSTBridgeListener() {
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
       await handleVVChatSyncRaw(data.raw || '');
+      return;
     }
 
     if (data.type === 'VVPHONE_REPLY') {
@@ -4838,6 +4853,7 @@ function initSTBridgeListener() {
         senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
         text: data.text || '……'
       });
+      return;
     }
 
     if (data.type === 'VVPHONE_CALL_REPLY') {
@@ -4852,6 +4868,7 @@ function initSTBridgeListener() {
       });
       renderCallTranscript();
       saveAll();
+      return;
     }
 
     if (data.type === 'VVPHONE_CALL_STATUS') {
@@ -4868,6 +4885,7 @@ function initSTBridgeListener() {
         document.getElementById('callStatus').innerText = '无人接听';
         document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
       }
+      return;
     }
 
     if (data.type === 'VVPHONE_INCOMING_CALL') {
@@ -4892,6 +4910,7 @@ function initSTBridgeListener() {
 
       saveAll();
       simulateIncomingCall(contact.id);
+      return;
     }
 
     if (data.type === 'VVPHONE_FEED_REPLY') {
@@ -4901,7 +4920,10 @@ function initSTBridgeListener() {
         text: data.text || '……',
         replyTo: data.replyTo || ''
       });
+      return;
     }
+
+    console.log('[VV][listener] unhandled message type:', data.type);
   });
 }
 
