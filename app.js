@@ -931,16 +931,9 @@ function appendVVChatReplyToLocal(chatData) {
   });
 
   saveAll();
-
-  if (chatId === currentChatId) {
-    requestAnimationFrame(() => {
-      renderMessages();
-      applyCurrentChatBackground?.();
-    });
-  }
 }
 
-function handleVVChatSyncRaw(raw) {
+async function handleVVChatSyncRaw(raw) {
   console.log('[VV] handleVVChatSyncRaw raw full >>>');
   console.log(String(raw || ''));
   console.log('<<< [VV] handleVVChatSyncRaw raw full');
@@ -955,20 +948,10 @@ function handleVVChatSyncRaw(raw) {
 
   appendVVChatReplyToLocal(parsed);
 
-  // 等一帧，确保当前会话状态、DOM、背景等都稳定后再刷新
-  requestAnimationFrame(() => {
-    if (parsed.chatId === currentChatId) {
-      renderMessages();
-      applyCurrentChatBackground?.();
-
-      // 再做一次轻量兜底刷新，避免首条消息或某些轮次延迟显示
-      setTimeout(() => {
-        if (parsed.chatId === currentChatId) {
-          renderMessages();
-        }
-      }, 30);
-    }
-  });
+  if (parsed.chatId === currentChatId) {
+    await renderMessages();
+    applyCurrentChatBackground?.();
+  }
 }
 
 async function triggerSlash(cmd) {
@@ -2717,7 +2700,10 @@ async function renderMessages() {
   console.log('[renderMessages] html injected');
 
   await hydrateMediaRefs(area);
-  console.log('[renderMessages] hydrate done');
+
+  area.style.display = 'none';
+  area.offsetHeight;
+  area.style.display = '';
 
   area.scrollTop = area.scrollHeight;
 }
@@ -2909,7 +2895,7 @@ function removeRefsPossiblyUnused(refs) {
   }, 0);
 }
 
-function sendMessage() {
+async function sendMessage() {
   if (!currentChatId) return;
 
   const rel = getRelSetting(currentChatId);
@@ -2977,17 +2963,21 @@ function sendMessage() {
     });
   });
 
-  const lastContent = hasText ? chunks[chunks.length - 1] : getAttachmentSummary(attachments[attachments.length - 1]);
-  updateLastMsg(currentChatId, lastContent, time, currentChatType);
+  const lastContent = hasText
+    ? chunks[chunks.length - 1]
+    : getAttachmentSummary(attachments[attachments.length - 1]);
 
+  updateLastMsg(currentChatId, lastContent, time, currentChatType);
   pendingReplyTargets[currentChatId] = true;
+
   console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-    input.value = '';
-    clearComposerDraft();
-    renderMessages();
-    saveAll();
-    closeEmojiPanel();
+  input.value = '';
+  clearComposerDraft();
+  saveAll();
+  closeEmojiPanel();
+
+  await renderMessages();
 }
 
 function buildVVEventPayload(chatId) {
@@ -4694,7 +4684,7 @@ function maybeSimulateIncomingCall() {
 }
 
 function initSTBridgeListener() {
-  window.addEventListener('message', event => {
+  window.addEventListener('message', async event => {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
 
@@ -4710,7 +4700,7 @@ function initSTBridgeListener() {
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
-      handleVVChatSyncRaw(data.raw || '');
+      await handleVVChatSyncRaw(data.raw || '');
     }
 
     if (data.type === 'VVPHONE_REPLY') {
