@@ -808,7 +808,7 @@ function appendVVChatReplyToLocal(chatData) {
     messages[chatId] = [];
   }
 
-  // 确保新会话的相关设置已初始化，避免首条消息时状态不完整
+  // 确保新会话初始化完整
   getChatSetting(chatId);
   getRelSetting(chatId);
 
@@ -816,19 +816,35 @@ function appendVVChatReplyToLocal(chatData) {
   const time = getNowTime();
   const timeLabel = chatData.time || getNowFullLabel();
 
-  const leftMsgs = (chatData.messages || []).filter(msg => {
-    const isLeft = String(msg.side || '').trim().toLowerCase() === 'left';
-    const hasContent = !!String(msg.content || '').trim();
-    return isLeft && hasContent;
+  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+  console.log('[VV] all parsed messages:', allMsgs);
+
+  const leftMsgs = allMsgs.filter(msg => {
+    const side = String(msg.side || '').trim().toLowerCase();
+    const content = String(msg.content || '').trim();
+    const isLeftLike = side === 'left' || side === 'assistant' || side === 'them';
+    const hasContent = !!content;
+
+    console.log('[VV] filter msg check:', {
+      raw: msg,
+      side,
+      isLeftLike,
+      content,
+      hasContent
+    });
+
+    return isLeftLike && hasContent;
   });
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
+
+  let hasAppendedLeftMessage = false;
+  let hasAnyLeftSignal = leftMsgs.length > 0;
 
   leftMsgs.forEach(msg => {
     const normalizedContent = String(msg.content || '').trim();
     if (!normalizedContent) return;
 
-    // 只跟“最近一条 AI 文本消息”比较，避免扫全线程导致误判重复
     const lastAssistantMsg = [...thread].reverse().find(item =>
       !item.isMe &&
       !item.recalled &&
@@ -861,16 +877,19 @@ function appendVVChatReplyToLocal(chatData) {
         timeLabel,
         state: msg.state || 'reply'
       });
+
+      hasAppendedLeftMessage = true;
+      console.log('[VV] appended assistant msg:', normalizedContent);
     } else {
       console.log('[VV] skip duplicated assistant msg:', normalizedContent);
     }
 
-    // 处理转账动作字段
     const action = String(msg.transferAction || '').trim().toLowerCase();
 
     if (action === 'accept') {
       const transferMsg = findLastPendingMyTransfer(chatId);
       if (transferMsg) {
+        console.log('[VV] transferAction=accept, accept last pending transfer');
         acceptMyTransferByAI(chatId, transferMsg);
       }
     }
@@ -878,6 +897,7 @@ function appendVVChatReplyToLocal(chatData) {
     if (action === 'return') {
       const transferMsg = findLastPendingMyTransfer(chatId);
       if (transferMsg) {
+        console.log('[VV] transferAction=return, return last pending transfer');
         returnMyTransferByAI(chatId, transferMsg);
       }
     }
@@ -896,7 +916,10 @@ function appendVVChatReplyToLocal(chatData) {
         );
 
         if (!alreadyExists) {
+          console.log('[VV] transferAction=send, receive transfer from AI:', amount, note);
           receiveTransferFromAI(chatId, amount, note);
+        } else {
+          console.log('[VV] skip duplicated AI transfer:', amount, note);
         }
       }
     }
@@ -923,6 +946,29 @@ function appendVVChatReplyToLocal(chatData) {
     updateLastMsg(chatId, last.content, time, currentChatType);
   }
 
+  // 关键闭环：只要这一轮确实收到了左侧消息信号，就清 pending
+  if (hasAnyLeftSignal) {
+    pendingReplyTargets[chatId] = false;
+
+    thread.forEach(m => {
+      if (m.isMe && !m.recalled && m.pendingForReply) {
+        m.pendingForReply = false;
+      }
+    });
+
+    console.log('[VV] pending cleared after sync:', {
+      chatId,
+      hasAnyLeftSignal,
+      hasAppendedLeftMessage,
+      pending: pendingReplyTargets[chatId]
+    });
+  } else {
+    console.warn('[VV] no leftMsgs appended from sync:', {
+      chatId,
+      allMsgs
+    });
+  }
+
   console.log('[VV] thread after append:', thread);
   console.log('[VV] append done:', {
     chatId,
@@ -932,27 +978,51 @@ function appendVVChatReplyToLocal(chatData) {
   });
 
   saveAll();
+
+  if (chatId === currentChatId && typeof renderMessages === 'function') {
+    renderMessages();
+  }
 }
 
 async function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw raw full >>>');
+  console.log('[VV] handleVVChatSyncRaw called');
+  console.log('[VV] raw sync text >>>');
   console.log(String(raw || ''));
-  console.log('<<< [VV] handleVVChatSyncRaw raw full');
+  console.log('<<< [VV] raw sync text');
 
   const parsed = parseVVChatBlocks(raw);
-  console.log('[VV] parseVVChatBlocks result:', parsed);
+
+  console.log('[VV] parsed sync data:', parsed);
 
   if (!parsed) {
-    console.warn('[VV] parseVVChatBlocks returned null');
+    console.warn('[VV] handleVVChatSyncRaw: parsed is null');
     return;
   }
 
+  if (!parsed.chatId) {
+    console.warn('[VV] handleVVChatSyncRaw: parsed.chatId missing');
+    return;
+  }
+
+  console.log('[VV] handleVVChatSyncRaw compare chatId:', {
+    parsedChatId: parsed.chatId,
+    currentChatId
+  });
+
   appendVVChatReplyToLocal(parsed);
 
-  if (parsed.chatId === currentChatId) {
+  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+    console.log('[VV] handleVVChatSyncRaw render current chat');
     await renderMessages();
-    applyCurrentChatBackground?.();
+  } else {
+    console.log('[VV] handleVVChatSyncRaw skip render, parsed.chatId != currentChatId');
   }
+
+  if (typeof renderChatList === 'function') {
+    renderChatList();
+  }
+
+  saveAll();
 }
 
 async function triggerSlash(cmd) {
@@ -3076,61 +3146,102 @@ function buildVVEventPayload(chatId) {
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
-  if (isTriggeringAIReply) return;
+  if (isTriggeringAIReply) {
+    console.log('[triggerAIReply] skipped: locked');
+    return;
+  }
+
   isTriggeringAIReply = true;
 
   try {
-    console.log('[triggerAIReply] currentChatId=', currentChatId, 'pending=', pendingReplyTargets[currentChatId], 'msgLen=', (messages[currentChatId] || []).length);
+    console.log(
+      '[triggerAIReply] currentChatId=',
+      currentChatId,
+      'pending=',
+      pendingReplyTargets[currentChatId],
+      'msgLen=',
+      (messages[currentChatId] || []).length
+    );
 
-    if (!currentChatId) return;
+    if (!currentChatId) {
+      console.log('[triggerAIReply] aborted: no currentChatId');
+      return;
+    }
 
     if (!pendingReplyTargets[currentChatId]) {
+      console.log('[triggerAIReply] aborted: no pending target');
       return;
     }
 
     const thread = messages[currentChatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
+    console.log('[triggerAIReply] pendingMessages.length =', pendingMessages.length);
+    console.log('[triggerAIReply] pendingMessages =', pendingMessages);
+
     if (!pendingMessages.length) {
+      console.log('[triggerAIReply] no pendingMessages, clear target');
       pendingReplyTargets[currentChatId] = false;
       saveAll();
       return;
     }
 
     const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
+    const vvPayload = buildVVEventPayload(currentChatId);
+    const latestPayload = buildLatestUserPayload(currentChatId);
+    const promptText = vvPayload || latestPayload;
+
+    console.log('[triggerAIReply] bridgeName =', bridgeName);
+    console.log('[triggerAIReply] vvPayload =', vvPayload);
+    console.log('[triggerAIReply] latestPayload =', latestPayload);
+    console.log('[triggerAIReply] final promptText =', promptText);
+
+    if (!promptText || !String(promptText).trim()) {
+      console.warn('[triggerAIReply] aborted: promptText is empty');
+      return;
+    }
 
     let slashOk = false;
 
-    if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')) {
+    if (
+      VV_BRIDGE_CONFIG.enabled &&
+      (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')
+    ) {
       const cmd = VV_BRIDGE_CONFIG.buildReplyCommand({
         bridgeName,
         chatId: currentChatId,
         chatType: currentChatType,
         promptText
       });
-      slashOk = await triggerSlash(cmd);
-    }
 
-    if (slashOk) {
-      pendingMessages.forEach(m => {
-        m.pendingForReply = false;
-      });
-      pendingReplyTargets[currentChatId] = false;
+      console.log('[triggerAIReply] slash cmd =', cmd);
+      slashOk = await triggerSlash(cmd);
+      console.log('[triggerAIReply] slashOk =', slashOk);
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
+      console.log('[triggerAIReply] fallback simulateAutoReply');
       simulateAutoReply(currentChatId, currentChatType);
+
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
       pendingReplyTargets[currentChatId] = false;
+
+      saveAll();
+      return;
     }
 
+    // 关键：这里不要提前清 pending
+    // 等 handleVVChatSyncRaw -> appendVVChatReplyToLocal 真正落库后再清
+    console.log('[triggerAIReply] slash submitted, waiting for VVPHONE_CHAT_SYNC...');
     saveAll();
+  } catch (err) {
+    console.error('[triggerAIReply] error:', err);
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
+      console.log('[triggerAIReply] lock released');
     }, 300);
   }
 }

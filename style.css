@@ -94,7 +94,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .widget .date{font-size:16px;opacity:.9}
 .widget .weather{font-size:16px;opacity:.95;margin-top:0px}
 .app-grid{
-  position:absolute;top:420px;left:8px;right:8px;display:grid;
+  position:absolute;top:440px;left:8px;right:8px;display:grid;
   grid-template-columns:repeat(4,1fr);gap:6px
 }
 .app-block{
@@ -120,7 +120,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   text-overflow:ellipsis;
 }
 .bottom-bar{
-  position:absolute;left:6px;right:6px;bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px
+  position:absolute;left:6px;right:6px;bottom:20px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px
 }
 .bottom-bar .app{display:flex;flex-direction:column;align-items:center;cursor:pointer}
 .dialog{
