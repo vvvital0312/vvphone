@@ -802,9 +802,14 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   const chatId = chatData.chatId;
+
   if (!messages[chatId]) {
     messages[chatId] = [];
   }
+
+  // 确保新会话的相关设置已初始化，避免首条消息时状态不完整
+  getChatSetting(chatId);
+  getRelSetting(chatId);
 
   const thread = messages[chatId];
   const time = getNowTime();
@@ -822,20 +827,26 @@ function appendVVChatReplyToLocal(chatData) {
     const normalizedContent = String(msg.content || '').trim();
     if (!normalizedContent) return;
 
-    const duplicated = thread.some(item =>
+    // 只跟“最近一条 AI 文本消息”比较，避免扫全线程导致误判重复
+    const lastAssistantMsg = [...thread].reverse().find(item =>
       !item.isMe &&
       !item.recalled &&
-      item.type === 'text' &&
+      item.type === 'text'
+    );
+
+    const duplicated = !!lastAssistantMsg && (
       (
-        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
-        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
+        Array.isArray(lastAssistantMsg.chunks) &&
+        lastAssistantMsg.chunks.join('\n').trim() === normalizedContent
+      ) ||
+      (
+        typeof lastAssistantMsg.text === 'string' &&
+        lastAssistantMsg.text.trim() === normalizedContent
       )
     );
 
-    let appendedMessage = null;
-
     if (!duplicated) {
-      appendedMessage = {
+      thread.push({
         id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
         sender: 'them',
         senderName: msg.sender || chatData.target || '对方',
@@ -848,13 +859,12 @@ function appendVVChatReplyToLocal(chatData) {
         time,
         timeLabel,
         state: msg.state || 'reply'
-      };
-
-      thread.push(appendedMessage);
+      });
     } else {
       console.log('[VV] skip duplicated assistant msg:', normalizedContent);
     }
 
+    // 处理转账动作字段
     const action = String(msg.transferAction || '').trim().toLowerCase();
 
     if (action === 'accept') {
@@ -900,7 +910,10 @@ function appendVVChatReplyToLocal(chatData) {
   if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
   if (chatData.myBubble) setting.myBubble = chatData.myBubble;
   if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.targetAvatarId) {
+    setting.theirAvatar = chatData.targetAvatarId;
+    setting.targetAvatarId = chatData.targetAvatarId;
+  }
   if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
   if (chatData.target) setting.target = chatData.target;
 
@@ -910,13 +923,21 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   console.log('[VV] thread after append:', thread);
-
-  if (chatId === currentChatId) {
-    renderMessages();
-    applyCurrentChatBackground();
-  }
+  console.log('[VV] append done:', {
+    chatId,
+    currentChatId,
+    threadLen: thread.length,
+    lastMsg: thread[thread.length - 1]
+  });
 
   saveAll();
+
+  if (chatId === currentChatId) {
+    requestAnimationFrame(() => {
+      renderMessages();
+      applyCurrentChatBackground?.();
+    });
+  }
 }
 
 function handleVVChatSyncRaw(raw) {
@@ -933,9 +954,21 @@ function handleVVChatSyncRaw(raw) {
   }
 
   appendVVChatReplyToLocal(parsed);
-  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 
-  renderMessages();
+  // 等一帧，确保当前会话状态、DOM、背景等都稳定后再刷新
+  requestAnimationFrame(() => {
+    if (parsed.chatId === currentChatId) {
+      renderMessages();
+      applyCurrentChatBackground?.();
+
+      // 再做一次轻量兜底刷新，避免首条消息或某些轮次延迟显示
+      setTimeout(() => {
+        if (parsed.chatId === currentChatId) {
+          renderMessages();
+        }
+      }, 30);
+    }
+  });
 }
 
 async function triggerSlash(cmd) {
