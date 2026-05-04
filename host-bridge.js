@@ -1,8 +1,11 @@
 (function () {
   const VVHostBridge = {
     frame: null,
+    frameReady: false,
+
     lastChatSyncRaw: '',
     lastChatSyncChatId: '',
+
     lastContext: {
       type: 'chat',
       command: '',
@@ -14,14 +17,44 @@
 
     init() {
       this.frame = document.getElementById('vvphoneFrame');
+      this.bindFrameReady();
       this.bindEvents();
       this.log('宿主页桥接已启动', 'ok');
+    },
+
+    bindFrameReady() {
+      const refreshFrame = () => {
+        this.frame = document.getElementById('vvphoneFrame');
+        this.frameReady = !!(this.frame && this.frame.contentWindow);
+      };
+
+      refreshFrame();
+
+      if (this.frame) {
+        this.frame.addEventListener('load', () => {
+          refreshFrame();
+          this.log('iframe load 完成', 'ok', {
+            frameReady: this.frameReady
+          });
+        });
+      }
+
+      setTimeout(refreshFrame, 50);
+      setTimeout(refreshFrame, 300);
+      setTimeout(refreshFrame, 1000);
     },
 
     bindEvents() {
       window.addEventListener('message', async (event) => {
         const data = event.data;
         if (!data || typeof data !== 'object') return;
+
+        this.log('收到 message', 'ok', {
+          type: data.type || '',
+          requestId: data.requestId || '',
+          viewId: data.viewId || '',
+          chatId: data.chatId || ''
+        });
 
         if (data.type === 'VV_EXECUTE_SLASH' || data.type === 'VVPHONE_SLASH') {
           await this.handleSlashRequest(data);
@@ -41,9 +74,8 @@
       const requestId = data.requestId || '';
       const viewId = data.viewId || '';
 
-      this.lastContext.command = command;
-
       const parsed = this.parseCommand(command);
+
       this.lastContext = {
         ...this.lastContext,
         ...parsed,
@@ -67,6 +99,7 @@
           ok: true,
           error: null
         });
+
         this.log('当前为 passthrough 模式：仅记录命令，不自动回传聊天内容', 'warn');
         return;
       }
@@ -78,6 +111,7 @@
           ok: true,
           error: null
         });
+
         this.log('当前为 manual 模式：等待你点击“发送手动回传”', 'warn');
         return;
       }
@@ -113,29 +147,50 @@
     },
 
     replyExecuteResult({ requestId, viewId, ok, error }) {
-      window.postMessage({
+      const payload = {
         type: 'VV_EXECUTE_RESULT',
         requestId: requestId || '',
         viewId: viewId || '',
         ok: !!ok,
         error: error || null
-      }, '*');
+      };
+
+      this.emitToPhone(payload);
+
+      this.log('已回传 VV_EXECUTE_RESULT', ok ? 'ok' : 'err', payload);
     },
 
     emitToPhone(payload) {
-      try {
-        window.postMessage(payload, '*');
-      } catch (e) {
-        console.warn('[VVHostBridge] window.postMessage failed:', e);
-      }
+      let postedToFrame = false;
+      let postedToWindow = false;
 
       try {
+        this.frame = document.getElementById('vvphoneFrame') || this.frame;
+
         if (this.frame && this.frame.contentWindow) {
           this.frame.contentWindow.postMessage(payload, '*');
+          postedToFrame = true;
         }
       } catch (e) {
         console.warn('[VVHostBridge] frame.contentWindow.postMessage failed:', e);
       }
+
+      try {
+        window.postMessage(payload, '*');
+        postedToWindow = true;
+      } catch (e) {
+        console.warn('[VVHostBridge] window.postMessage failed:', e);
+      }
+
+      this.log('emitToPhone', postedToFrame || postedToWindow ? 'ok' : 'err', {
+        type: payload?.type || '',
+        viewId: payload?.viewId || '',
+        chatId: payload?.chatId || '',
+        postedToFrame,
+        postedToWindow
+      });
+
+      return postedToFrame || postedToWindow;
     },
 
     resendLastChatSync(chatId, viewId) {
@@ -152,20 +207,22 @@
         return false;
       }
 
-      this.emitToPhone({
+      const payload = {
         type: 'VVPHONE_CHAT_SYNC',
         chatId: this.lastChatSyncChatId || chatId || '',
         raw: this.lastChatSyncRaw,
         viewId: viewId || ''
-      });
+      };
 
-      this.log('已补发 last VVPHONE_CHAT_SYNC', 'ok', {
-        chatId: this.lastChatSyncChatId || chatId || '',
-        viewId: viewId || '',
+      const ok = this.emitToPhone(payload);
+
+      this.log(ok ? '已补发 last VVPHONE_CHAT_SYNC' : '补发 last VVPHONE_CHAT_SYNC 失败', ok ? 'ok' : 'err', {
+        chatId: payload.chatId,
+        viewId: payload.viewId,
         raw: String(this.lastChatSyncRaw || '').slice(0, 500)
       });
 
-      return true;
+      return ok;
     },
 
     parseCommand(command) {
@@ -412,11 +469,6 @@
     },
 
     sendManualReply() {
-      if (!this.frame || !this.frame.contentWindow) {
-        this.log('iframe 不存在，无法手动回传', 'err');
-        return;
-      }
-
       const text = document.getElementById('hostManualReply')?.value.trim();
       const manualType = document.getElementById('hostManualType')?.value || 'chat';
       const senderName = this.getDefaultSender();
@@ -435,7 +487,7 @@
           text,
           replyTo: '',
           viewId
-        }, '*');
+        });
 
         this.log('手动回传 VVPHONE_FEED_REPLY', 'ok', {
           postId: this.lastContext.postId || '',
@@ -452,7 +504,7 @@
           senderName,
           text,
           viewId
-        }, '*');
+        });
 
         this.log('手动回传 VVPHONE_CALL_REPLY', 'ok', {
           chatId: this.lastContext.chatId || '',
@@ -497,9 +549,12 @@
         '[/VV_CHAT_SYNC]'
       ].join('\n');
 
+      this.lastChatSyncRaw = raw;
+      this.lastChatSyncChatId = this.lastContext.chatId || '';
+
       this.emitToPhone({
         type: 'VVPHONE_CHAT_SYNC',
-        chatId: parsed.chatId || '',
+        chatId: this.lastContext.chatId || '',
         raw,
         viewId
       });
@@ -512,11 +567,6 @@
     },
 
     sendManualCallStatus() {
-      if (!this.frame || !this.frame.contentWindow) {
-        this.log('iframe 不存在，无法回传电话状态', 'err');
-        return;
-      }
-
       const status = this.getSelectedCallStatus();
       const viewId = window.__vv_view_id || '';
 
@@ -525,7 +575,7 @@
         chatId: this.lastContext.chatId || '',
         status,
         viewId
-      }, '*');
+      });
 
       this.log('手动回传 VVPHONE_CALL_STATUS', 'ok', {
         chatId: this.lastContext.chatId || '',
@@ -534,11 +584,6 @@
     },
 
     testIncomingCall() {
-      if (!this.frame || !this.frame.contentWindow) {
-        this.log('iframe 不存在，无法测试来电', 'err');
-        return;
-      }
-
       const senderName = this.getDefaultSender();
       const viewId = window.__vv_view_id || '';
 
@@ -547,7 +592,7 @@
         senderName,
         bridgeName: senderName,
         viewId
-      }, '*');
+      });
 
       this.log('已发送测试来电', 'ok', { senderName });
     },

@@ -1153,18 +1153,22 @@ async function triggerSlash(cmd) {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       const viewId = window.__vv_view_id || '';
 
+      function cleanup() {
+        window.removeEventListener('message', onMessage);
+      }
+
       function onMessage(event) {
         const data = event.data;
-        if (!data || data.type !== 'VV_EXECUTE_RESULT' || data.requestId !== requestId) {
-          return;
-        }
-        
+        if (!data || typeof data !== 'object') return;
+        if (data.type !== 'VV_EXECUTE_RESULT') return;
+        if (data.requestId !== requestId) return;
+
         if (data.viewId && viewId && data.viewId !== viewId) {
           console.log('[VV] ignore VV_EXECUTE_RESULT for other viewId:', data.viewId, 'mine=', viewId);
           return;
-        }        
+        }
 
-        window.removeEventListener('message', onMessage);
+        cleanup();
 
         if (VV_BRIDGE_CONFIG.debug) {
           console.log('[VV] 收到 bridge 消息:', data);
@@ -1181,11 +1185,17 @@ async function triggerSlash(cmd) {
       window.parent.postMessage({
         type: 'VV_EXECUTE_SLASH',
         requestId,
+        viewId,
         command: cmd
       }, '*');
 
+      console.log('[VV] posted VV_EXECUTE_SLASH', {
+        requestId,
+        viewId
+      });
+
       setTimeout(() => {
-        window.removeEventListener('message', onMessage);
+        cleanup();
         resolve({
           ok: false,
           error: 'timeout'
