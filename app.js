@@ -99,6 +99,120 @@ const VV_BRIDGE_CONFIG = {
   }
 };
 
+let vvBridgeListenerInited = false;
+
+function initSTBridgeListener() {
+  if (vvBridgeListenerInited) {
+    console.log('[VV] initSTBridgeListener skipped: already inited');
+    return;
+  }
+  vvBridgeListenerInited = true;
+
+  console.log('[VV] initSTBridgeListener called');
+
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+
+    const myViewId = window.__vv_view_id || '';
+    if (data.viewId && myViewId && data.viewId !== myViewId) {
+      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+      return;
+    }
+
+    if (VV_BRIDGE_CONFIG.debug) {
+      console.log('[VV] 收到 bridge 消息:', data);
+    }
+
+    if (data.type === 'VVPHONE_CHAT_SYNC') {
+      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
+      handleVVChatSyncRaw(data.raw || '');
+      return;
+    }
+
+    if (data.type === 'VVPHONE_REPLY') {
+      const chatId = data.chatId || currentChatId;
+      appendAIMessageToCurrentChat({
+        chatId,
+        senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
+        text: data.text || '……'
+      });
+      return;
+    }
+
+    if (data.type === 'VVPHONE_CALL_REPLY') {
+      const chatId = data.chatId || currentCallId;
+      if (!chatId) return;
+      if (!callLogs[chatId]) callLogs[chatId] = [];
+      callLogs[chatId].push({
+        speaker: data.senderName || getBridgeNameByChatId(chatId, 'direct'),
+        isMe: false,
+        text: data.text || '我在听。',
+        time: getNowTime()
+      });
+      renderCallTranscript();
+      saveAll();
+      return;
+    }
+
+    if (data.type === 'VVPHONE_CALL_STATUS') {
+      const contactId = data.chatId || currentCallId;
+      if (!contactId) return;
+
+      const status = data.status;
+      if (status === 'accepted') {
+        openCallPage(contactId, true);
+      } else if (status === 'rejected') {
+        document.getElementById('callStatus').innerText = '对方已拒接';
+        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方拒接了你的来电。</div>';
+      } else if (status === 'missed') {
+        document.getElementById('callStatus').innerText = '无人接听';
+        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
+      }
+      return;
+    }
+
+    if (data.type === 'VVPHONE_INCOMING_CALL') {
+      const bridgeName = data.bridgeName || data.senderName || '角色';
+      let contact = contactList.find(i => (i.bridgeName || i.name) === bridgeName || i.name === bridgeName);
+
+      if (!contact) {
+        const id = 'c' + Date.now();
+        contact = {
+          id,
+          name: data.senderName || bridgeName,
+          bridgeName,
+          avatar: DEFAULT_AVATAR,
+          isSticky: false,
+          lastTime: getNowTime(),
+          threadType: 'direct'
+        };
+        contactList.unshift(contact);
+        getChatSetting(contact.id);
+        getRelSetting(contact.id);
+      }
+
+      saveAll();
+      simulateIncomingCall(contact.id);
+      return;
+    }
+
+    if (data.type === 'VVPHONE_FEED_REPLY') {
+      appendAICommentToFeed({
+        postId: data.postId,
+        senderName: data.senderName || '角色',
+        text: data.text || '……',
+        replyTo: data.replyTo || ''
+      });
+      return;
+    }
+
+    console.log('[VV][listener] unhandled message type:', data.type);
+  });
+}
+
+initSTBridgeListener();
+
 function safeJSONParse(raw, fallback) {
   try {
     return JSON.parse(raw);
@@ -4676,118 +4790,6 @@ function maybeSimulateIncomingCall() {
     const random = contactList[Math.floor(Math.random() * contactList.length)];
     setTimeout(() => simulateIncomingCall(random.id), 1200);
   }
-}
-
-let vvBridgeListenerInited = false;
-
-function initSTBridgeListener() {
-  if (vvBridgeListenerInited) {
-    console.log('[VV] initSTBridgeListener skipped: already inited');
-    return;
-  }
-  vvBridgeListenerInited = true;
-
-  console.log('[VV] initSTBridgeListener called');
-
-  window.addEventListener('message', event => {
-    const data = event.data;
-    if (!data || typeof data !== 'object') return;
-
-    const myViewId = window.__vv_view_id || '';
-    if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
-      return;
-    }
-
-    if (VV_BRIDGE_CONFIG.debug) {
-      console.log('[VV] 收到 bridge 消息:', data);
-    }
-
-    if (data.type === 'VVPHONE_CHAT_SYNC') {
-      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
-      handleVVChatSyncRaw(data.raw || '');
-      return;
-    }
-
-    if (data.type === 'VVPHONE_REPLY') {
-      const chatId = data.chatId || currentChatId;
-      appendAIMessageToCurrentChat({
-        chatId,
-        senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
-        text: data.text || '……'
-      });
-      return;
-    }
-
-    if (data.type === 'VVPHONE_CALL_REPLY') {
-      const chatId = data.chatId || currentCallId;
-      if (!chatId) return;
-      if (!callLogs[chatId]) callLogs[chatId] = [];
-      callLogs[chatId].push({
-        speaker: data.senderName || getBridgeNameByChatId(chatId, 'direct'),
-        isMe: false,
-        text: data.text || '我在听。',
-        time: getNowTime()
-      });
-      renderCallTranscript();
-      saveAll();
-      return;
-    }
-
-    if (data.type === 'VVPHONE_CALL_STATUS') {
-      const contactId = data.chatId || currentCallId;
-      if (!contactId) return;
-
-      const status = data.status;
-      if (status === 'accepted') {
-        openCallPage(contactId, true);
-      } else if (status === 'rejected') {
-        document.getElementById('callStatus').innerText = '对方已拒接';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方拒接了你的来电。</div>';
-      } else if (status === 'missed') {
-        document.getElementById('callStatus').innerText = '无人接听';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
-      }
-      return;
-    }
-
-    if (data.type === 'VVPHONE_INCOMING_CALL') {
-      const bridgeName = data.bridgeName || data.senderName || '角色';
-      let contact = contactList.find(i => (i.bridgeName || i.name) === bridgeName || i.name === bridgeName);
-
-      if (!contact) {
-        const id = 'c' + Date.now();
-        contact = {
-          id,
-          name: data.senderName || bridgeName,
-          bridgeName,
-          avatar: DEFAULT_AVATAR,
-          isSticky: false,
-          lastTime: getNowTime(),
-          threadType: 'direct'
-        };
-        contactList.unshift(contact);
-        getChatSetting(contact.id);
-        getRelSetting(contact.id);
-      }
-
-      saveAll();
-      simulateIncomingCall(contact.id);
-      return;
-    }
-
-    if (data.type === 'VVPHONE_FEED_REPLY') {
-      appendAICommentToFeed({
-        postId: data.postId,
-        senderName: data.senderName || '角色',
-        text: data.text || '……',
-        replyTo: data.replyTo || ''
-      });
-      return;
-    }
-
-    console.log('[VV][listener] unhandled message type:', data.type);
-  });
 }
 
 function initEventBindings() {
