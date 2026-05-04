@@ -794,165 +794,167 @@ function parseVVChatBlocks(raw) {
 }
 
 function appendVVChatReplyToLocal(chatData) {
-  console.log('[VV] appendVVChatReplyToLocal chatData:', chatData);
+  console.log('[VV][APPEND] enter');
+  console.log('[VV][APPEND] chatData =', chatData);
 
-  try {
-    if (!chatData || !chatData.chatId) {
-      console.warn('[VV] appendVVChatReplyToLocal: invalid chatData');
-      return;
+  if (!chatData || !chatData.chatId) {
+    console.warn('[VV][APPEND] invalid chatData');
+    return;
+  }
+
+  const chatId = chatData.chatId;
+  console.log('[VV][APPEND] chatId =', chatId);
+
+  if (!messages[chatId]) {
+    messages[chatId] = [];
+  }
+
+  console.log('[VV][APPEND] before get settings');
+
+  const setting = getChatSetting(chatId);
+  const rel = getRelSetting(chatId);
+
+  console.log('[VV][APPEND] after get settings');
+
+  const thread = messages[chatId];
+  const time = getNowTime();
+  const timeLabel = chatData.time || getNowFullLabel();
+  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+
+  console.log('[VV][APPEND] allMsgs =', allMsgs);
+
+  const leftMsgs = allMsgs.filter(msg => {
+    const side = String(msg.side || '').trim().toLowerCase();
+    const content = String(msg.content || '').trim();
+    return (side === 'left' || side === 'assistant' || side === 'them') && !!content;
+  });
+
+  console.log('[VV][APPEND] leftMsgs =', leftMsgs);
+  console.log('[VV][APPEND] leftMsgs.length =', leftMsgs.length);
+
+  for (let i = 0; i < leftMsgs.length; i++) {
+    console.log('[VV][APPEND] loop start i =', i);
+
+    const msg = leftMsgs[i];
+    console.log('[VV][APPEND] msg =', msg);
+
+    const normalizedContent = String(msg.content || '').trim();
+    console.log('[VV][APPEND] normalizedContent =', normalizedContent);
+
+    if (!normalizedContent) {
+      console.log('[VV][APPEND] skip empty content');
+      continue;
     }
 
-    const chatId = chatData.chatId;
-    console.log('[VV] append start chatId =', chatId);
+    const duplicated = thread.some(item =>
+      !item.isMe &&
+      !item.recalled &&
+      item.type === 'text' &&
+      (
+        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
+        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
+      )
+    );
 
-    if (!messages[chatId]) {
-      messages[chatId] = [];
+    console.log('[VV][APPEND] duplicated =', duplicated);
+
+    if (!duplicated) {
+      const newMsg = {
+        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+        sender: 'them',
+        senderName: msg.sender || chatData.target || '对方',
+        isMe: false,
+        type: 'text',
+        chunks: [normalizedContent],
+        text: normalizedContent,
+        replyTo: null,
+        recalled: false,
+        time,
+        timeLabel,
+        state: msg.state || 'sent'
+      };
+
+      console.log('[VV][APPEND] before push newMsg =', newMsg);
+      thread.push(newMsg);
+      console.log('[VV][APPEND] after push, thread =', thread);
     }
 
-    const setting = getChatSetting(chatId);
-    const rel = getRelSetting(chatId);
+    const action = String(msg.transferAction || '').trim().toLowerCase();
+    console.log('[VV][APPEND] transferAction =', action);
 
-    const thread = messages[chatId];
-    const time = getNowTime();
-    const timeLabel = chatData.time || getNowFullLabel();
+    if (action === 'accept') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      console.log('[VV][APPEND] accept transferMsg =', transferMsg);
+      if (transferMsg) acceptMyTransferByAI(chatId, transferMsg);
+    }
 
-    const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
-    console.log('[VV] allMsgs =', allMsgs);
+    if (action === 'return') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      console.log('[VV][APPEND] return transferMsg =', transferMsg);
+      if (transferMsg) returnMyTransferByAI(chatId, transferMsg);
+    }
 
-    const leftMsgs = allMsgs.filter(msg => {
-      const side = String(msg.side || '').trim().toLowerCase();
-      const content = String(msg.content || '').trim();
-      return (side === 'left' || side === 'assistant' || side === 'them') && !!content;
-    });
+    if (action === 'send') {
+      const amount = Number(msg.transferAmount || 0);
+      const note = String(msg.transferNote || '').trim() || '给你的转账';
 
-    console.log('[VV] leftMsgs to append:', leftMsgs);
+      console.log('[VV][APPEND] send amount/note =', amount, note);
 
-    leftMsgs.forEach((msg, index) => {
-      try {
-        const normalizedContent = String(msg.content || '').trim();
-        console.log('[VV] processing left msg #' + index, msg);
-
-        if (!normalizedContent) {
-          console.log('[VV] skip empty left msg');
-          return;
-        }
-
-        const duplicated = thread.some(item =>
+      if (amount > 0) {
+        const alreadyExists = thread.some(item =>
           !item.isMe &&
-          !item.recalled &&
-          item.type === 'text' &&
-          (
-            (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
-            (typeof item.text === 'string' && item.text.trim() === normalizedContent)
-          )
+          item.type === 'transfer' &&
+          Number(item.amount || 0) === amount &&
+          String(item.note || '').trim() === note &&
+          item.status === '待收款'
         );
 
-        console.log('[VV] duplicated =', duplicated, 'content =', normalizedContent);
+        console.log('[VV][APPEND] send alreadyExists =', alreadyExists);
 
-        if (!duplicated) {
-          const newMsg = {
-            id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-            sender: 'them',
-            senderName: msg.sender || chatData.target || '对方',
-            isMe: false,
-            type: 'text',
-            chunks: [normalizedContent],
-            text: normalizedContent,
-            replyTo: null,
-            recalled: false,
-            time,
-            timeLabel,
-            state: msg.state || 'sent'
-          };
-
-          thread.push(newMsg);
-          console.log('[VV] appended assistant msg:', newMsg);
-        } else {
-          console.log('[VV] skip duplicated assistant msg:', normalizedContent);
+        if (!alreadyExists) {
+          receiveTransferFromAI(chatId, amount, note);
         }
+      }
+    }
 
-        const action = String(msg.transferAction || '').trim().toLowerCase();
-        console.log('[VV] transfer action =', action);
+    console.log('[VV][APPEND] loop end i =', i);
+  }
 
-        if (action === 'accept') {
-          const transferMsg = findLastPendingMyTransfer(chatId);
-          if (transferMsg) {
-            acceptMyTransferByAI(chatId, transferMsg);
-          }
-        }
+  console.log('[VV][APPEND] after loop');
 
-        if (action === 'return') {
-          const transferMsg = findLastPendingMyTransfer(chatId);
-          if (transferMsg) {
-            returnMyTransferByAI(chatId, transferMsg);
-          }
-        }
+  if (chatData.target && rel && !rel.name) {
+    rel.name = chatData.target;
+  }
 
-        if (action === 'send') {
-          const amount = Number(msg.transferAmount || 0);
-          const note = String(msg.transferNote || '').trim() || '给你的转账';
+  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
+  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) {
+    setting.theirAvatar = chatData.targetAvatarId;
+    setting.targetAvatarId = chatData.targetAvatarId;
+  }
+  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+  if (chatData.target) setting.target = chatData.target;
 
-          if (amount > 0) {
-            const alreadyExists = thread.some(item =>
-              !item.isMe &&
-              item.type === 'transfer' &&
-              Number(item.amount || 0) === amount &&
-              String(item.note || '').trim() === note &&
-              item.status === '待收款'
-            );
+  if (leftMsgs.length > 0) {
+    const last = leftMsgs[leftMsgs.length - 1];
+    console.log('[VV][APPEND] before updateLastMsg');
+    updateLastMsg(chatId, last.content, time, currentChatType);
+    console.log('[VV][APPEND] after updateLastMsg');
 
-            if (!alreadyExists) {
-              receiveTransferFromAI(chatId, amount, note);
-            }
-          }
-        }
-      } catch (e) {
-        console.error('[VV] error while processing left msg:', e, msg);
+    pendingReplyTargets[chatId] = false;
+
+    thread.forEach(m => {
+      if (m.isMe && !m.recalled && m.pendingForReply) {
+        m.pendingForReply = false;
       }
     });
-
-    if (chatData.target && rel && !rel.name) {
-      rel.name = chatData.target;
-    }
-
-    if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
-    if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-    if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-    if (chatData.targetAvatarId) {
-      setting.theirAvatar = chatData.targetAvatarId;
-      setting.targetAvatarId = chatData.targetAvatarId;
-    }
-    if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
-    if (chatData.target) setting.target = chatData.target;
-
-    if (leftMsgs.length > 0) {
-      const last = leftMsgs[leftMsgs.length - 1];
-      updateLastMsg(chatId, last.content, time, currentChatType);
-
-      pendingReplyTargets[chatId] = false;
-
-      thread.forEach(m => {
-        if (m.isMe && !m.recalled && m.pendingForReply) {
-          m.pendingForReply = false;
-        }
-      });
-    }
-
-    console.log('[VV] thread after append:', JSON.parse(JSON.stringify(thread)));
-
-    saveAll();
-
-    if (chatId === currentChatId && typeof renderMessages === 'function') {
-      renderMessages();
-      setTimeout(() => {
-        if (chatId === currentChatId && typeof renderMessages === 'function') {
-          renderMessages();
-        }
-      }, 80);
-    }
-  } catch (err) {
-    console.error('[VV] appendVVChatReplyToLocal fatal error:', err);
   }
+
+  console.log('[VV][APPEND] final thread =', JSON.parse(JSON.stringify(thread)));
+
+  saveAll();
+  console.log('[VV][APPEND] saveAll done');
 }
 
 async function handleVVChatSyncRaw(raw) {
