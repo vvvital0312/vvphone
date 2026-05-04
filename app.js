@@ -794,28 +794,133 @@ function parseVVChatBlocks(raw) {
 }
 
 function appendVVChatReplyToLocal(chatData) {
-  console.log('========= APPEND HIT =========');
-  console.log(chatData);
+
+  if (!chatData || !chatData.chatId) {
+    console.warn('[VV][APPEND] invalid chatData');
+    return;
+  }
 
   const chatId = chatData.chatId;
-  if (!messages[chatId]) messages[chatId] = [];
 
-  messages[chatId].push({
-    id: 'test_' + Date.now(),
-    sender: 'them',
-    senderName: '测试',
-    isMe: false,
-    type: 'text',
-    chunks: ['测试气泡'],
-    text: '测试气泡',
-    replyTo: null,
-    recalled: false,
-    time: getNowTime(),
-    timeLabel: chatData.time || getNowFullLabel(),
-    state: 'sent'
+  if (!messages[chatId]) {
+    messages[chatId] = [];
+  }
+
+  const setting = getChatSetting(chatId);
+  const rel = getRelSetting(chatId);
+
+  const thread = messages[chatId];
+  const time = getNowTime();
+  const timeLabel = chatData.time || getNowFullLabel();
+  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+
+  const leftMsgs = allMsgs.filter(msg => {
+    const side = String(msg.side || '').trim().toLowerCase();
+    const content = String(msg.content || '').trim();
+    return (side === 'left' || side === 'assistant' || side === 'them') && !!content;
   });
 
-  console.log('========= APPEND DONE =========', messages[chatId]);
+  for (let i = 0; i < leftMsgs.length; i++) {
+
+    const msg = leftMsgs[i];
+
+    const normalizedContent = String(msg.content || '').trim();
+
+    if (!normalizedContent) {
+      continue;
+    }
+
+    const duplicated = thread.some(item =>
+      !item.isMe &&
+      !item.recalled &&
+      item.type === 'text' &&
+      (
+        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
+        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
+      )
+    );
+
+    if (!duplicated) {
+      const newMsg = {
+        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+        sender: 'them',
+        senderName: msg.sender || chatData.target || '对方',
+        isMe: false,
+        type: 'text',
+        chunks: [normalizedContent],
+        text: normalizedContent,
+        replyTo: null,
+        recalled: false,
+        time,
+        timeLabel,
+        state: msg.state || 'sent'
+      };
+
+      console.log('[VV][APPEND] before push newMsg =', newMsg);
+      thread.push(newMsg);
+      console.log('[VV][APPEND] after push, thread =', thread);
+    }
+
+    const action = String(msg.transferAction || '').trim().toLowerCase();
+
+    if (action === 'accept') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) acceptMyTransferByAI(chatId, transferMsg);
+    }
+
+    if (action === 'return') {
+      const transferMsg = findLastPendingMyTransfer(chatId);
+      if (transferMsg) returnMyTransferByAI(chatId, transferMsg);
+    }
+
+    if (action === 'send') {
+      const amount = Number(msg.transferAmount || 0);
+      const note = String(msg.transferNote || '').trim() || '给你的转账';
+
+      if (amount > 0) {
+        const alreadyExists = thread.some(item =>
+          !item.isMe &&
+          item.type === 'transfer' &&
+          Number(item.amount || 0) === amount &&
+          String(item.note || '').trim() === note &&
+          item.status === '待收款'
+        );
+
+        if (!alreadyExists) {
+          receiveTransferFromAI(chatId, amount, note);
+        }
+      }
+    }
+  }
+
+  if (chatData.target && rel && !rel.name) {
+    rel.name = chatData.target;
+  }
+
+  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
+  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
+  if (chatData.targetAvatarId) {
+    setting.theirAvatar = chatData.targetAvatarId;
+    setting.targetAvatarId = chatData.targetAvatarId;
+  }
+  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+  if (chatData.target) setting.target = chatData.target;
+
+  if (leftMsgs.length > 0) {
+    const last = leftMsgs[leftMsgs.length - 1];
+    updateLastMsg(chatId, last.content, time, currentChatType);
+
+    pendingReplyTargets[chatId] = false;
+
+    thread.forEach(m => {
+      if (m.isMe && !m.recalled && m.pendingForReply) {
+        m.pendingForReply = false;
+      }
+    });
+  }
+
+  saveAll();
 }
 
 async function handleVVChatSyncRaw(raw) {
@@ -4573,7 +4678,17 @@ function maybeSimulateIncomingCall() {
   }
 }
 
+let vvBridgeListenerInited = false;
+
 function initSTBridgeListener() {
+  if (vvBridgeListenerInited) {
+    console.log('[VV] initSTBridgeListener skipped: already inited');
+    return;
+  }
+  vvBridgeListenerInited = true;
+
+  console.log('[VV] initSTBridgeListener called');
+
   window.addEventListener('message', event => {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
@@ -4591,6 +4706,7 @@ function initSTBridgeListener() {
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
       handleVVChatSyncRaw(data.raw || '');
+      return;
     }
 
     if (data.type === 'VVPHONE_REPLY') {
@@ -4600,6 +4716,7 @@ function initSTBridgeListener() {
         senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
         text: data.text || '……'
       });
+      return;
     }
 
     if (data.type === 'VVPHONE_CALL_REPLY') {
@@ -4614,6 +4731,7 @@ function initSTBridgeListener() {
       });
       renderCallTranscript();
       saveAll();
+      return;
     }
 
     if (data.type === 'VVPHONE_CALL_STATUS') {
@@ -4630,6 +4748,7 @@ function initSTBridgeListener() {
         document.getElementById('callStatus').innerText = '无人接听';
         document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
       }
+      return;
     }
 
     if (data.type === 'VVPHONE_INCOMING_CALL') {
@@ -4654,6 +4773,7 @@ function initSTBridgeListener() {
 
       saveAll();
       simulateIncomingCall(contact.id);
+      return;
     }
 
     if (data.type === 'VVPHONE_FEED_REPLY') {
@@ -4663,7 +4783,10 @@ function initSTBridgeListener() {
         text: data.text || '……',
         replyTo: data.replyTo || ''
       });
+      return;
     }
+
+    console.log('[VV][listener] unhandled message type:', data.type);
   });
 }
 
