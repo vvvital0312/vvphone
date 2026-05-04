@@ -802,21 +802,29 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   const chatId = chatData.chatId;
+
   if (!messages[chatId]) {
     messages[chatId] = [];
   }
+
+  getChatSetting(chatId);
+  getRelSetting(chatId);
 
   const thread = messages[chatId];
   const time = getNowTime();
   const timeLabel = chatData.time || getNowFullLabel();
 
-  const leftMsgs = (chatData.messages || []).filter(msg => {
-    const isLeft = String(msg.side || '').trim().toLowerCase() === 'left';
-    const hasContent = !!String(msg.content || '').trim();
-    return isLeft && hasContent;
+  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+
+  const leftMsgs = allMsgs.filter(msg => {
+    const side = String(msg.side || '').trim().toLowerCase();
+    const content = String(msg.content || '').trim();
+    return (side === 'left' || side === 'assistant' || side === 'them') && !!content;
   });
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
+
+  let appendedCount = 0;
 
   leftMsgs.forEach(msg => {
     const normalizedContent = String(msg.content || '').trim();
@@ -832,10 +840,8 @@ function appendVVChatReplyToLocal(chatData) {
       )
     );
 
-    let appendedMessage = null;
-
     if (!duplicated) {
-      appendedMessage = {
+      thread.push({
         id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
         sender: 'them',
         senderName: msg.sender || chatData.target || '对方',
@@ -847,10 +853,11 @@ function appendVVChatReplyToLocal(chatData) {
         recalled: false,
         time,
         timeLabel,
-        state: msg.state || 'reply'
-      };
+        state: msg.state || 'sent'
+      });
 
-      thread.push(appendedMessage);
+      appendedCount++;
+      console.log('[VV] appended assistant msg:', normalizedContent);
     } else {
       console.log('[VV] skip duplicated assistant msg:', normalizedContent);
     }
@@ -900,7 +907,10 @@ function appendVVChatReplyToLocal(chatData) {
   if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
   if (chatData.myBubble) setting.myBubble = chatData.myBubble;
   if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
+  if (chatData.targetAvatarId) {
+    setting.theirAvatar = chatData.targetAvatarId;
+    setting.targetAvatarId = chatData.targetAvatarId;
+  }
   if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
   if (chatData.target) setting.target = chatData.target;
 
@@ -909,31 +919,89 @@ function appendVVChatReplyToLocal(chatData) {
     updateLastMsg(chatId, last.content, time, currentChatType);
   }
 
-  console.log('[VV] thread after append:', thread);
+  if (leftMsgs.length > 0) {
+    pendingReplyTargets[chatId] = false;
 
-  if (chatId === currentChatId) {
-    renderMessages();
-    applyCurrentChatBackground();
+    thread.forEach(m => {
+      if (m.isMe && !m.recalled && m.pendingForReply) {
+        m.pendingForReply = false;
+      }
+    });
   }
 
+  console.log('[VV] thread after append:', thread);
+  console.log('[VV] appendedCount:', appendedCount);
+
   saveAll();
+
+  if (chatId === currentChatId && typeof renderMessages === 'function') {
+    requestAnimationFrame(() => {
+      if (chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+    });
+
+    setTimeout(() => {
+      if (chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+    }, 60);
+  }
 }
 
-function handleVVChatSyncRaw(raw) {
-  console.log('[VV] RAW FULL >>>', raw);
+async function handleVVChatSyncRaw(raw) {
+  console.log('[VV] handleVVChatSyncRaw called');
+  console.log('[VV] raw sync text >>>');
+  console.log(String(raw || ''));
+  console.log('<<< [VV] raw sync text');
+
   const parsed = parseVVChatBlocks(raw);
-  console.log('[VV] PARSED FULL >>>', parsed);
-  console.log('[VV] PARSED MESSAGES >>>', parsed && parsed.messages);
+
+  console.log('[VV] parsed sync data:', parsed);
 
   if (!parsed) {
-    console.warn('[VV] parseVVChatBlocks returned null');
+    console.warn('[VV] handleVVChatSyncRaw: parsed is null');
+    return;
+  }
+
+  if (!parsed.chatId) {
+    console.warn('[VV] handleVVChatSyncRaw: parsed.chatId missing');
     return;
   }
 
   appendVVChatReplyToLocal(parsed);
-  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 
-  renderMessages();
+  console.log('[VV] after append, thread =', messages[parsed.chatId]);
+
+  if (typeof renderChatList === 'function') {
+    renderChatList();
+  }
+
+  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+    console.log('[VV] handleVVChatSyncRaw render current chat');
+
+    requestAnimationFrame(() => {
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+    });
+
+    setTimeout(() => {
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        console.log('[VV] handleVVChatSyncRaw delayed re-render current chat');
+        renderMessages();
+      }
+    }, 60);
+
+    setTimeout(() => {
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        console.log('[VV] handleVVChatSyncRaw second delayed re-render current chat');
+        renderMessages();
+      }
+    }, 180);
+  }
+
+  saveAll();
 }
 
 async function triggerSlash(cmd) {
