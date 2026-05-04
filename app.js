@@ -3285,7 +3285,20 @@ async function requestCurrentChatReply() {
 
 function collectCurrentReplyBatch(chatId) {
   const thread = messages[chatId] || [];
-  if (!thread.length) return [];
+  if (!thread.length) {
+    console.log('[collectCurrentReplyBatch] empty thread:', chatId);
+    return [];
+  }
+
+  console.log('[collectCurrentReplyBatch] thread snapshot:', thread.map((m, idx) => ({
+    idx,
+    id: m.id,
+    isMe: m.isMe,
+    type: m.type,
+    text: m.text || (Array.isArray(m.chunks) ? m.chunks.join('\n') : ''),
+    pendingForReply: m.pendingForReply,
+    recalled: m.recalled
+  })));
 
   let lastThemIndex = -1;
   for (let i = thread.length - 1; i >= 0; i--) {
@@ -3296,12 +3309,18 @@ function collectCurrentReplyBatch(chatId) {
     }
   }
 
-  return thread.filter((m, idx) => (
+  console.log('[collectCurrentReplyBatch] lastThemIndex =', lastThemIndex);
+
+  const batch = thread.filter((m, idx) => (
     idx > lastThemIndex &&
     m.isMe &&
     !m.recalled &&
     m.pendingForReply
   ));
+
+  console.log('[collectCurrentReplyBatch] batch result:', batch);
+
+  return batch;
 }
 
 function simulateAutoReply(targetId, type) {
