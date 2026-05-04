@@ -118,11 +118,18 @@ function initSTBridgeListener() {
 
     console.log('[VV][listener] ALL message =', data);
 
-    const myViewId = window.__vv_view_id || '';
-    if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV][listener] ignore other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
-      return;
-    }
+    //const myViewId = window.__vv_view_id || '';
+
+    // 聊天同步先不要严格拦 viewId，避免首轮因 viewId 初始化时序丢消息
+    const allowWithoutStrictViewCheck =
+      data.type === 'VVPHONE_CHAT_SYNC' ||
+      data.type === 'VVPHONE_REPLY' ||
+      data.type === 'VV_EXECUTE_RESULT';
+
+    //if (!allowWithoutStrictViewCheck && data.viewId && myViewId && data.viewId !== myViewId) {
+    //  console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+    //  return;
+    //}
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV][listener] HIT VVPHONE_CHAT_SYNC');
