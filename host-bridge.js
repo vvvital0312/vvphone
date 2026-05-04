@@ -113,6 +113,22 @@
       }, '*');
     },
 
+    emitToPhone(payload) {
+      try {
+        window.postMessage(payload, '*');
+      } catch (e) {
+        console.warn('[VVHostBridge] window.postMessage failed:', e);
+      }
+
+      try {
+        if (this.frame && this.frame.contentWindow) {
+          this.frame.contentWindow.postMessage(payload, '*');
+        }
+      } catch (e) {
+        console.warn('[VVHostBridge] frame.contentWindow.postMessage failed:', e);
+      }
+    },
+
     parseCommand(command) {
       const text = String(command || '');
 
@@ -180,34 +196,29 @@
     },
 
     handleMockResult(result, parsed, meta = {}) {
-      if (!this.frame || !this.frame.contentWindow) {
-        this.log('iframe 不存在，无法回传', 'err');
-        return;
-      }
-
       const viewId = meta.viewId || '';
 
       if (result.kind === 'call') {
-        this.frame.contentWindow.postMessage({
+        this.emitToPhone({
           type: 'VVPHONE_CALL_STATUS',
           chatId: parsed.chatId || '',
           status: result.status,
           viewId
-        }, '*');
+        });
 
         this.log('已回传 VVPHONE_CALL_STATUS', 'ok', result);
         return;
       }
 
       if (result.kind === 'feed') {
-        this.frame.contentWindow.postMessage({
+        this.emitToPhone({
           type: 'VVPHONE_FEED_REPLY',
           postId: parsed.postId || '',
           senderName: parsed.senderName || this.getDefaultSender(),
           text: result.text || '……',
           replyTo: '',
           viewId
-        }, '*');
+        });
 
         this.log('已回传 VVPHONE_FEED_REPLY', 'ok', result);
         return;
@@ -217,12 +228,12 @@
         const raw = result.raw || result.text || '';
 
         if (raw && (raw.includes('[VV_CHAT_SYNC]') || raw.includes('[聊天界面]'))) {
-          this.frame.contentWindow.postMessage({
+          this.emitToPhone({
             type: 'VVPHONE_CHAT_SYNC',
             chatId: parsed.chatId || '',
             raw,
             viewId
-          }, '*');
+          });
 
           this.log('已回传 VVPHONE_CHAT_SYNC', 'ok', {
             chatId: parsed.chatId || '',
@@ -232,25 +243,25 @@
           return;
         }
 
-        this.frame.contentWindow.postMessage({
+        this.emitToPhone({
           type: 'VVPHONE_REPLY',
           chatId: parsed.chatId || '',
           senderName: parsed.senderName || this.getDefaultSender(),
           text: result.text || '……',
           viewId
-        }, '*');
+        });
 
         this.log('已回传 VVPHONE_REPLY(fallback)', 'ok', result);
         return;
       }
 
-      this.frame.contentWindow.postMessage({
+      this.emitToPhone({
         type: 'VVPHONE_REPLY',
         chatId: parsed.chatId || '',
         senderName: parsed.senderName || this.getDefaultSender(),
         text: result.text || '……',
         viewId
-      }, '*');
+      });
 
       this.log('已回传 VVPHONE_REPLY(default)', 'ok', result);
     },
@@ -375,7 +386,7 @@
       }
 
       if (manualType === 'feed') {
-        this.frame.contentWindow.postMessage({
+        this.emitToPhone({
           type: 'VVPHONE_FEED_REPLY',
           postId: this.lastContext.postId || '',
           senderName,
@@ -393,7 +404,7 @@
       }
 
       if (manualType === 'call') {
-        this.frame.contentWindow.postMessage({
+        this.emitToPhone({
           type: 'VVPHONE_CALL_REPLY',
           chatId: this.lastContext.chatId || '',
           senderName,
@@ -444,12 +455,12 @@
         '[/VV_CHAT_SYNC]'
       ].join('\n');
 
-      this.frame.contentWindow.postMessage({
+      this.emitToPhone({
         type: 'VVPHONE_CHAT_SYNC',
-        chatId: this.lastContext.chatId || '',
+        chatId: parsed.chatId || '',
         raw,
         viewId
-      }, '*');
+      });
 
       this.log('手动回传 VVPHONE_CHAT_SYNC', 'ok', {
         chatId: this.lastContext.chatId || '',
@@ -467,7 +478,7 @@
       const status = this.getSelectedCallStatus();
       const viewId = window.__vv_view_id || '';
 
-      this.frame.contentWindow.postMessage({
+      this.emitToPhone({
         type: 'VVPHONE_CALL_STATUS',
         chatId: this.lastContext.chatId || '',
         status,
@@ -489,7 +500,7 @@
       const senderName = this.getDefaultSender();
       const viewId = window.__vv_view_id || '';
 
-      this.frame.contentWindow.postMessage({
+      this.emitToPhone({
         type: 'VVPHONE_INCOMING_CALL',
         senderName,
         bridgeName: senderName,
