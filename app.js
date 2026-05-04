@@ -25,6 +25,8 @@ let composerDraft = {
 };
 
 let pendingReplyTargets = {};
+let pendingVVChatSyncQueue = [];
+let vvAppReady = false;
 
 let myProfile = {
   avatar: '',
@@ -1038,34 +1040,92 @@ function appendVVChatReplyToLocal(chatData) {
 }
 
 async function handleVVChatSyncRaw(raw) {
-  console.log('[VV][SYNC] enter');
+  console.log('[VV] handleVVChatSyncRaw called');
 
   const parsed = parseVVChatBlocks(raw);
-  console.log('[VV][SYNC] parsed =', parsed);
+
+  console.log('[VV] parsed sync data:', parsed);
 
   if (!parsed || !parsed.chatId) {
-    console.warn('[VV][SYNC] invalid parsed');
+    console.warn('[VV] handleVVChatSyncRaw: invalid parsed');
     return;
   }
 
-  console.log('[VV][SYNC] typeof appendVVChatReplyToLocal =', typeof appendVVChatReplyToLocal);
-  console.log('[VV][SYNC] appendVVChatReplyToLocal =', appendVVChatReplyToLocal);
+  const area = document.getElementById('messageArea');
+  const uiNotReady = !vvAppReady || !area;
 
-  try {
-    appendVVChatReplyToLocal(parsed);
-    console.log('[VV][SYNC] append call finished');
-  } catch (e) {
-    console.error('[VV][SYNC] append call error =', e);
+  if (uiNotReady) {
+    console.warn('[VV] UI not ready, queue sync:', parsed.chatId);
+    pendingVVChatSyncQueue.push({
+      raw,
+      chatId: parsed.chatId,
+      time: Date.now()
+    });
+    return;
   }
 
-  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-    console.log('[VV][SYNC] render current chat');
-    await renderMessages();
-  }
+  appendVVChatReplyToLocal(parsed);
 
   if (typeof renderChatList === 'function') {
     renderChatList();
   }
+
+  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+    renderMessages();
+
+    setTimeout(() => {
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+    }, 80);
+
+    setTimeout(() => {
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+    }, 200);
+  }
+
+  saveAll();
+}
+
+function flushPendingVVChatSyncQueue() {
+  if (!pendingVVChatSyncQueue.length) return;
+
+  const area = document.getElementById('messageArea');
+  if (!vvAppReady || !area) {
+    console.log('[VV] flush skipped: app not ready');
+    return;
+  }
+
+  const queue = pendingVVChatSyncQueue.slice();
+  pendingVVChatSyncQueue = [];
+
+  console.log('[VV] flushing queued sync count =', queue.length);
+
+  queue.forEach(item => {
+    try {
+      const parsed = parseVVChatBlocks(item.raw);
+      if (!parsed || !parsed.chatId) return;
+
+      appendVVChatReplyToLocal(parsed);
+
+      if (typeof renderChatList === 'function') {
+        renderChatList();
+      }
+
+      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+        renderMessages();
+        setTimeout(() => {
+          if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+            renderMessages();
+          }
+        }, 80);
+      }
+    } catch (e) {
+      console.error('[VV] flush queued sync error:', e);
+    }
+  });
 
   saveAll();
 }
@@ -5335,6 +5395,16 @@ window.onload = async function () {
     !openChatByRoute()
   }, 80);
 
+  vvAppReady = true;
+  flushPendingVVChatSyncQueue();
+
+  setTimeout(() => {
+    flushPendingVVChatSyncQueue();
+  }, 120);
+
+  setTimeout(() => {
+    flushPendingVVChatSyncQueue();
+  }, 300);
   // 暂时关闭随机来电，后续改为剧情触发式来电
   // maybeSimulateIncomingCall();
 };
