@@ -26,6 +26,7 @@ let composerDraft = {
 };
 
 let pendingReplyTargets = {};
+let currentReplyBatch = {};
 
 let myProfile = {
   avatar: '',
@@ -946,20 +947,24 @@ function appendVVChatReplyToLocal(chatData) {
     updateLastMsg(chatId, last.content, time, currentChatType);
   }
 
-  // 关键闭环：只要这一轮确实收到了左侧消息信号，就清 pending
   if (hasAnyLeftSignal) {
+    const batchIds = currentReplyBatch[chatId] || [];
+
     pendingReplyTargets[chatId] = false;
 
     thread.forEach(m => {
-      if (m.isMe && !m.recalled && m.pendingForReply) {
+      if (batchIds.includes(m.id)) {
         m.pendingForReply = false;
       }
     });
+
+    currentReplyBatch[chatId] = [];
 
     console.log('[VV] pending cleared after sync:', {
       chatId,
       hasAnyLeftSignal,
       hasAppendedLeftMessage,
+      clearedBatchIds: batchIds,
       pending: pendingReplyTargets[chatId]
     });
   } else {
@@ -3067,7 +3072,11 @@ async function sendMessage() {
 
 function buildVVEventPayload(chatId) {
   const list = messages[chatId] || [];
-  const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
+  const batchIds = currentReplyBatch[chatId] || [];
+
+  const myPending = list.filter(m =>
+    batchIds.includes(m.id)
+  );
 
   if (!myPending.length) return '';
 
@@ -3096,12 +3105,13 @@ function buildVVEventPayload(chatId) {
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
     '你必须输出完整的 [聊天界面] ... [/聊天界面] 结构。',
-    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份完全一致的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
-    '[VV_CHAT_SYNC] 中的字段和消息顺序必须与 [聊天界面] 一致。',
+    '在输出完 [聊天界面] ... [/聊天界面] 后，还必须额外输出一份 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 同步块。',
     '[VV_CHAT_SYNC] 只用于前端同步，不要省略。',
-    '你必须先把用户刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
+    '[VV_CHAT_SYNC] 只允许包含本轮新增消息，绝对不要重复任何历史消息。',
+    '你必须先把用户本轮刚刚发送的 message 内容按顺序展开成一个或多个 side=right 的 [消息] 块。',
     '然后再输出角色自己的 side=left 的 [消息] 回复块。',
-    '如果有多条用户消息，必须逐条展开，不可合并成一条。',
+    '如果本轮有多条用户消息，必须逐条展开，不可合并成一条。',
+    '角色回复只能针对本轮新增的用户消息，不要把更早已经回复过的历史消息再次纳入本轮回复。',
     '聊天展示必须保留以下字段：chatId、target、time、myAvatarKey、targetAvatarId、myBubble、targetBubble、chatBgKey。',
     'time 只在 [聊天界面] 顶部显示一次，消息块内部默认不要重复输出 time。',
     '用户消息必须使用 side=right，角色消息必须使用 side=left。',
@@ -3254,28 +3264,44 @@ async function requestCurrentChatReply() {
     messages[currentChatId] = [];
   }
 
-  const thread = messages[currentChatId] || [];
-  const hasPending = thread.some(m => m.isMe && !m.recalled && m.pendingForReply);
+  const batch = collectCurrentReplyBatch(currentChatId);
 
-  console.log('[requestCurrentChatReply] before trigger:', {
-    chatId: currentChatId,
-    hasPending,
-    pendingTarget: pendingReplyTargets[currentChatId],
-    threadLen: thread.length,
-    pendingMessages: thread.filter(m => m.isMe && !m.recalled && m.pendingForReply)
-  });
+  console.log('[requestCurrentChatReply] collected batch:', batch);
 
-  if (!hasPending) {
-    console.log('[requestCurrentChatReply] no pending user messages');
+  if (!batch.length) {
+    console.log('[requestCurrentChatReply] no new batch messages');
     return;
   }
 
+  currentReplyBatch[currentChatId] = batch.map(m => m.id);
   pendingReplyTargets[currentChatId] = true;
   saveAll();
 
   console.log('[requestCurrentChatReply] pendingReplyTargets set true for', currentChatId);
+  console.log('[requestCurrentChatReply] currentReplyBatch ids =', currentReplyBatch[currentChatId]);
 
   await triggerAIReply();
+}
+
+function collectCurrentReplyBatch(chatId) {
+  const thread = messages[chatId] || [];
+  if (!thread.length) return [];
+
+  let lastThemIndex = -1;
+  for (let i = thread.length - 1; i >= 0; i--) {
+    const m = thread[i];
+    if (!m.isMe && !m.recalled) {
+      lastThemIndex = i;
+      break;
+    }
+  }
+
+  return thread.filter((m, idx) => (
+    idx > lastThemIndex &&
+    m.isMe &&
+    !m.recalled &&
+    m.pendingForReply
+  ));
 }
 
 function simulateAutoReply(targetId, type) {
