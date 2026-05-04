@@ -3244,6 +3244,40 @@ async function triggerAIReply() {
   }
 }
 
+async function requestCurrentChatReply() {
+  if (!currentChatId) {
+    console.log('[requestCurrentChatReply] aborted: no currentChatId');
+    return;
+  }
+
+  if (!messages[currentChatId]) {
+    messages[currentChatId] = [];
+  }
+
+  const thread = messages[currentChatId] || [];
+  const hasPending = thread.some(m => m.isMe && !m.recalled && m.pendingForReply);
+
+  console.log('[requestCurrentChatReply] before trigger:', {
+    chatId: currentChatId,
+    hasPending,
+    pendingTarget: pendingReplyTargets[currentChatId],
+    threadLen: thread.length,
+    pendingMessages: thread.filter(m => m.isMe && !m.recalled && m.pendingForReply)
+  });
+
+  if (!hasPending) {
+    console.log('[requestCurrentChatReply] no pending user messages');
+    return;
+  }
+
+  pendingReplyTargets[currentChatId] = true;
+  saveAll();
+
+  console.log('[requestCurrentChatReply] pendingReplyTargets set true for', currentChatId);
+
+  await triggerAIReply();
+}
+
 function simulateAutoReply(targetId, type) {
   const time = getNowTime();
   const timeLabel = getNowFullLabel();
