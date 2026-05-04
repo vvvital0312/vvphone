@@ -25,6 +25,13 @@
 
         if (data.type === 'VV_EXECUTE_SLASH' || data.type === 'VVPHONE_SLASH') {
           await this.handleSlashRequest(data);
+          return;
+        }
+
+        if (data.type === 'VVPHONE_RESEND_LAST_CHAT_SYNC') {
+          this.log('收到补发请求', 'warn', data);
+          this.resendLastChatSync(data.chatId || '', data.viewId || '');
+          return;
         }
       });
     },

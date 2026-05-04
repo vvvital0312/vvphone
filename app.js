@@ -3321,22 +3321,22 @@ function requestResendLastVVChatSync(chatId) {
   try {
     const viewId = window.__vv_view_id || '';
 
-    if (window.parent && window.parent !== window && window.parent.VVHostBridge) {
-      const ok = window.parent.VVHostBridge.resendLastChatSync(chatId, viewId);
-      console.log('[VV] requested resendLastChatSync from parent:', ok);
-      return ok;
-    }
+    window.parent.postMessage({
+      type: 'VVPHONE_RESEND_LAST_CHAT_SYNC',
+      chatId: chatId || '',
+      viewId
+    }, '*');
 
-    if (window.VVHostBridge) {
-      const ok = window.VVHostBridge.resendLastChatSync(chatId, viewId);
-      console.log('[VV] requested resendLastChatSync from local host:', ok);
-      return ok;
-    }
+    console.log('[VV] requested resendLastChatSync by postMessage:', {
+      chatId,
+      viewId
+    });
+
+    return true;
   } catch (e) {
     console.warn('[VV] requestResendLastVVChatSync failed:', e);
+    return false;
   }
-
-  return false;
 }
 
 function simulateAutoReply(targetId, type) {
