@@ -1,7 +1,6 @@
 let currentUploadImage = '';
 let currentActiveContactId = '';
 let currentChatId = '';
-let isChatViewReady = false;
 let currentChatType = 'direct';
 let currentContactTab = 'direct';
 let currentCallId = '';
@@ -720,18 +719,21 @@ function parseVVChatBlocks(raw) {
   console.log('<<< [VV] parseVVChatBlocks input full');
 
   const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
+  const uiMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
 
   console.log('[VV] syncMatch exists:', !!syncMatch);
+  console.log('[VV] uiMatch exists:', !!uiMatch);
 
-  if (!syncMatch) {
-    console.warn('[VV] parseVVChatBlocks: no VV_CHAT_SYNC block found');
+  const chatMatch = syncMatch || uiMatch;
+  if (!chatMatch) {
+    console.warn('[VV] parseVVChatBlocks: no sync/chat block found');
     return null;
   }
 
-  const full = syncMatch[1];
-  console.log('[VV] extracted sync block full >>>');
+  const full = chatMatch[1];
+  console.log('[VV] extracted block full >>>');
   console.log(full);
-  console.log('<<< [VV] extracted sync block full');
+  console.log('<<< [VV] extracted block full');
 
   function escapeRegExp(s) {
     return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -800,55 +802,40 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   const chatId = chatData.chatId;
-
   if (!messages[chatId]) {
     messages[chatId] = [];
   }
-
-  getChatSetting(chatId);
-  getRelSetting(chatId);
 
   const thread = messages[chatId];
   const time = getNowTime();
   const timeLabel = chatData.time || getNowFullLabel();
 
-  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
-  console.log('[VV] all parsed messages:', allMsgs);
-
-  const leftMsgs = allMsgs.filter(msg => {
-    const side = String(msg.side || '').trim().toLowerCase();
-    const content = String(msg.content || '').trim();
-    const isLeftLike = side === 'left' || side === 'assistant' || side === 'them';
-    return isLeftLike && !!content;
+  const leftMsgs = (chatData.messages || []).filter(msg => {
+    const isLeft = String(msg.side || '').trim().toLowerCase() === 'left';
+    const hasContent = !!String(msg.content || '').trim();
+    return isLeft && hasContent;
   });
 
   console.log('[VV] leftMsgs to append:', leftMsgs);
-
-  let hasAnyLeftSignal = leftMsgs.length > 0;
 
   leftMsgs.forEach(msg => {
     const normalizedContent = String(msg.content || '').trim();
     if (!normalizedContent) return;
 
-    const lastAssistantMsg = [...thread].reverse().find(item =>
+    const duplicated = thread.some(item =>
       !item.isMe &&
       !item.recalled &&
-      item.type === 'text'
-    );
-
-    const duplicated = !!lastAssistantMsg && (
+      item.type === 'text' &&
       (
-        Array.isArray(lastAssistantMsg.chunks) &&
-        lastAssistantMsg.chunks.join('\n').trim() === normalizedContent
-      ) ||
-      (
-        typeof lastAssistantMsg.text === 'string' &&
-        lastAssistantMsg.text.trim() === normalizedContent
+        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
+        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
       )
     );
 
+    let appendedMessage = null;
+
     if (!duplicated) {
-      thread.push({
+      appendedMessage = {
         id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
         sender: 'them',
         senderName: msg.sender || chatData.target || '对方',
@@ -861,9 +848,9 @@ function appendVVChatReplyToLocal(chatData) {
         time,
         timeLabel,
         state: msg.state || 'reply'
-      });
+      };
 
-      console.log('[VV] appended assistant msg:', normalizedContent);
+      thread.push(appendedMessage);
     } else {
       console.log('[VV] skip duplicated assistant msg:', normalizedContent);
     }
@@ -913,10 +900,7 @@ function appendVVChatReplyToLocal(chatData) {
   if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
   if (chatData.myBubble) setting.myBubble = chatData.myBubble;
   if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) {
-    setting.theirAvatar = chatData.targetAvatarId;
-    setting.targetAvatarId = chatData.targetAvatarId;
-  }
+  if (chatData.targetAvatarId) setting.targetAvatarId = chatData.targetAvatarId;
   if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
   if (chatData.target) setting.target = chatData.target;
 
@@ -925,83 +909,33 @@ function appendVVChatReplyToLocal(chatData) {
     updateLastMsg(chatId, last.content, time, currentChatType);
   }
 
-  if (hasAnyLeftSignal) {
-    pendingReplyTargets[chatId] = false;
-
-    thread.forEach(m => {
-      if (m.isMe && !m.recalled && m.pendingForReply) {
-        m.pendingForReply = false;
-      }
-    });
-
-    console.log('[VV] pending cleared after sync:', {
-      chatId,
-      pending: pendingReplyTargets[chatId]
-    });
-  } else {
-    console.warn('[VV] no leftMsgs appended from sync:', {
-      chatId,
-      allMsgs
-    });
-  }
-
   console.log('[VV] thread after append:', thread);
 
-  saveAll();
-
-  if (chatId === currentChatId && typeof renderMessages === 'function') {
+  if (chatId === currentChatId) {
     renderMessages();
-    setTimeout(() => {
-      if (chatId === currentChatId && typeof renderMessages === 'function') {
-        renderMessages();
-      }
-    }, 80);
+    applyCurrentChatBackground();
   }
+
+  saveAll();
 }
 
-async function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw called');
-  console.log('[VV] raw sync text >>>');
+function handleVVChatSyncRaw(raw) {
+  console.log('[VV] handleVVChatSyncRaw raw full >>>');
   console.log(String(raw || ''));
-  console.log('<<< [VV] raw sync text');
+  console.log('<<< [VV] handleVVChatSyncRaw raw full');
 
   const parsed = parseVVChatBlocks(raw);
-
-  console.log('[VV] parsed sync data:', parsed);
+  console.log('[VV] parseVVChatBlocks result:', parsed);
 
   if (!parsed) {
-    console.warn('[VV] handleVVChatSyncRaw: parsed is null');
+    console.warn('[VV] parseVVChatBlocks returned null');
     return;
   }
-
-  if (!parsed.chatId) {
-    console.warn('[VV] handleVVChatSyncRaw: parsed.chatId missing');
-    return;
-  }
-
-  console.log('[VV] parsed.messages =', parsed.messages);
 
   appendVVChatReplyToLocal(parsed);
+  console.log('[VV] messages[currentChatId] after append:', messages[currentChatId]);
 
-  console.log('[VV] after append, thread =', messages[parsed.chatId]);
-
-  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-    console.log('[VV] handleVVChatSyncRaw render current chat');
-    await renderMessages();
-
-    setTimeout(async () => {
-      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-        console.log('[VV] handleVVChatSyncRaw delayed re-render current chat');
-        await renderMessages();
-      }
-    }, 80);
-  }
-
-  if (typeof renderChatList === 'function') {
-    renderChatList();
-  }
-
-  saveAll();
+  renderMessages();
 }
 
 async function triggerSlash(cmd) {
@@ -2404,15 +2338,10 @@ async function addFeedPost() {
 async function openChat(id, type = 'direct') {
   currentChatId = id;
   currentChatType = type;
-  isChatViewReady = false;
 
   const list = type === 'group' ? groupList : contactList;
   const item = list.find(i => i.id === id);
   if (!item) return;
-
-  if (!messages[id]) messages[id] = [];
-  getChatSetting(id);
-  getRelSetting(id);
 
   const title = document.getElementById('chatDetailName');
   const a = document.getElementById('contactPage');
@@ -2426,8 +2355,6 @@ async function openChat(id, type = 'direct') {
   await applyCurrentChatBackground();
   await renderMessages();
   renderChatList?.();
-
-  isChatViewReady = true;
 }
 
 async function applyCurrentChatBackground() {
@@ -2447,8 +2374,6 @@ async function applyCurrentChatBackground() {
 
 async function openChatDetail(chatId, forceName = '') {
   if (!chatId) return;
-
-  isChatViewReady = false;
 
   if (!messages[chatId]) {
     messages[chatId] = [];
@@ -2516,7 +2441,7 @@ async function openChatDetail(chatId, forceName = '') {
     page.style.display = 'block';
   }
 
-  renderComposerPreview?.();
+  renderComposerPreview();
 
   if (typeof applyCurrentChatBackground === 'function') {
     await applyCurrentChatBackground();
@@ -2533,8 +2458,6 @@ async function openChatDetail(chatId, forceName = '') {
   }
 
   saveAll();
-
-  isChatViewReady = true;
 }
 
 async function restoreLastChatSession() {
@@ -2761,10 +2684,7 @@ async function renderMessages() {
   console.log('[renderMessages] html injected');
 
   await hydrateMediaRefs(area);
-
-  area.style.display = 'none';
-  area.offsetHeight;
-  area.style.display = '';
+  console.log('[renderMessages] hydrate done');
 
   area.scrollTop = area.scrollHeight;
 }
@@ -2956,12 +2876,8 @@ function removeRefsPossiblyUnused(refs) {
   }, 0);
 }
 
-async function sendMessage() {
+function sendMessage() {
   if (!currentChatId) return;
-
-  if (!isChatViewReady && typeof openChatDetail === 'function') {
-    await openChatDetail(currentChatId);
-  }
 
   const rel = getRelSetting(currentChatId);
   if (rel.blockedByMe) {
@@ -3028,20 +2944,17 @@ async function sendMessage() {
     });
   });
 
-  const lastContent = hasText
-    ? chunks[chunks.length - 1]
-    : getAttachmentSummary(attachments[attachments.length - 1]);
-
+  const lastContent = hasText ? chunks[chunks.length - 1] : getAttachmentSummary(attachments[attachments.length - 1]);
   updateLastMsg(currentChatId, lastContent, time, currentChatType);
 
-  input.value = '';
-  clearComposerDraft();
-  saveAll();
-  closeEmojiPanel?.();
+  pendingReplyTargets[currentChatId] = true;
+  console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-  await renderMessages();
-
-  console.log('[sendMessage] message saved locally only, waiting for manual triggerAIReply');
+    input.value = '';
+    clearComposerDraft();
+    renderMessages();
+    saveAll();
+    closeEmojiPanel();
 }
 
 function buildVVEventPayload(chatId) {
@@ -3123,138 +3036,63 @@ function buildVVEventPayload(chatId) {
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
-  if (isTriggeringAIReply) {
-    console.log('[triggerAIReply] skipped: locked');
-    return;
-  }
-
+  if (isTriggeringAIReply) return;
   isTriggeringAIReply = true;
 
   try {
-    console.log(
-      '[triggerAIReply] currentChatId=',
-      currentChatId,
-      'pending=',
-      pendingReplyTargets[currentChatId],
-      'msgLen=',
-      (messages[currentChatId] || []).length
-    );
+    console.log('triggerAIReply check:', currentChatId, pendingReplyTargets[currentChatId]);
 
-    if (!currentChatId) {
-      console.log('[triggerAIReply] aborted: no currentChatId');
-      return;
-    }
+    if (!currentChatId) return;
 
     if (!pendingReplyTargets[currentChatId]) {
-      console.log('[triggerAIReply] aborted: no pending target');
       return;
     }
 
     const thread = messages[currentChatId] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
-    console.log('[triggerAIReply] pendingMessages.length =', pendingMessages.length);
-    console.log('[triggerAIReply] pendingMessages =', pendingMessages);
-
     if (!pendingMessages.length) {
-      console.log('[triggerAIReply] no pendingMessages, clear target');
       pendingReplyTargets[currentChatId] = false;
       saveAll();
       return;
     }
 
     const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const vvPayload = buildVVEventPayload(currentChatId);
-    const latestPayload = buildLatestUserPayload(currentChatId);
-    const promptText = vvPayload || latestPayload;
-
-    console.log('[triggerAIReply] bridgeName =', bridgeName);
-    console.log('[triggerAIReply] vvPayload =', vvPayload);
-    console.log('[triggerAIReply] latestPayload =', latestPayload);
-    console.log('[triggerAIReply] final promptText =', promptText);
-
-    if (!promptText || !String(promptText).trim()) {
-      console.warn('[triggerAIReply] aborted: promptText is empty');
-      return;
-    }
+    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
 
     let slashOk = false;
 
-    if (
-      VV_BRIDGE_CONFIG.enabled &&
-      (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')
-    ) {
+    if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')) {
       const cmd = VV_BRIDGE_CONFIG.buildReplyCommand({
         bridgeName,
         chatId: currentChatId,
         chatType: currentChatType,
         promptText
       });
-
-      console.log('[triggerAIReply] slash cmd =', cmd);
       slashOk = await triggerSlash(cmd);
-      console.log('[triggerAIReply] slashOk =', slashOk);
     }
 
-    if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
-      console.log('[triggerAIReply] fallback simulateAutoReply');
-      simulateAutoReply(currentChatId, currentChatType);
-
+    if (slashOk) {
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
       pendingReplyTargets[currentChatId] = false;
-
-      saveAll();
-      return;
     }
 
-    // 关键：这里不要提前清 pending
-    // 等 handleVVChatSyncRaw -> appendVVChatReplyToLocal 真正落库后再清
-    console.log('[triggerAIReply] slash submitted, waiting for VVPHONE_CHAT_SYNC...');
+    if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
+      simulateAutoReply(currentChatId, currentChatType);
+      pendingMessages.forEach(m => {
+        m.pendingForReply = false;
+      });
+      pendingReplyTargets[currentChatId] = false;
+    }
+
     saveAll();
-  } catch (err) {
-    console.error('[triggerAIReply] error:', err);
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
-      console.log('[triggerAIReply] lock released');
     }, 300);
   }
-}
-
-async function requestCurrentChatReply() {
-  if (!currentChatId) {
-    console.log('[requestCurrentChatReply] aborted: no currentChatId');
-    return;
-  }
-
-  if (!messages[currentChatId]) {
-    messages[currentChatId] = [];
-  }
-
-  const thread = messages[currentChatId] || [];
-  const hasPending = thread.some(m => m.isMe && !m.recalled && m.pendingForReply);
-
-  console.log('[requestCurrentChatReply] before trigger:', {
-    chatId: currentChatId,
-    hasPending,
-    pendingTarget: pendingReplyTargets[currentChatId],
-    threadLen: thread.length,
-    pendingMessages: thread.filter(m => m.isMe && !m.recalled && m.pendingForReply)
-  });
-
-  if (!hasPending) {
-    console.log('[requestCurrentChatReply] no pending user messages');
-    return;
-  }
-
-  pendingReplyTargets[currentChatId] = true;
-  saveAll();
-
-  console.log('[requestCurrentChatReply] pendingReplyTargets set true for', currentChatId);
-
-  await triggerAIReply();
 }
 
 function simulateAutoReply(targetId, type) {
@@ -4823,29 +4661,13 @@ function maybeSimulateIncomingCall() {
 }
 
 function initSTBridgeListener() {
-  window.addEventListener('message', async event => {
+  window.addEventListener('message', event => {
     const data = event.data;
-
-    console.log('[VV][listener] raw message event:', data);
-
-    if (!data || typeof data !== 'object') {
-      console.log('[VV][listener] ignored: data invalid');
-      return;
-    }
+    if (!data || typeof data !== 'object') return;
 
     const myViewId = window.__vv_view_id || '';
-    console.log('[VV][listener] view check:', {
-      incomingType: data.type,
-      incomingViewId: data.viewId || '',
-      myViewId
-    });
-
     if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV][listener] ignore message for other viewId:', {
-        type: data.type,
-        incomingViewId: data.viewId,
-        myViewId
-      });
+      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
       return;
     }
 
@@ -4855,8 +4677,7 @@ function initSTBridgeListener() {
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
-      await handleVVChatSyncRaw(data.raw || '');
-      return;
+      handleVVChatSyncRaw(data.raw || '');
     }
 
     if (data.type === 'VVPHONE_REPLY') {
@@ -4866,7 +4687,6 @@ function initSTBridgeListener() {
         senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
         text: data.text || '……'
       });
-      return;
     }
 
     if (data.type === 'VVPHONE_CALL_REPLY') {
@@ -4881,7 +4701,6 @@ function initSTBridgeListener() {
       });
       renderCallTranscript();
       saveAll();
-      return;
     }
 
     if (data.type === 'VVPHONE_CALL_STATUS') {
@@ -4898,7 +4717,6 @@ function initSTBridgeListener() {
         document.getElementById('callStatus').innerText = '无人接听';
         document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
       }
-      return;
     }
 
     if (data.type === 'VVPHONE_INCOMING_CALL') {
@@ -4923,7 +4741,6 @@ function initSTBridgeListener() {
 
       saveAll();
       simulateIncomingCall(contact.id);
-      return;
     }
 
     if (data.type === 'VVPHONE_FEED_REPLY') {
@@ -4933,10 +4750,7 @@ function initSTBridgeListener() {
         text: data.text || '……',
         replyTo: data.replyTo || ''
       });
-      return;
     }
-
-    console.log('[VV][listener] unhandled message type:', data.type);
   });
 }
 
@@ -5210,7 +5024,7 @@ function getVVRouteParams() {
   }
 }
 
-async function openChatByRoute() {
+function openChatByRoute() {
   const route = getVVRouteParams();
   if (route.view !== 'chat') return false;
   if (!route.chatId) return false;
@@ -5236,7 +5050,7 @@ async function openChatByRoute() {
   }
 
   if (typeof openChatDetail === 'function') {
-    await openChatDetail(chatId, route.target || '');
+    openChatDetail(chatId, route.target || '');
     return true;
   }
 
@@ -5248,14 +5062,13 @@ async function openChatByRoute() {
   }
 
   if (typeof applyCurrentChatBackground === 'function') {
-    await applyCurrentChatBackground();
+    applyCurrentChatBackground();
   }
 
   if (typeof renderMessages === 'function') {
-    await renderMessages();
+    renderMessages();
   }
 
-  isChatViewReady = true;
   return true;
 }
 
