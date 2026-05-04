@@ -116,29 +116,33 @@ function initSTBridgeListener() {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
 
+    console.log('[VV][listener] ALL message =', data);
+
     const myViewId = window.__vv_view_id || '';
     if (data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+      console.log('[VV][listener] ignore other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
       return;
     }
 
-    if (VV_BRIDGE_CONFIG.debug) {
-      console.log('[VV] 收到 bridge 消息:', data);
-    }
-
     if (data.type === 'VVPHONE_CHAT_SYNC') {
-      console.log('[VV] 收到 VVPHONE_CHAT_SYNC:', (data.raw || '').slice(0, 300));
+      console.log('[VV][listener] HIT VVPHONE_CHAT_SYNC');
       handleVVChatSyncRaw(data.raw || '');
       return;
     }
 
     if (data.type === 'VVPHONE_REPLY') {
+      console.log('[VV][listener] HIT VVPHONE_REPLY');
       const chatId = data.chatId || currentChatId;
       appendAIMessageToCurrentChat({
         chatId,
         senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
         text: data.text || '……'
       });
+      return;
+    }
+
+    if (data.type === 'VV_EXECUTE_RESULT') {
+      console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
       return;
     }
 
