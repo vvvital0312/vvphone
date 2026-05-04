@@ -5320,7 +5320,6 @@ window.onload = async function () {
   initStickerPanelEvents();
   initFeedPostImages();
   initSwipeCall();
-  initSTBridgeListener();
   initProfilePage();
 
   renderAllPanels();
