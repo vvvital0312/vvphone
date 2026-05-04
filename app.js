@@ -920,12 +920,10 @@ function appendVVChatReplyToLocal(chatData) {
 }
 
 function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw raw full >>>');
-  console.log(String(raw || ''));
-  console.log('<<< [VV] handleVVChatSyncRaw raw full');
-
+  console.log('[VV] RAW FULL >>>', raw);
   const parsed = parseVVChatBlocks(raw);
-  console.log('[VV] parseVVChatBlocks result:', parsed);
+  console.log('[VV] PARSED FULL >>>', parsed);
+  console.log('[VV] PARSED MESSAGES >>>', parsed && parsed.messages);
 
   if (!parsed) {
     console.warn('[VV] parseVVChatBlocks returned null');
