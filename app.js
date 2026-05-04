@@ -721,21 +721,18 @@ function parseVVChatBlocks(raw) {
   console.log('<<< [VV] parseVVChatBlocks input full');
 
   const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
-  const uiMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
 
   console.log('[VV] syncMatch exists:', !!syncMatch);
-  console.log('[VV] uiMatch exists:', !!uiMatch);
 
-  const chatMatch = syncMatch || uiMatch;
-  if (!chatMatch) {
-    console.warn('[VV] parseVVChatBlocks: no sync/chat block found');
+  if (!syncMatch) {
+    console.warn('[VV] parseVVChatBlocks: no VV_CHAT_SYNC block found');
     return null;
   }
 
-  const full = chatMatch[1];
-  console.log('[VV] extracted block full >>>');
+  const full = syncMatch[1];
+  console.log('[VV] extracted sync block full >>>');
   console.log(full);
-  console.log('<<< [VV] extracted block full');
+  console.log('<<< [VV] extracted sync block full');
 
   function escapeRegExp(s) {
     return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1009,18 +1006,15 @@ async function handleVVChatSyncRaw(raw) {
     return;
   }
 
-  console.log('[VV] handleVVChatSyncRaw compare chatId:', {
-    parsedChatId: parsed.chatId,
-    currentChatId
-  });
+  console.log('[VV] parsed.messages =', parsed.messages);
 
   appendVVChatReplyToLocal(parsed);
+
+  console.log('[VV] after append, thread =', messages[parsed.chatId]);
 
   if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
     console.log('[VV] handleVVChatSyncRaw render current chat');
     await renderMessages();
-  } else {
-    console.log('[VV] handleVVChatSyncRaw skip render, parsed.chatId != currentChatId');
   }
 
   if (typeof renderChatList === 'function') {
