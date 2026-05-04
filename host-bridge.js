@@ -1,6 +1,8 @@
 (function () {
   const VVHostBridge = {
     frame: null,
+    lastChatSyncRaw: '',
+    lastChatSyncChatId: '',
     lastContext: {
       type: 'chat',
       command: '',
@@ -129,6 +131,36 @@
       }
     },
 
+    resendLastChatSync(chatId, viewId) {
+      if (!this.lastChatSyncRaw) {
+        this.log('没有可补发的 lastChatSyncRaw', 'warn');
+        return false;
+      }
+
+      if (chatId && this.lastChatSyncChatId && chatId !== this.lastChatSyncChatId) {
+        this.log('lastChatSyncRaw chatId 不匹配，取消补发', 'warn', {
+          expect: chatId,
+          actual: this.lastChatSyncChatId
+        });
+        return false;
+      }
+
+      this.emitToPhone({
+        type: 'VVPHONE_CHAT_SYNC',
+        chatId: this.lastChatSyncChatId || chatId || '',
+        raw: this.lastChatSyncRaw,
+        viewId: viewId || ''
+      });
+
+      this.log('已补发 last VVPHONE_CHAT_SYNC', 'ok', {
+        chatId: this.lastChatSyncChatId || chatId || '',
+        viewId: viewId || '',
+        raw: String(this.lastChatSyncRaw || '').slice(0, 500)
+      });
+
+      return true;
+    },
+
     parseCommand(command) {
       const text = String(command || '');
 
@@ -226,6 +258,9 @@
 
       if (result.kind === 'chat') {
         const raw = result.raw || result.text || '';
+
+        this.lastChatSyncRaw = raw || '';
+        this.lastChatSyncChatId = parsed.chatId || '';
 
         if (raw && (raw.includes('[VV_CHAT_SYNC]') || raw.includes('[聊天界面]'))) {
           this.emitToPhone({

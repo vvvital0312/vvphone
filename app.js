@@ -3251,43 +3251,62 @@ async function triggerAIReply() {
       return;
     }
 
-    const thread = messages[currentChatId] || [];
+    const chatIdAtRequest = currentChatId;
+    const chatTypeAtRequest = currentChatType;
+    const thread = messages[chatIdAtRequest] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
     if (!pendingMessages.length) {
-      pendingReplyTargets[currentChatId] = false;
+      pendingReplyTargets[chatIdAtRequest] = false;
       saveAll();
       return;
     }
 
-    const bridgeName = getBridgeNameByChatId(currentChatId, currentChatType);
-    const promptText = buildVVEventPayload(currentChatId) || buildLatestUserPayload(currentChatId);
+    const bridgeName = getBridgeNameByChatId(chatIdAtRequest, chatTypeAtRequest);
+    const promptText = buildVVEventPayload(chatIdAtRequest) || buildLatestUserPayload(chatIdAtRequest);
 
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.chatMode === 'slash' || VV_BRIDGE_CONFIG.chatMode === 'local+slash')) {
       const cmd = VV_BRIDGE_CONFIG.buildReplyCommand({
         bridgeName,
-        chatId: currentChatId,
-        chatType: currentChatType,
+        chatId: chatIdAtRequest,
+        chatType: chatTypeAtRequest,
         promptText
       });
       slashOk = await triggerSlash(cmd);
     }
 
     if (slashOk) {
-      pendingMessages.forEach(m => {
-        m.pendingForReply = false;
-      });
-      pendingReplyTargets[currentChatId] = false;
+      console.log('[triggerAIReply] slash submitted, waiting for VVPHONE_CHAT_SYNC...');
+
+      setTimeout(() => {
+        const latestThread = messages[chatIdAtRequest] || [];
+        const hasLeftReply = latestThread.some(m => !m.isMe && !m.recalled);
+
+        if (!hasLeftReply) {
+          console.warn('[VV] no left reply after slash ok, try resend last sync');
+          requestResendLastVVChatSync(chatIdAtRequest);
+        }
+      }, 800);
+
+      setTimeout(() => {
+        const latestThread = messages[chatIdAtRequest] || [];
+        const hasLeftReply = latestThread.some(m => !m.isMe && !m.recalled);
+
+        if (!hasLeftReply) {
+          console.warn('[VV] still no left reply, try resend last sync again');
+          requestResendLastVVChatSync(chatIdAtRequest);
+        }
+      }, 1600);
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
-      simulateAutoReply(currentChatId, currentChatType);
+      simulateAutoReply(chatIdAtRequest, chatTypeAtRequest);
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
       });
-      pendingReplyTargets[currentChatId] = false;
+      pendingReplyTargets[chatIdAtRequest] = false;
     }
 
     saveAll();
@@ -3296,6 +3315,28 @@ async function triggerAIReply() {
       isTriggeringAIReply = false;
     }, 300);
   }
+}
+
+function requestResendLastVVChatSync(chatId) {
+  try {
+    const viewId = window.__vv_view_id || '';
+
+    if (window.parent && window.parent !== window && window.parent.VVHostBridge) {
+      const ok = window.parent.VVHostBridge.resendLastChatSync(chatId, viewId);
+      console.log('[VV] requested resendLastChatSync from parent:', ok);
+      return ok;
+    }
+
+    if (window.VVHostBridge) {
+      const ok = window.VVHostBridge.resendLastChatSync(chatId, viewId);
+      console.log('[VV] requested resendLastChatSync from local host:', ok);
+      return ok;
+    }
+  } catch (e) {
+    console.warn('[VV] requestResendLastVVChatSync failed:', e);
+  }
+
+  return false;
 }
 
 function simulateAutoReply(targetId, type) {
