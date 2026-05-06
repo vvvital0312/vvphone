@@ -3322,9 +3322,6 @@ function buildVVEventPayload(chatId) {
     return '[消息]';
   })();
 
-  console.log('[VV_EVENT] selected pending =', myPending);
-  console.log('[VV_EVENT] messageText =', messageText);
-
   const myAvatarKey = 'current_my_avatar';
   const targetAvatarId = chatSetting.theirAvatar ? String(chatSetting.theirAvatar) : 'contact_unknown_avatar';
   const myBubble = chatSetting.myBubble || '#5B86FF';
