@@ -5595,3 +5595,4 @@ window.onload = async function () {
   // 暂时关闭随机来电，后续改为剧情触发式来电
   // maybeSimulateIncomingCall();
 };
+ 
