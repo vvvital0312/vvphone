@@ -142,13 +142,7 @@ function initSTBridgeListener() {
     }
 
     if (data.type === 'VVPHONE_REPLY') {
-      console.log('[VV][listener] HIT VVPHONE_REPLY');
-      const chatId = data.chatId || currentChatId;
-      appendAIMessageToCurrentChat({
-        chatId,
-        senderName: data.senderName || getBridgeNameByChatId(chatId, currentChatType),
-        text: data.text || '……'
-      });
+      console.log('[VV][listener] HIT VVPHONE_REPLY (ignored because VV_CHAT_SYNC is enabled)');
       return;
     }
 
@@ -1101,14 +1095,18 @@ function appendVVChatReplyToLocal(chatData) {
     rel.name = chatData.target;
   }
 
-  if (chatData.chatBgKey) setting.background = chatData.chatBgKey;
   if (chatData.myBubble) setting.myBubble = chatData.myBubble;
   if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
-  if (chatData.targetAvatarId) {
+
+  if (chatData.targetAvatarId && (
+    String(chatData.targetAvatarId).startsWith('idb:') ||
+    String(chatData.targetAvatarId).startsWith('http') ||
+    String(chatData.targetAvatarId).startsWith('data:image/')
+  )) {
     setting.theirAvatar = chatData.targetAvatarId;
     setting.targetAvatarId = chatData.targetAvatarId;
   }
-  if (chatData.myAvatarKey) setting.myAvatarKey = chatData.myAvatarKey;
+
   if (chatData.target) setting.target = chatData.target;
 
   if (leftMsgs.length > 0) {
@@ -3297,16 +3295,17 @@ function sendMessage() {
 
 function buildVVEventPayload(chatId) {
   const list = messages[chatId] || [];
-  const myPending = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
+  const myPending = [...list].reverse().find(m => m.isMe && !m.recalled && m.pendingForReply);
 
-  if (!myPending.length) return '';
+  if (!myPending) return '';
 
   const chatSetting = getChatSetting(chatId) || {};
   const rel = getRelSetting(chatId) || {};
   const time = typeof getNowFullLabel === 'function' ? getNowFullLabel() : getNowTime();
   const targetName = rel.name || chatSetting.name || getBridgeNameByChatId(chatId, currentChatType) || '未知联系人';
 
-  const messageText = myPending.map(m => {
+  const messageText = (() => {
+    const m = myPending;
     if (m.type === 'text') return (m.chunks || []).join('\n');
     if (m.type === 'sticker') return `[表情] ${m.stickerName || '表情'}`;
     if (m.type === 'image') return `[图片] ${m.desc || ''}`.trim();
@@ -3314,13 +3313,13 @@ function buildVVEventPayload(chatId) {
     if (m.type === 'transfer') return `[转账] 金额${m.amount}，备注${m.note || '无'}`;
     if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
-  }).join('\\n');
+  })();
 
   const myAvatarKey = 'current_my_avatar';
   const targetAvatarId = chatSetting.theirAvatar ? String(chatSetting.theirAvatar) : 'contact_unknown_avatar';
   const myBubble = chatSetting.myBubble || '#5B86FF';
   const targetBubble = chatSetting.theirBubble || '#F8F8F8';
-  const chatBgKey = chatSetting.background || 'current_chat_bg';
+  const chatBgKey = 'current_chat_bg';
 
   return [
     '以下是一次手机聊天事件。',
@@ -3340,19 +3339,6 @@ function buildVVEventPayload(chatId) {
     '不得省略 sender=。',
     '不得省略 state=。',
     '如需表现正在输入，可先输出 state=typing 的 [消息] 块。',
-    '如果角色不打算继续回复线上消息，则不要输出 [VV_CHAT_SYNC]，并明确说明没有继续回复手机消息。',
-    '当前聊天系统支持转账互动。',
-    '如果角色接受用户最近一笔待收款转账，则必须在对应的 side=left [消息] 块中加入：transferAction=accept',
-    '如果角色退回用户最近一笔待收款转账，则必须在对应的 side=left [消息] 块中加入：transferAction=return',
-    '如果角色主动向用户发起转账，则必须在对应的 side=left [消息] 块中加入：transferAction=send',
-    '当 transferAction=send 时，必须同时提供：transferAmount=正数金额',
-    '如有备注，可额外提供：transferNote=备注内容',
-    'transferAction、transferAmount、transferNote 必须写在 [消息] 块内部，和 side、sender、content、state 同级。',
-    '如果只是普通聊天，没有发生转账行为，则不要添加 transferAction 字段。',
-    '如果用户消息中包含“[转账] 金额xx，备注xx”，且角色语义上表示“收到、谢谢、我收下了”，则应添加 transferAction=accept。',
-    '如果用户消息中包含“[转账] 金额xx，备注xx”，且角色语义上表示“我不能收、你拿回去、不用给我”，则应添加 transferAction=return。',
-    '如果输出的 [消息] 块使用 text 字段、缺少 sender 字段、缺少 state 字段，均视为格式错误，必须自行改正后再输出。',
-    '若回复语义已经构成接受转账、退回转账或主动发起转账，则必须补出 transferAction 字段，否则视为格式错误。',
     '',
     '[VV_EVENT]',
     'type=chat',
@@ -3836,6 +3822,12 @@ function handleAITransferDirectives(chatId, text) {
 
 function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' }) {
   if (!chatId) return;
+
+  if (typeof text === 'string' && /\[VV_CHAT_SYNC\][\s\S]*?\[\/VV_CHAT_SYNC\]/i.test(text)) {
+    console.log('[appendAIMessageToCurrentChat] ignored raw VV_CHAT_SYNC text');
+    return;
+  }
+
   if (!messages[chatId]) messages[chatId] = [];
 
   let finalText = text || '...';
