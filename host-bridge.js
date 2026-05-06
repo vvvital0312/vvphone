@@ -326,7 +326,7 @@
         this.lastChatSyncRaw = raw || '';
         this.lastChatSyncChatId = parsed.chatId || '';
 
-        if (raw && (raw.includes('[VV_CHAT_SYNC]') || raw.includes('[聊天界面]'))) {
+        if (raw && raw.includes('[VV_CHAT_SYNC]')) {
           this.emitToPhone({
             type: 'VVPHONE_CHAT_SYNC',
             chatId: parsed.chatId || '',
@@ -368,41 +368,70 @@
     buildMockChatReply(command, parsed) {
       const prompt = this.extractPrompt(command);
       const sender = parsed.senderName || this.getDefaultSender();
-      const chatId = parsed.chatId || '';
-      const target = parsed.bridgeName || parsed.senderName || this.getDefaultSender();
-      const time = this.formatNowLabel();
+      const fallbackChatId = parsed.chatId || '';
+      const fallbackTarget = parsed.bridgeName || parsed.senderName || this.getDefaultSender();
+      const fallbackTime = this.formatNowLabel();
+
+      const eventMatch = String(prompt).match(/\[VV_EVENT\]([\s\S]*?)\[\/VV_EVENT\]/i);
+      const eventBody = eventMatch ? eventMatch[1] : '';
+
+      const readField = (name, fallback = '') => {
+        const m = String(eventBody).match(new RegExp(`^\\s*${name}=(.*)$`, 'mi'));
+        return m ? m[1].trim() : fallback;
+      };
+
+      const chatId = readField('chatId', fallbackChatId);
+      const target = readField('target', fallbackTarget);
+      const time = readField('time', fallbackTime);
+      const rawMessage = readField('message', '').replace(/\\n/g, '\n');
 
       const myAvatarKey = 'current_my_avatar';
-      const targetAvatarId = 'contact_unknown_avatar';
-      const myBubble = 'default';
-      const targetBubble = '#F8F8F8';
-      const chatBgKey = 'default';
+      const targetAvatarId = readField('targetAvatarId', 'contact_unknown_avatar');
+      const myBubble = readField('myBubble', '#5B86FF');
+      const targetBubble = readField('targetBubble', '#F8F8F8');
+      const chatBgKey = readField('chatBgKey', 'current_chat_bg');
+
+      const userLines = rawMessage
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
 
       let replyText = '我看到了，我们继续聊吧。';
       let transferAction = '';
       let transferAmount = '';
       let transferNote = '';
 
-      if (prompt.includes('[转账]')) {
+      const joined = userLines.join('\n');
+
+      if (joined.includes('[转账]')) {
         replyText = '我收到了，谢谢你。';
         transferAction = 'accept';
-      } else if (prompt.includes('[图片]')) {
+      } else if (joined.includes('[图片]')) {
         replyText = '我看到你发来的图片了。';
-      } else if (prompt.includes('[语音]')) {
+      } else if (joined.includes('[语音]')) {
         replyText = '我听完了。';
-      } else if (prompt.includes('[表情]')) {
+      } else if (joined.includes('[表情]')) {
         replyText = '这个表情我看到了。';
       } else {
-        const lastLine = this.getLastMeaningfulLine(prompt);
-        replyText = `我看到了，你刚才说的是“${lastLine || '继续聊聊吧'}”。`;
+        const lastLine = userLines[userLines.length - 1] || '继续聊聊吧';
+        replyText = `我看到了，你刚才说的是“${lastLine}”。`;
       }
+
+      const rightMsgs = userLines.map(line => [
+        '[消息]',
+        'side=right',
+        'sender=我',
+        `content=${line}`,
+        'state=sent',
+        '[/消息]'
+      ].join('\n')).join('\n\n');
 
       const leftMsg = [
         '[消息]',
         'side=left',
         `sender=${sender}`,
         `content=${replyText}`,
-        'state=reply',
+        'state=sent',
         transferAction ? `transferAction=${transferAction}` : '',
         transferAmount ? `transferAmount=${transferAmount}` : '',
         transferNote ? `transferNote=${transferNote}` : '',
@@ -410,17 +439,6 @@
       ].filter(Boolean).join('\n');
 
       return [
-        '[聊天界面]',
-        `chatId=${chatId}`,
-        `target=${target}`,
-        `time=${time}`,
-        `myAvatarKey=${myAvatarKey}`,
-        `targetAvatarId=${targetAvatarId}`,
-        `myBubble=${myBubble}`,
-        `targetBubble=${targetBubble}`,
-        `chatBgKey=${chatBgKey}`,
-        leftMsg,
-        '[/聊天界面]',
         '[VV_CHAT_SYNC]',
         `chatId=${chatId}`,
         `target=${target}`,
@@ -430,6 +448,9 @@
         `myBubble=${myBubble}`,
         `targetBubble=${targetBubble}`,
         `chatBgKey=${chatBgKey}`,
+        '',
+        rightMsgs,
+        '',
         leftMsg,
         '[/VV_CHAT_SYNC]'
       ].join('\n');
@@ -515,36 +536,20 @@
       }
 
       const raw = [
-        '[聊天界面]',
-        `chatId=${this.lastContext.chatId || ''}`,
-        `target=${senderName}`,
-        `time=${this.formatNowLabel()}`,
-        'myAvatarKey=current_my_avatar',
-        'targetAvatarId=contact_unknown_avatar',
-        'myBubble=default',
-        'targetBubble=#F8F8F8',
-        'chatBgKey=default',
-        '[消息]',
-        'side=left',
-        `sender=${senderName}`,
-        `content=${text}`,
-        'state=reply',
-        '[/消息]',
-        '[/聊天界面]',
         '[VV_CHAT_SYNC]',
         `chatId=${this.lastContext.chatId || ''}`,
         `target=${senderName}`,
         `time=${this.formatNowLabel()}`,
         'myAvatarKey=current_my_avatar',
         'targetAvatarId=contact_unknown_avatar',
-        'myBubble=default',
+        'myBubble=#5B86FF',
         'targetBubble=#F8F8F8',
-        'chatBgKey=default',
+        'chatBgKey=current_chat_bg',
         '[消息]',
         'side=left',
         `sender=${senderName}`,
         `content=${text}`,
-        'state=reply',
+        'state=sent',
         '[/消息]',
         '[/VV_CHAT_SYNC]'
       ].join('\n');
