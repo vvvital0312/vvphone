@@ -870,20 +870,11 @@ function parseVVChatBlocks(raw, fallback = {}) {
 
   const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/i);
 
-    console.log('[VV] syncMatch exists:', !!syncMatch);
-
-    const chatMatch = syncMatch;
-    if (!chatMatch) {
-      console.warn('[VV] parseVVChatBlocks: no VV_CHAT_SYNC block found');
-      return null;
-    }
-
   console.log('[VV] syncMatch exists:', !!syncMatch);
-  console.log('[VV] uiMatch exists:', !!uiMatch);
 
-  const chatMatch = syncMatch || uiMatch;
+  const chatMatch = syncMatch;
   if (!chatMatch) {
-    console.warn('[VV] parseVVChatBlocks: no sync/chat block found');
+    console.warn('[VV] parseVVChatBlocks: no VV_CHAT_SYNC block found');
     return null;
   }
 
@@ -3321,6 +3312,9 @@ function buildVVEventPayload(chatId) {
     if (m.type === 'system') return `[系统] ${(m.chunks || []).join(' / ')}`;
     return '[消息]';
   })();
+
+  console.log('[VV_EVENT] selected pending =', myPending);
+  console.log('[VV_EVENT] messageText =', messageText);
 
   const myAvatarKey = 'current_my_avatar';
   const targetAvatarId = chatSetting.theirAvatar ? String(chatSetting.theirAvatar) : 'contact_unknown_avatar';
