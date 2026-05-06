@@ -133,7 +133,11 @@ function initSTBridgeListener() {
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV][listener] HIT VVPHONE_CHAT_SYNC');
-      handleVVChatSyncRaw(data.raw || '');
+      handleVVChatSyncRaw({
+        raw: data.raw || '',
+        chatId: data.chatId || '',
+        viewId: data.viewId || ''
+      });
       return;
     }
 
@@ -839,14 +843,39 @@ function savePhoneIconsSafely(savedIcons) {
   }
 }
 
-function parseVVChatBlocks(raw) {
-  const text = String(raw || '');
+function parseVVChatBlocks(raw, fallback = {}) {
+  let text = String(raw || '');
+
   console.log('[VV] parseVVChatBlocks input full >>>');
   console.log(text);
   console.log('<<< [VV] parseVVChatBlocks input full');
 
-  const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/);
-  const uiMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/);
+  if (!text.trim()) {
+    console.warn('[VV] parseVVChatBlocks: empty raw');
+    return null;
+  }
+
+  // 1. 如果是 HTML 包装，先尽量解成纯文本
+  if (/[<>]/.test(text) && (text.includes('<div') || text.includes('<span') || text.includes('<br') || text.includes('<'))) {
+    try {
+      const div = document.createElement('div');
+      div.innerHTML = text;
+      const decoded = div.textContent || div.innerText || '';
+      if (decoded && decoded.trim()) {
+        text = decoded;
+      }
+    } catch (err) {
+      console.warn('[VV] parseVVChatBlocks html decode failed:', err);
+    }
+  }
+
+  text = text
+    .replace(/\r/g, '')
+    .replace(/\u00a0/g, ' ')
+    .trim();
+
+  const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/i);
+  const uiMatch = text.match(/\[聊天界面\]([\s\S]*?)\[\/聊天界面\]/i);
 
   console.log('[VV] syncMatch exists:', !!syncMatch);
   console.log('[VV] uiMatch exists:', !!uiMatch);
@@ -857,7 +886,8 @@ function parseVVChatBlocks(raw) {
     return null;
   }
 
-  const full = chatMatch[1];
+  const full = String(chatMatch[1] || '').replace(/\r/g, '').trim();
+
   console.log('[VV] extracted block full >>>');
   console.log(full);
   console.log('<<< [VV] extracted block full');
@@ -871,22 +901,30 @@ function parseVVChatBlocks(raw) {
     return m ? m[1].trim() : '';
   }
 
+  function cleanValue(v) {
+    return String(v || '')
+      .replace(/\r/g, '')
+      .replace(/^\s+|\s+$/g, '');
+  }
+
   const chat = {
-    chatId: readField('chatId'),
-    target: readField('target'),
-    time: readField('time'),
-    myAvatarKey: readField('myAvatarKey'),
-    targetAvatarId: readField('targetAvatarId'),
-    myBubble: readField('myBubble'),
-    targetBubble: readField('targetBubble'),
-    chatBgKey: readField('chatBgKey'),
+    chatId: cleanValue(readField('chatId')) || cleanValue(fallback.chatId),
+    target: cleanValue(readField('target')),
+    time: cleanValue(readField('time')),
+    myAvatarKey: cleanValue(readField('myAvatarKey')),
+    targetAvatarId: cleanValue(readField('targetAvatarId')),
+    myBubble: cleanValue(readField('myBubble')),
+    targetBubble: cleanValue(readField('targetBubble')),
+    chatBgKey: cleanValue(readField('chatBgKey')),
     messages: []
   };
 
-  const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/g;
+  const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/gi;
   let m;
+
   while ((m = msgRegex.exec(full))) {
-    const block = m[1];
+    const block = String(m[1] || '').replace(/\r/g, '').trim();
+
     console.log('[VV] found [消息] block >>>');
     console.log(block);
     console.log('<<< [VV] found [消息] block');
@@ -897,40 +935,64 @@ function parseVVChatBlocks(raw) {
     }
 
     const msg = {
-      side: readMsgField('side'),
-      sender: readMsgField('sender'),
-      content:
+      side: cleanValue(readMsgField('side')),
+      sender: cleanValue(readMsgField('sender')),
+      content: cleanValue(
         readMsgField('content') ||
         readMsgField('text') ||
         readMsgField('message') ||
-        readMsgField('msg'),
-      state: readMsgField('state'),
-      type: readMsgField('type') || 'text',
-      transferAction: readMsgField('transferAction'),
-      transferAmount: readMsgField('transferAmount'),
-      transferNote: readMsgField('transferNote'),
-      _raw: block.trim()
+        readMsgField('msg')
+      ),
+      state: cleanValue(readMsgField('state')) || 'reply',
+      type: cleanValue(readMsgField('type')) || 'text',
+      transferAction: cleanValue(readMsgField('transferAction')),
+      transferAmount: cleanValue(readMsgField('transferAmount')),
+      transferNote: cleanValue(readMsgField('transferNote')),
+      _raw: block
     };
 
     console.log('[VV] parsed msg:', msg);
     chat.messages.push(msg);
   }
 
+  chat.messages = chat.messages.filter(Boolean);
+
   console.log('[VV] parseVVChatBlocks parsed chat:', chat);
   return chat;
 }
 
 function appendVVChatReplyToLocal(chatData) {
-
   if (!chatData || !chatData.chatId) {
     console.warn('[VV][APPEND] invalid chatData');
-    return;
+    return false;
   }
 
   const chatId = chatData.chatId;
 
   if (!messages[chatId]) {
     messages[chatId] = [];
+  }
+
+  let contact = contactList.find(i => i.id === chatId);
+  if (!contact) {
+    contact = {
+      id: chatId,
+      name: chatData.target || '联系人',
+      bridgeName: chatData.target || '',
+      avatar: DEFAULT_AVATAR,
+      isSticky: false,
+      lastTime: getNowTime(),
+      lastPreview: '',
+      threadType: 'direct'
+    };
+    contactList.unshift(contact);
+  } else {
+    if (chatData.target && (!contact.name || contact.name === '联系人')) {
+      contact.name = chatData.target;
+    }
+    if (chatData.target && !contact.bridgeName) {
+      contact.bridgeName = chatData.target;
+    }
   }
 
   const setting = getChatSetting(chatId);
@@ -943,31 +1005,42 @@ function appendVVChatReplyToLocal(chatData) {
 
   const leftMsgs = allMsgs.filter(msg => {
     const side = String(msg.side || '').trim().toLowerCase();
+    const hasTransferSignal =
+      !!String(msg.transferAction || '').trim() ||
+      !!String(msg.transferAmount || '').trim() ||
+      !!String(msg.transferNote || '').trim();
+
     const content = String(msg.content || '').trim();
-    return (side === 'left' || side === 'assistant' || side === 'them') && !!content;
+
+    return (side === 'left' || side === 'assistant' || side === 'them') &&
+      (!!content || hasTransferSignal);
   });
 
-  for (let i = 0; i < leftMsgs.length; i++) {
+  console.log('[VV][APPEND] leftMsgs to append =', leftMsgs);
 
+  let appendedCount = 0;
+
+  for (let i = 0; i < leftMsgs.length; i++) {
     const msg = leftMsgs[i];
 
     const normalizedContent = String(msg.content || '').trim();
+    const normalizedType = String(msg.type || 'text').trim().toLowerCase() || 'text';
+    const transferAction = String(msg.transferAction || '').trim().toLowerCase();
+    const transferAmount = String(msg.transferAmount || '').trim();
+    const transferNote = String(msg.transferNote || '').trim();
 
-    if (!normalizedContent) {
-      continue;
-    }
+    const duplicated = thread.some(item => {
+      const oldText = Array.isArray(item.chunks) ? item.chunks.join('\n').trim() : String(item.text || '').trim();
+      return (
+        !item.isMe &&
+        !item.recalled &&
+        String(item.type || 'text') === 'text' &&
+        oldText === normalizedContent &&
+        String(item.timeLabel || '') === String(timeLabel || '')
+      );
+    });
 
-    const duplicated = thread.some(item =>
-      !item.isMe &&
-      !item.recalled &&
-      item.type === 'text' &&
-      (
-        (Array.isArray(item.chunks) && item.chunks.join('\n').trim() === normalizedContent) ||
-        (typeof item.text === 'string' && item.text.trim() === normalizedContent)
-      )
-    );
-
-    if (!duplicated) {
+    if (normalizedContent && !duplicated) {
       const newMsg = {
         id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
         sender: 'them',
@@ -980,29 +1053,33 @@ function appendVVChatReplyToLocal(chatData) {
         recalled: false,
         time,
         timeLabel,
-        state: msg.state || 'sent'
+        state: msg.state || 'reply'
       };
 
       console.log('[VV][APPEND] before push newMsg =', newMsg);
       thread.push(newMsg);
       console.log('[VV][APPEND] after push, thread =', thread);
+      appendedCount++;
     }
 
-    const action = String(msg.transferAction || '').trim().toLowerCase();
-
-    if (action === 'accept') {
+    // 转账联动逻辑
+    if (transferAction === 'accept') {
       const transferMsg = findLastPendingMyTransfer(chatId);
-      if (transferMsg) acceptMyTransferByAI(chatId, transferMsg);
+      if (transferMsg) {
+        acceptMyTransferByAI(chatId, transferMsg);
+      }
     }
 
-    if (action === 'return') {
+    if (transferAction === 'return') {
       const transferMsg = findLastPendingMyTransfer(chatId);
-      if (transferMsg) returnMyTransferByAI(chatId, transferMsg);
+      if (transferMsg) {
+        returnMyTransferByAI(chatId, transferMsg);
+      }
     }
 
-    if (action === 'send') {
-      const amount = Number(msg.transferAmount || 0);
-      const note = String(msg.transferNote || '').trim() || '给你的转账';
+    if (transferAction === 'send') {
+      const amount = Number(transferAmount || 0);
+      const note = transferNote || '给你的转账';
 
       if (amount > 0) {
         const alreadyExists = thread.some(item =>
@@ -1035,8 +1112,12 @@ function appendVVChatReplyToLocal(chatData) {
   if (chatData.target) setting.target = chatData.target;
 
   if (leftMsgs.length > 0) {
-    const last = leftMsgs[leftMsgs.length - 1];
-    updateLastMsg(chatId, last.content, time, currentChatType);
+    const lastTextMsg = [...leftMsgs].reverse().find(item => String(item.content || '').trim());
+    const previewText = lastTextMsg
+      ? lastTextMsg.content
+      : (leftMsgs[leftMsgs.length - 1].transferAction ? '[转账消息]' : '[新消息]');
+
+    updateLastMsg(chatId, previewText, time, currentChatType);
 
     pendingReplyTargets[chatId] = false;
 
@@ -1048,18 +1129,28 @@ function appendVVChatReplyToLocal(chatData) {
   }
 
   saveAll();
+
+  return appendedCount > 0;
 }
 
-async function handleVVChatSyncRaw(raw) {
-  console.log('[VV] handleVVChatSyncRaw called');
+async function handleVVChatSyncRaw(payload) {
+  console.log('[VV] handleVVChatSyncRaw called:', payload);
 
-  const parsed = parseVVChatBlocks(raw);
+  const raw = typeof payload === 'string' ? payload : (payload?.raw || '');
+  const payloadChatId = typeof payload === 'object' ? (payload?.chatId || '') : '';
+  const payloadViewId = typeof payload === 'object' ? (payload?.viewId || '') : '';
+
+  const parsed = parseVVChatBlocks(raw, {
+    chatId: payloadChatId,
+    viewId: payloadViewId
+  });
 
   console.log('[VV] parsed sync data:', parsed);
 
   if (!parsed || !parsed.chatId) {
-    console.warn('[VV] handleVVChatSyncRaw: invalid parsed');
-    return;
+    console.warn('[VV] handleVVChatSyncRaw: invalid parsed, request resend');
+    requestVVChatSyncResend(payloadChatId, payloadViewId);
+    return false;
   }
 
   const area = document.getElementById('messageArea');
@@ -1070,37 +1161,46 @@ async function handleVVChatSyncRaw(raw) {
     pendingVVChatSyncQueue.push({
       raw,
       chatId: parsed.chatId,
+      viewId: payloadViewId,
       time: Date.now()
     });
-    return;
+    return false;
   }
 
-  appendVVChatReplyToLocal(parsed);
+  const appended = appendVVChatReplyToLocal(parsed);
 
   if (typeof renderChatList === 'function') {
     renderChatList();
+  } else if (typeof renderAllPanels === 'function') {
+    renderAllPanels();
   }
 
-  if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-    renderMessages();
-
-    setTimeout(() => {
-      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-        renderMessages();
+  const rerender = async () => {
+    if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
+      try {
+        await renderMessages();
+      } catch (err) {
+        console.error('[VV] renderMessages error:', err);
       }
-    }, 80);
+    }
+  };
 
-    setTimeout(() => {
-      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-        renderMessages();
-      }
-    }, 200);
-  }
+  await rerender();
+  setTimeout(rerender, 50);
+  setTimeout(rerender, 120);
+  setTimeout(rerender, 260);
 
   saveAll();
+
+  console.log('[VV] handleVVChatSyncRaw done:', {
+    chatId: parsed.chatId,
+    appended
+  });
+
+  return !!appended;
 }
 
-function flushPendingVVChatSyncQueue() {
+async function flushPendingVVChatSyncQueue() {
   if (!pendingVVChatSyncQueue.length) return;
 
   const area = document.getElementById('messageArea');
@@ -1109,34 +1209,31 @@ function flushPendingVVChatSyncQueue() {
     return;
   }
 
+  const now = Date.now();
+
+  // 可选：顺手清理太旧的队列，避免堆积脏数据
+  pendingVVChatSyncQueue = pendingVVChatSyncQueue.filter(item => {
+    return item && item.raw && (now - (item.time || now) < 60 * 1000);
+  });
+
+  if (!pendingVVChatSyncQueue.length) return;
+
   const queue = pendingVVChatSyncQueue.slice();
   pendingVVChatSyncQueue = [];
 
   console.log('[VV] flushing queued sync count =', queue.length);
 
-  queue.forEach(item => {
+  for (const item of queue) {
     try {
-      const parsed = parseVVChatBlocks(item.raw);
-      if (!parsed || !parsed.chatId) return;
-
-      appendVVChatReplyToLocal(parsed);
-
-      if (typeof renderChatList === 'function') {
-        renderChatList();
-      }
-
-      if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-        renderMessages();
-        setTimeout(() => {
-          if (parsed.chatId === currentChatId && typeof renderMessages === 'function') {
-            renderMessages();
-          }
-        }, 80);
-      }
+      await handleVVChatSyncRaw({
+        raw: item.raw || '',
+        chatId: item.chatId || '',
+        viewId: item.viewId || ''
+      });
     } catch (e) {
-      console.error('[VV] flush queued sync error:', e);
+      console.error('[VV] flush queued sync error:', e, item);
     }
-  });
+  }
 
   saveAll();
 }
@@ -2662,6 +2759,34 @@ async function openChatDetail(chatId, forceName = '') {
 
   if (typeof renderMessages === 'function') {
     await renderMessages();
+
+    setTimeout(() => {
+      if (currentChatId === chatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+      if (typeof flushPendingVVChatSyncQueue === 'function') {
+        flushPendingVVChatSyncQueue();
+      }
+    }, 60);
+
+    setTimeout(() => {
+      if (currentChatId === chatId && typeof renderMessages === 'function') {
+        renderMessages();
+      }
+      if (typeof flushPendingVVChatSyncQueue === 'function') {
+        flushPendingVVChatSyncQueue();
+      }
+    }, 180);
+  } else {
+    if (typeof flushPendingVVChatSyncQueue === 'function') {
+      setTimeout(() => {
+        flushPendingVVChatSyncQueue();
+      }, 60);
+
+      setTimeout(() => {
+        flushPendingVVChatSyncQueue();
+      }, 180);
+    }
   }
 
   if (typeof renderChatList === 'function') {
