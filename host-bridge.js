@@ -83,13 +83,21 @@
       const requestId = data.requestId || '';
       const viewId = data.viewId || '';
 
+      console.log('[VV_BRIDGE][handleSlashRequest] data =', data);
+
       const parsed = this.parseCommand(command);
+
+      console.log('[VV_BRIDGE][handleSlashRequest] command =', command);
+      console.log('[VV_BRIDGE][handleSlashRequest] parsed =', parsed);
+      console.log('[VV_BRIDGE][handleSlashRequest] requestId =', requestId, 'viewId =', viewId);
 
       this.lastContext = {
         ...this.lastContext,
         ...parsed,
         command
       };
+
+      console.log('[VV_BRIDGE][handleSlashRequest] lastContext =', this.lastContext);
 
       this.log('收到 Slash 请求', 'ok', {
         type: data.type,
@@ -100,8 +108,11 @@
       });
 
       const mode = this.getReplyMode();
+      console.log('[VV_BRIDGE][handleSlashRequest] mode =', mode);
 
       if (mode === 'passthrough') {
+        console.log('[VV_BRIDGE][handleSlashRequest] passthrough mode: replyExecuteResult only');
+
         this.replyExecuteResult({
           requestId,
           viewId,
@@ -114,6 +125,8 @@
       }
 
       if (mode === 'manual') {
+        console.log('[VV_BRIDGE][handleSlashRequest] manual mode: replyExecuteResult only');
+
         this.replyExecuteResult({
           requestId,
           viewId,
@@ -126,7 +139,18 @@
       }
 
       try {
+        console.log('[VV_BRIDGE][handleSlashRequest] about to call mockExecute');
+
         const result = await this.mockExecute(command, parsed);
+
+        console.log('[VV_BRIDGE][handleSlashRequest] mockExecute result =', result);
+        try {
+          console.log('[VV_BRIDGE][handleSlashRequest][mockExecute_result_json] =', JSON.stringify(result, null, 2));
+        } catch (e) {
+          console.warn('[VV_BRIDGE][handleSlashRequest][mockExecute_result_json] stringify failed:', e);
+        }
+
+        console.log('[VV_BRIDGE][handleSlashRequest] about to replyExecuteResult ok=true');
 
         this.replyExecuteResult({
           requestId,
@@ -135,10 +159,14 @@
           error: null
         });
 
+        console.log('[VV_BRIDGE][handleSlashRequest] replyExecuteResult done, about to call handleMockResult');
+
         this.handleMockResult(result, parsed, {
           requestId,
           viewId
         });
+
+        console.log('[VV_BRIDGE][handleSlashRequest] handleMockResult called');
       } catch (err) {
         console.error('[VVHostBridge] mockExecute error:', err);
 
@@ -173,12 +201,23 @@
       let postedToFrame = false;
       let postedToWindow = false;
 
+      console.log('[VV_BRIDGE][emitToPhone] payload =', payload);
+      try {
+        console.log('[VV_BRIDGE][emitToPhone][payload_json] =', JSON.stringify(payload, null, 2));
+      } catch (e) {
+        console.warn('[VV_BRIDGE][emitToPhone][payload_json] stringify failed:', e);
+      }
+
       try {
         this.frame = document.getElementById('vvphoneFrame') || this.frame;
+        console.log('[VV_BRIDGE][emitToPhone] frame =', this.frame);
 
         if (this.frame && this.frame.contentWindow) {
           this.frame.contentWindow.postMessage(payload, '*');
           postedToFrame = true;
+          console.log('[VV_BRIDGE][emitToPhone] posted to frame.contentWindow');
+        } else {
+          console.log('[VV_BRIDGE][emitToPhone] no frame.contentWindow');
         }
       } catch (e) {
         console.warn('[VVHostBridge] frame.contentWindow.postMessage failed:', e);
@@ -187,9 +226,18 @@
       try {
         window.postMessage(payload, '*');
         postedToWindow = true;
+        console.log('[VV_BRIDGE][emitToPhone] posted to window');
       } catch (e) {
         console.warn('[VVHostBridge] window.postMessage failed:', e);
       }
+
+      console.log('[VV_BRIDGE][emitToPhone] result =', {
+        type: payload?.type || '',
+        viewId: payload?.viewId || '',
+        chatId: payload?.chatId || '',
+        postedToFrame,
+        postedToWindow
+      });
 
       this.log('emitToPhone', postedToFrame || postedToWindow ? 'ok' : 'err', {
         type: payload?.type || '',
@@ -203,12 +251,24 @@
     },
 
     resendLastChatSync(chatId, viewId) {
+      console.log('[VV_BRIDGE][resendLastChatSync] called with =', {
+        chatId,
+        viewId,
+        lastChatSyncChatId: this.lastChatSyncChatId,
+        hasLastChatSyncRaw: !!this.lastChatSyncRaw
+      });
+
       if (!this.lastChatSyncRaw) {
+        console.log('[VV_BRIDGE][resendLastChatSync][RETURN] no lastChatSyncRaw');
         this.log('没有可补发的 lastChatSyncRaw', 'warn');
         return false;
       }
 
       if (chatId && this.lastChatSyncChatId && chatId !== this.lastChatSyncChatId) {
+        console.log('[VV_BRIDGE][resendLastChatSync][RETURN] chatId mismatch', {
+          expect: chatId,
+          actual: this.lastChatSyncChatId
+        });
         this.log('lastChatSyncRaw chatId 不匹配，取消补发', 'warn', {
           expect: chatId,
           actual: this.lastChatSyncChatId
@@ -223,7 +283,16 @@
         viewId: viewId || ''
       };
 
+      console.log('[VV_BRIDGE][resendLastChatSync] payload =', payload);
+      try {
+        console.log('[VV_BRIDGE][resendLastChatSync][payload_json] =', JSON.stringify(payload, null, 2));
+      } catch (e) {
+        console.warn('[VV_BRIDGE][resendLastChatSync][payload_json] stringify failed:', e);
+      }
+
       const ok = this.emitToPhone(payload);
+
+      console.log('[VV_BRIDGE][resendLastChatSync] emit result =', ok);
 
       this.log(ok ? '已补发 last VVPHONE_CHAT_SYNC' : '补发 last VVPHONE_CHAT_SYNC 失败', ok ? 'ok' : 'err', {
         chatId: payload.chatId,
@@ -310,7 +379,26 @@
     handleMockResult(result, parsed, meta = {}) {
       const viewId = meta.viewId || '';
 
+      console.log('[VV_BRIDGE][handleMockResult] result =', result);
+      console.log('[VV_BRIDGE][handleMockResult] parsed =', parsed);
+      console.log('[VV_BRIDGE][handleMockResult] meta =', meta);
+
+      try {
+        console.log('[VV_BRIDGE][handleMockResult][result_json] =', JSON.stringify(result, null, 2));
+      } catch (e) {
+        console.warn('[VV_BRIDGE][handleMockResult][result_json] stringify failed:', e);
+      }
+
+      if (!result) {
+        console.log('[VV_BRIDGE][handleMockResult][RETURN] no result');
+        return;
+      }
+
+      console.log('[VV_BRIDGE][handleMockResult] kind =', result.kind, 'viewId =', viewId);
+
       if (result.kind === 'call') {
+        console.log('[VV_BRIDGE][handleMockResult] enter call branch');
+
         this.emitToPhone({
           type: 'VVPHONE_CALL_STATUS',
           chatId: parsed.chatId || '',
@@ -323,6 +411,8 @@
       }
 
       if (result.kind === 'feed') {
+        console.log('[VV_BRIDGE][handleMockResult] enter feed branch');
+
         this.emitToPhone({
           type: 'VVPHONE_FEED_REPLY',
           postId: parsed.postId || '',
@@ -337,18 +427,33 @@
       }
 
       if (result.kind === 'chat') {
+        console.log('[VV_BRIDGE][handleMockResult] enter chat branch');
+
         const raw = result.raw || result.text || '';
+
+        console.log('[VV_BRIDGE][handleMockResult][chat] raw =', raw);
+        console.log('[VV_BRIDGE][handleMockResult][chat] raw length =', String(raw || '').length);
+        console.log('[VV_BRIDGE][handleMockResult][chat] includes [VV_CHAT_SYNC] =', !!(raw && raw.includes('[VV_CHAT_SYNC]')));
 
         this.lastChatSyncRaw = raw || '';
         this.lastChatSyncChatId = parsed.chatId || '';
 
+        console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncChatId =', this.lastChatSyncChatId);
+        console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncRaw preview =', String(this.lastChatSyncRaw || '').slice(0, 500));
+
         if (raw && raw.includes('[VV_CHAT_SYNC]')) {
-          this.emitToPhone({
+          console.log('[VV_BRIDGE][handleMockResult][chat] about to emit VVPHONE_CHAT_SYNC');
+
+          const payload = {
             type: 'VVPHONE_CHAT_SYNC',
             chatId: parsed.chatId || '',
             raw,
             viewId
-          });
+          };
+
+          console.log('[VV_BRIDGE][handleMockResult][chat] payload =', payload);
+
+          this.emitToPhone(payload);
 
           this.log('已回传 VVPHONE_CHAT_SYNC', 'ok', {
             chatId: parsed.chatId || '',
@@ -358,25 +463,37 @@
           return;
         }
 
-        this.emitToPhone({
+        console.log('[VV_BRIDGE][handleMockResult][chat] no [VV_CHAT_SYNC], fallback to VVPHONE_REPLY');
+
+        const fallbackPayload = {
           type: 'VVPHONE_REPLY',
           chatId: parsed.chatId || '',
           senderName: parsed.senderName || this.getDefaultSender(),
           text: result.text || '……',
           viewId
-        });
+        };
+
+        console.log('[VV_BRIDGE][handleMockResult][chat] fallback payload =', fallbackPayload);
+
+        this.emitToPhone(fallbackPayload);
 
         this.log('已回传 VVPHONE_REPLY(fallback)', 'ok', result);
         return;
       }
 
-      this.emitToPhone({
+      console.log('[VV_BRIDGE][handleMockResult] enter default branch');
+
+      const defaultPayload = {
         type: 'VVPHONE_REPLY',
         chatId: parsed.chatId || '',
         senderName: parsed.senderName || this.getDefaultSender(),
         text: result.text || '……',
         viewId
-      });
+      };
+
+      console.log('[VV_BRIDGE][handleMockResult] default payload =', defaultPayload);
+
+      this.emitToPhone(defaultPayload);
 
       this.log('已回传 VVPHONE_REPLY(default)', 'ok', result);
     },
