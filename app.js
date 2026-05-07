@@ -19,6 +19,12 @@ let chatSettings = {};
 let stickerPacks = [];
 let relationshipSettings = {};
 
+let appProfile = {
+  myName: '我',
+  myAvatar: '',
+  feedCover: ''
+};
+
 let composerDraft = {
   quote: null,
   attachments: []
@@ -555,7 +561,7 @@ function releaseAllAssetObjectUrls() {
 }
 
 function buildMediaSrcAttrs(ref) {
-  const safe = escapeHTML(ref || '');
+  const safe = escapeHTMLAttr(ref || '');
   return `data-media-ref="${safe}" src="${STORAGE_IMAGE_PLACEHOLDER}"`;
 }
 
@@ -987,7 +993,7 @@ function appendVVChatReplyToLocal(chatData) {
     }
   }
 
-  const setting = getChatSetting(chatId);
+  const setting = normalizeChatSetting(chatId);
   const rel = getRelSetting(chatId);
 
   const thread = messages[chatId];
@@ -1163,7 +1169,10 @@ async function handleVVChatSyncRaw(payload) {
     return false;
   }
 
-  const appended = appendVVChatReplyToLocal(parsed);
+    const appended = appendVVChatReplyToLocal(parsed);
+    console.log('[VV] appended =', appended);
+    console.log('[VV] currentChatId =', currentChatId, 'parsed.chatId =', parsed.chatId);
+    console.log('[VV] messages[parsed.chatId] =', messages[parsed.chatId]);
 
   if (typeof renderChatList === 'function') {
     renderChatList();
@@ -1309,26 +1318,45 @@ async function triggerSlash(cmd) {
 }
 
 function escapeHTML(str) {
-  const amp = String.fromCharCode(38, 97, 109, 112, 59);
-  const lt = String.fromCharCode(38, 108, 116, 59);
-  const gt = String.fromCharCode(38, 103, 116, 59);
-  const quot = String.fromCharCode(38, 113, 117, 111, 116, 59);
-  const apos = String.fromCharCode(38, 35, 51, 57, 59);
+  const c1 = String.fromCharCode(38);
+  const c2 = String.fromCharCode(60);
+  const c3 = String.fromCharCode(62);
+  const c4 = String.fromCharCode(34);
+  const c5 = String.fromCharCode(39);
+
+  const r1 = String.fromCharCode(38, 97, 109, 112, 59);
+  const r2 = String.fromCharCode(38, 108, 116, 59);
+  const r3 = String.fromCharCode(38, 103, 116, 59);
+  const r4 = String.fromCharCode(38, 113, 117, 111, 116, 59);
+  const r5 = String.fromCharCode(38, 35, 51, 57, 59);
 
   return String(str == null ? '' : str)
-    .split(String.fromCharCode(38)).join(amp)
-    .split(String.fromCharCode(60)).join(lt)
-    .split(String.fromCharCode(62)).join(gt)
-    .split(String.fromCharCode(34)).join(quot)
-    .split(String.fromCharCode(39)).join(apos);
+    .split(c1).join(r1)
+    .split(c2).join(r2)
+    .split(c3).join(r3)
+    .split(c4).join(r4)
+    .split(c5).join(r5);
 }
 
-function escapeHTMLAttr(str = '') {
+function escapeHTMLAttr(str) {
+  const c1 = String.fromCharCode(38);
+  const c2 = String.fromCharCode(60);
+  const c3 = String.fromCharCode(62);
+  const c4 = String.fromCharCode(34);
+  const c5 = String.fromCharCode(39);
+
+  const r1 = String.fromCharCode(38, 97, 109, 112, 59);
+  const r2 = String.fromCharCode(38, 108, 116, 59);
+  const r3 = String.fromCharCode(38, 103, 116, 59);
+  const r4 = String.fromCharCode(38, 113, 117, 111, 116, 59);
+  const r5 = String.fromCharCode(38, 35, 51, 57, 59);
+
   return String(str == null ? '' : str)
-    .replace(/&/g, '&')
-    .replace(/"/g, '"')
-    .replace(/</g, '<')
-    .replace(/>/g, '>');
+    .split(c1).join(r1)
+    .split(c2).join(r2)
+    .split(c3).join(r3)
+    .split(c4).join(r4)
+    .split(c5).join(r5);
 }
 
 function ensureProfileData() {
@@ -1375,7 +1403,7 @@ function getMyAvatar(chatId = null) {
     return myProfile.avatar || DEFAULT_AVATAR;
   }
 
-  const setting = getChatSetting(chatId);
+  const setting = normalizeChatSetting(chatId);
 
   if (myProfile.avatarUnified) {
     return setting.myAvatarOverride
@@ -1395,7 +1423,7 @@ function getChatBackground(chatId = null) {
     return myProfile.globalChatBg || '';
   }
 
-  const setting = getChatSetting(chatId);
+  const setting = normalizeChatSetting(chatId);
 
   if (myProfile.backgroundUnified) {
     return setting.backgroundOverride
@@ -1804,13 +1832,6 @@ function restoreBgStyle() {
   const bgBlur = document.getElementById('bgBlur');
   if (bgOpacity) bgOpacity.value = bgSettings.opacity;
   if (bgBlur) bgBlur.value = bgSettings.blur;
-}
-
-function showDialog(dialogId) {
-  const dialog = document.getElementById(dialogId);
-  if (!dialog) return;
-  dialog.style.display = 'flex';
-  setTimeout(() => dialog.classList.add('show'), 10);
 }
 
 function closeDialog(dialogId) {
@@ -2645,6 +2666,8 @@ async function openChat(id, type = 'direct') {
   currentChatId = id;
   currentChatType = type;
 
+  rememberCurrentChatSession();
+
   const list = type === 'group' ? groupList : contactList;
   const item = list.find(i => i.id === id);
   if (!item) return;
@@ -2687,6 +2710,8 @@ async function openChatDetail(chatId, forceName = '') {
 
   currentChatId = chatId;
   currentChatType = 'direct';
+
+  rememberCurrentChatSession();
 
   let contact = contactList.find(i => i.id === chatId);
 
@@ -2807,6 +2832,15 @@ async function restoreLastChatSession() {
 
   await openChat(lastChatId, lastChatType);
   return true;
+}
+
+function rememberCurrentChatSession() {
+  try {
+    localStorage.setItem('st_current_chat_id', currentChatId || '');
+    localStorage.setItem('st_current_chat_type', currentChatType || 'direct');
+  } catch (err) {
+    console.warn('[Session] rememberCurrentChatSession failed:', err);
+  }
 }
 
 function removeComposerAttachment(index) {
@@ -2949,15 +2983,20 @@ async function renderMessages() {
   console.log('[renderMessages] start currentChatId =', currentChatId);
 
   const area = document.getElementById('messageArea');
-  if (!area) return;
+  if (!area) {
+    console.log('[renderMessages] messageArea not found');
+    return;
+  }
 
   const msgs = messages[currentChatId] || [];
+  console.log('[renderMessages] msgs =', msgs);
+
   if (!msgs.length) {
     area.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">开始聊天吧~</div>';
     return;
   }
 
-  const setting = getChatSetting(currentChatId);
+  const setting = normalizeChatSetting(currentChatId);
   let html = '';
   let lastLabel = '';
 
@@ -3015,6 +3054,7 @@ async function renderMessages() {
   });
 
   area.innerHTML = html;
+  console.log('[renderMessages] final html =', area.innerHTML);
   console.log('[renderMessages] html injected');
 
   await hydrateMediaRefs(area);
@@ -3212,6 +3252,8 @@ function removeRefsPossiblyUnused(refs) {
 
 function sendMessage() {
   if (!currentChatId) return;
+  console.log('[sendMessage] currentChatId =', currentChatId);
+  console.log('[sendMessage] before push thread =', messages[currentChatId]);
 
   const rel = getRelSetting(currentChatId);
   if (rel.blockedByMe) {
@@ -3255,6 +3297,8 @@ function sendMessage() {
     });
   }
 
+  console.log('[sendMessage] after text push thread =', messages[currentChatId]);
+
   attachments.forEach((att, idx) => {
     messages[currentChatId].push({
       id: 'm' + Date.now() + '_' + idx,
@@ -3278,17 +3322,19 @@ function sendMessage() {
     });
   });
 
+  console.log('[sendMessage] after all push thread =', messages[currentChatId]);
+
   const lastContent = hasText ? chunks[chunks.length - 1] : getAttachmentSummary(attachments[attachments.length - 1]);
   updateLastMsg(currentChatId, lastContent, time, currentChatType);
 
   pendingReplyTargets[currentChatId] = true;
   console.log('pendingReplyTargets set true:', currentChatId, pendingReplyTargets[currentChatId]);
 
-    input.value = '';
-    clearComposerDraft();
-    renderMessages();
-    saveAll();
-    closeEmojiPanel();
+  input.value = '';
+  clearComposerDraft();
+  renderMessages();
+  saveAll();
+  closeEmojiPanel();
 }
 
 function buildVVEventPayload(chatId) {
@@ -3434,6 +3480,32 @@ async function triggerAIReply() {
       isTriggeringAIReply = false;
     }, 300);
   }
+}
+
+async function replyCurrentChat() {
+  if (!currentChatId) return;
+
+  const thread = messages[currentChatId] || [];
+  const hasPending = thread.some(m => m.isMe && !m.recalled && m.pendingForReply);
+
+  if (!hasPending) {
+    alert('当前没有待回复的消息');
+    return;
+  }
+
+  await triggerAIReply();
+}
+
+function triggerAIReplySoon(delay) {
+  const wait = typeof delay === 'number' ? delay : 60;
+
+  setTimeout(() => {
+    try {
+      triggerAIReply?.();
+    } catch (err) {
+      console.error('[AI] triggerAIReplySoon error:', err);
+    }
+  }, wait);
 }
 
 function requestResendLastVVChatSync(chatId) {
@@ -4129,6 +4201,7 @@ function sendStickerDirect(stickerId) {
   renderMessages();
   saveAll();
   closeEmojiPanel();
+  triggerAIReplySoon(80);
 }
 
 function closeEmojiPanel() {
@@ -4138,6 +4211,12 @@ function closeEmojiPanel() {
 
   panel.classList.remove('show');
   messageArea.style.bottom = '104px';
+
+  setTimeout(() => {
+    if (!panel.classList.contains('show')) {
+      panel.style.display = 'none';
+    }
+  }, 180);
 
   if (stickerManageMode) {
     stickerManageMode = false;
@@ -4219,6 +4298,7 @@ async function confirmImageDraft() {
 
   closeDialog('imageSendDialog');
   closeEmojiPanel?.();
+  triggerAIReplySoon(80);
 }
 
 function addVoiceDraft() {
@@ -4278,6 +4358,7 @@ function confirmVoiceDraft() {
 
   closeDialog('voiceDialog');
   closeEmojiPanel?.();
+  triggerAIReplySoon(80);
 }
 
 function openTransferDialog() {
@@ -4358,6 +4439,7 @@ function confirmTransfer() {
 
   closeDialog('transferDialog');
   closeEmojiPanel?.();
+  triggerAIReplySoon(80);
 }
 
 function startCallFromDialog() {
@@ -4631,7 +4713,7 @@ async function openChatSettingPage() {
   }
 
   const contact = contactList.find(i => i.id === currentChatId);
-  const set = getChatSetting(currentChatId);
+  const set = normalizeChatSetting(currentChatId);
   const rel = getRelSetting(currentChatId);
 
   const titleEl = document.getElementById('profileTitleName');
@@ -5299,7 +5381,7 @@ function getVVRouteParams() {
   }
 }
 
-function openChatByRoute() {
+async function openChatByRoute() {
   const route = getVVRouteParams();
   if (route.view !== 'chat') return false;
   if (!route.chatId) return false;
@@ -5324,8 +5406,13 @@ function openChatByRoute() {
     nameEl.textContent = route.target || (rel && rel.name) || '联系人';
   }
 
-  if (typeof openChatDetail === 'function') {
-    openChatDetail(chatId, route.target || '');
+  if (typeof openChatDetail === 'function' && chatType === 'direct') {
+    await openChatDetail(chatId, route.target || '');
+    return true;
+  }
+
+  if (typeof openChat === 'function') {
+    await openChat(chatId, chatType);
     return true;
   }
 
@@ -5337,11 +5424,11 @@ function openChatByRoute() {
   }
 
   if (typeof applyCurrentChatBackground === 'function') {
-    applyCurrentChatBackground();
+    await applyCurrentChatBackground();
   }
 
   if (typeof renderMessages === 'function') {
-    renderMessages();
+    await renderMessages();
   }
 
   return true;
@@ -5362,7 +5449,14 @@ function confirmProfileNicknameChange() {
 }
 
 function normalizeChatSetting(chatId) {
-  const setting = getChatSetting(chatId);
+  const id = chatId || currentChatId;
+  if (!id) return {};
+
+  if (!chatSettings[id]) {
+    chatSettings[id] = {};
+  }
+
+  const setting = chatSettings[id];
 
   if (typeof setting.myAvatarBase === 'undefined' && setting.myAvatar) {
     setting.myAvatarBase = setting.myAvatar;
@@ -5568,12 +5662,8 @@ window.onload = async function () {
 
   migrateFeedPostsAuthorId();
 
-  setTimeout(() => {
-    !openChatByRoute()
-  }, 80);
-
   vvAppReady = true;
-  flushPendingVVChatSyncQueue();
+  await flushPendingVVChatSyncQueue();
 
   setTimeout(() => {
     flushPendingVVChatSyncQueue();
@@ -5582,6 +5672,14 @@ window.onload = async function () {
   setTimeout(() => {
     flushPendingVVChatSyncQueue();
   }, 300);
+
+  setTimeout(async () => {
+    const openedByRoute = await openChatByRoute();
+    if (!openedByRoute) {
+      await restoreLastChatSession();
+    }
+  }, 80);
+
   // 暂时关闭随机来电，后续改为剧情触发式来电
   // maybeSimulateIncomingCall();
 };

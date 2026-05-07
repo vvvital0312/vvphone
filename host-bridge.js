@@ -49,12 +49,21 @@
         const data = event.data;
         if (!data || typeof data !== 'object') return;
 
+        const fromFrame = !!(this.frame && event.source === this.frame.contentWindow);
+        const fromSelf = event.source === window;
+
         this.log('收到 message', 'ok', {
           type: data.type || '',
           requestId: data.requestId || '',
           viewId: data.viewId || '',
-          chatId: data.chatId || ''
+          chatId: data.chatId || '',
+          fromFrame,
+          fromSelf
         });
+
+        if (!fromFrame && !fromSelf) {
+          return;
+        }
 
         if (data.type === 'VV_EXECUTE_SLASH' || data.type === 'VVPHONE_SLASH') {
           await this.handleSlashRequest(data);
@@ -233,19 +242,19 @@
       if (text.includes('[朋友圈互动]')) type = 'feed';
 
       let bridgeName = '';
-      const sendMatch = text.match(/^\/send\s+([^\n|]+)/m);
+      const sendMatch = text.match(/^\/send\s+([^\n|]+)/mi);
       if (sendMatch) {
         bridgeName = sendMatch[1].trim();
       }
 
       let chatId = '';
-      const chatIdMatch = text.match(/聊天ID:([^\n]+)/);
+      const chatIdMatch = text.match(/聊天ID\s*[:：]\s*([^\n]+)/i);
       if (chatIdMatch) {
         chatId = chatIdMatch[1].trim();
       }
 
       let postId = '';
-      const postIdMatch = text.match(/动态ID:([^\n]+)/);
+      const postIdMatch = text.match(/动态ID\s*[:：]\s*([^\n]+)/i);
       if (postIdMatch) {
         postId = postIdMatch[1].trim();
       }
@@ -257,6 +266,13 @@
         senderName: bridgeName || this.getDefaultSender(),
         bridgeName: bridgeName || this.getDefaultSender()
       };
+    },
+
+    normalizeSyncFieldText(text) {
+      return String(text == null ? '' : text)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\n/g, '\\n');
     },
 
     async mockExecute(command, parsed) {
@@ -421,7 +437,7 @@
         '[消息]',
         'side=right',
         'sender=我',
-        `content=${line}`,
+        `content=${this.normalizeSyncFieldText(line)}`,
         'state=sent',
         '[/消息]'
       ].join('\n')).join('\n\n');
@@ -429,25 +445,25 @@
       const leftMsg = [
         '[消息]',
         'side=left',
-        `sender=${sender}`,
-        `content=${replyText}`,
+        `sender=${this.normalizeSyncFieldText(sender)}`,
+        `content=${this.normalizeSyncFieldText(replyText)}`,
         'state=sent',
-        transferAction ? `transferAction=${transferAction}` : '',
-        transferAmount ? `transferAmount=${transferAmount}` : '',
-        transferNote ? `transferNote=${transferNote}` : '',
+        transferAction ? `transferAction=${this.normalizeSyncFieldText(transferAction)}` : '',
+        transferAmount ? `transferAmount=${this.normalizeSyncFieldText(transferAmount)}` : '',
+        transferNote ? `transferNote=${this.normalizeSyncFieldText(transferNote)}` : '',
         '[/消息]'
       ].filter(Boolean).join('\n');
 
       return [
         '[VV_CHAT_SYNC]',
-        `chatId=${chatId}`,
-        `target=${target}`,
-        `time=${time}`,
-        `myAvatarKey=${myAvatarKey}`,
-        `targetAvatarId=${targetAvatarId}`,
-        `myBubble=${myBubble}`,
-        `targetBubble=${targetBubble}`,
-        `chatBgKey=${chatBgKey}`,
+        `chatId=${this.normalizeSyncFieldText(chatId)}`,
+        `target=${this.normalizeSyncFieldText(target)}`,
+        `time=${this.normalizeSyncFieldText(time)}`,
+        `myAvatarKey=${this.normalizeSyncFieldText(myAvatarKey)}`,
+        `targetAvatarId=${this.normalizeSyncFieldText(targetAvatarId)}`,
+        `myBubble=${this.normalizeSyncFieldText(myBubble)}`,
+        `targetBubble=${this.normalizeSyncFieldText(targetBubble)}`,
+        `chatBgKey=${this.normalizeSyncFieldText(chatBgKey)}`,
         '',
         rightMsgs,
         '',
@@ -475,8 +491,8 @@
         if (t === '[群聊回复]') return false;
         if (t === '[电话模式]') return false;
         if (t === '[朋友圈互动]') return false;
-        if (t.startsWith('聊天ID:')) return false;
-        if (t.startsWith('动态ID:')) return false;
+        if (/^聊天ID\s*[:：]/.test(t)) return false;
+        if (/^动态ID\s*[:：]/.test(t)) return false;
         if (t.includes('|/trigger')) return false;
         return true;
       });
@@ -537,9 +553,9 @@
 
       const raw = [
         '[VV_CHAT_SYNC]',
-        `chatId=${this.lastContext.chatId || ''}`,
-        `target=${senderName}`,
-        `time=${this.formatNowLabel()}`,
+        `chatId=${this.normalizeSyncFieldText(this.lastContext.chatId || '')}`,
+        `target=${this.normalizeSyncFieldText(senderName)}`,
+        `time=${this.normalizeSyncFieldText(this.formatNowLabel())}`,
         'myAvatarKey=current_my_avatar',
         'targetAvatarId=contact_unknown_avatar',
         'myBubble=#5B86FF',
@@ -547,8 +563,8 @@
         'chatBgKey=current_chat_bg',
         '[消息]',
         'side=left',
-        `sender=${senderName}`,
-        `content=${text}`,
+        `sender=${this.normalizeSyncFieldText(senderName)}`,
+        `content=${this.normalizeSyncFieldText(text)}`,
         'state=sent',
         '[/消息]',
         '[/VV_CHAT_SYNC]'
@@ -656,7 +672,7 @@
       const quot = String.fromCharCode(38, 113, 117, 111, 116, 59);
       const apos = String.fromCharCode(38, 35, 51, 57, 59);
 
-      return String(str)
+      return String(str == null ? '' : str)
         .split(String.fromCharCode(38)).join(amp)
         .split(String.fromCharCode(60)).join(lt)
         .split(String.fromCharCode(62)).join(gt)
