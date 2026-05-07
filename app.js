@@ -90,20 +90,71 @@ const VV_BRIDGE_CONFIG = {
     const chatType = params.chatType;
     const promptText = params.promptText;
     const scope = chatType === 'group' ? '[群聊回复]' : '[私聊回复]';
-    return '/send ' + bridgeName + '\n' + scope + '\n聊天ID:' + chatId + '\n' + promptText + '|/trigger';
+
+    const cmd =
+      '/send ' + bridgeName +
+      '\n' + scope +
+      '\n聊天ID:' + chatId +
+      '\n' + promptText +
+      '\n|/trigger';
+
+    console.log('[VV_BRIDGE_CONFIG][buildReplyCommand]', {
+      bridgeName,
+      chatId,
+      chatType,
+      scope,
+      promptLength: String(promptText || '').length
+    });
+    console.log('[VV_BRIDGE_CONFIG][buildReplyCommand][CMD_BEGIN]');
+    console.log(cmd);
+    console.log('[VV_BRIDGE_CONFIG][buildReplyCommand][CMD_END]');
+
+    return cmd;
   },
 
   buildCallCommand: function (params) {
     const bridgeName = params.bridgeName;
     const promptText = params.promptText;
-    return '/send ' + bridgeName + '\n[电话模式]\n' + promptText + '|/trigger';
+
+    const cmd =
+      '/send ' + bridgeName +
+      '\n[电话模式]' +
+      '\n' + promptText +
+      '\n|/trigger';
+
+    console.log('[VV_BRIDGE_CONFIG][buildCallCommand]', {
+      bridgeName,
+      promptLength: String(promptText || '').length
+    });
+    console.log('[VV_BRIDGE_CONFIG][buildCallCommand][CMD_BEGIN]');
+    console.log(cmd);
+    console.log('[VV_BRIDGE_CONFIG][buildCallCommand][CMD_END]');
+
+    return cmd;
   },
 
   buildFeedCommentCommand: function (params) {
     const bridgeName = params.bridgeName;
     const postId = params.postId;
     const promptText = params.promptText;
-    return '/send ' + bridgeName + '\n[朋友圈互动]\n动态ID:' + postId + '\n' + promptText + '|/trigger';
+
+    const cmd =
+      '/send ' + bridgeName +
+      '\n[朋友圈互动]' +
+      '\n动态ID:' + postId +
+      '\n' + promptText +
+      '\n|/trigger';
+
+    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand]', {
+      bridgeName,
+      postId,
+      promptLength: String(promptText || '').length
+    });
+    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_BEGIN]');
+    console.log(cmd);
+    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_END]');
+
+    return cmd;
   }
 };
 
@@ -118,194 +169,27 @@ function initSTBridgeListener() {
 
   console.log('[VV] initSTBridgeListener called');
 
-  window.addEventListener('message', event => {
-    const data = event.data;
+  window.addEventListener('message', async (event) => {
+    const data = event.data || {};
 
-    console.log('[VV][listener][RAW] origin =', event.origin);
-    console.log('[VV][listener][RAW] data =', data);
-
-    try {
-      console.log('[VV][listener][RAW_JSON] =', JSON.stringify(data, null, 2));
-    } catch (err) {
-      console.warn('[VV][listener][RAW_JSON] stringify failed:', err);
-    }
-
-    if (!data || typeof data !== 'object') {
-      console.log('[VV][listener][RETURN] data invalid:', data);
-      return;
-    }
-
-    console.log('[VV][listener] ALL message =', data);
-    console.log('[VV][listener] type =', data.type);
-    console.log('[VV][listener] keys =', Object.keys(data || {}));
-
-    const myViewId = window.__vv_view_id || '';
-
-    console.log('[VV][listener] myViewId =', myViewId, 'data.viewId =', data.viewId || '');
-
-    // 聊天同步先不要严格拦 viewId，避免首轮因 viewId 初始化时序丢消息
-    const allowWithoutStrictViewCheck =
-      data.type === 'VVPHONE_CHAT_SYNC' ||
-      data.type === 'VVPHONE_REPLY' ||
-      data.type === 'VV_EXECUTE_RESULT';
-
-    console.log('[VV][listener] allowWithoutStrictViewCheck =', allowWithoutStrictViewCheck);
-
-    if (!allowWithoutStrictViewCheck && data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV][listener][RETURN] ignore message for other viewId:', {
-        dataViewId: data.viewId,
-        myViewId,
-        type: data.type
-      });
-      return;
-    }
+    console.log('[VV][listener] message event type =', data.type, 'full data =', data);
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV][listener] HIT VVPHONE_CHAT_SYNC');
-      console.log('[VV][SYNC] chatId =', data.chatId || '');
-      console.log('[VV][SYNC] viewId =', data.viewId || '');
-      console.log('[VV][SYNC] raw =', data.raw || '');
+      console.log('[VV][SYNC][RECV_FULL]', data);
+      console.log('[VV][SYNC] raw =', data.raw);
 
       try {
-        console.log('[VV][SYNC][RAW_JSON] =', JSON.stringify({
-          raw: data.raw || '',
-          chatId: data.chatId || '',
-          viewId: data.viewId || ''
-        }, null, 2));
+        await handleVVChatSyncRaw(data);
       } catch (err) {
-        console.warn('[VV][SYNC][RAW_JSON] stringify failed:', err);
+        console.error('[VV][listener] handleVVChatSyncRaw error:', err);
       }
-
-      console.log('[VV][SYNC] about to call handleVVChatSyncRaw');
-
-      handleVVChatSyncRaw({
-        raw: data.raw || '',
-        chatId: data.chatId || '',
-        viewId: data.viewId || ''
-      });
-
-      console.log('[VV][SYNC] handleVVChatSyncRaw called');
-      return;
-    }
-
-    if (data.type === 'VVPHONE_REPLY') {
-      console.log('[VV][listener] HIT VVPHONE_REPLY (ignored because VV_CHAT_SYNC is enabled)');
-      console.log('[VV][VVPHONE_REPLY] raw =', data);
       return;
     }
 
     if (data.type === 'VV_EXECUTE_RESULT') {
       console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
-      console.log('[VV][EXECUTE_RESULT] chatId =', data.chatId || '');
-      console.log('[VV][EXECUTE_RESULT] viewId =', data.viewId || '');
-      console.log('[VV][EXECUTE_RESULT] raw =', data.raw || '');
-      console.log('[VV][EXECUTE_RESULT] text =', data.text || '');
-      console.log('[VV][EXECUTE_RESULT] payload =', data.payload);
-
-      try {
-        console.log('[VV][EXECUTE_RESULT][JSON] =', JSON.stringify(data, null, 2));
-      } catch (err) {
-        console.warn('[VV][EXECUTE_RESULT][JSON] stringify failed:', err);
-      }
-
-      return;
     }
-
-    if (data.type === 'VVPHONE_CALL_REPLY') {
-      console.log('[VV][listener] HIT VVPHONE_CALL_REPLY', data);
-
-      const chatId = data.chatId || currentCallId;
-      if (!chatId) {
-        console.log('[VV][CALL_REPLY][RETURN] no chatId and no currentCallId');
-        return;
-      }
-
-      if (!callLogs[chatId]) callLogs[chatId] = [];
-      callLogs[chatId].push({
-        speaker: data.senderName || getBridgeNameByChatId(chatId, 'direct'),
-        isMe: false,
-        text: data.text || '我在听。',
-        time: getNowTime()
-      });
-
-      console.log('[VV][CALL_REPLY] appended to callLogs for chatId =', chatId);
-
-      renderCallTranscript();
-      saveAll();
-      return;
-    }
-
-    if (data.type === 'VVPHONE_CALL_STATUS') {
-      console.log('[VV][listener] HIT VVPHONE_CALL_STATUS', data);
-
-      const contactId = data.chatId || currentCallId;
-      if (!contactId) {
-        console.log('[VV][CALL_STATUS][RETURN] no contactId and no currentCallId');
-        return;
-      }
-
-      const status = data.status;
-      console.log('[VV][CALL_STATUS] status =', status, 'contactId =', contactId);
-
-      if (status === 'accepted') {
-        openCallPage(contactId, true);
-      } else if (status === 'rejected') {
-        document.getElementById('callStatus').innerText = '对方已拒接';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方拒接了你的来电。</div>';
-      } else if (status === 'missed') {
-        document.getElementById('callStatus').innerText = '无人接听';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
-      }
-
-      return;
-    }
-
-    if (data.type === 'VVPHONE_INCOMING_CALL') {
-      console.log('[VV][listener] HIT VVPHONE_INCOMING_CALL', data);
-
-      const bridgeName = data.bridgeName || data.senderName || '角色';
-      let contact = contactList.find(i => (i.bridgeName || i.name) === bridgeName || i.name === bridgeName);
-
-      console.log('[VV][INCOMING_CALL] bridgeName =', bridgeName);
-      console.log('[VV][INCOMING_CALL] found contact =', contact);
-
-      if (!contact) {
-        const id = 'c' + Date.now();
-        contact = {
-          id,
-          name: data.senderName || bridgeName,
-          bridgeName,
-          avatar: DEFAULT_AVATAR,
-          isSticky: false,
-          lastTime: getNowTime(),
-          threadType: 'direct'
-        };
-        contactList.unshift(contact);
-        getChatSetting(contact.id);
-        getRelSetting(contact.id);
-
-        console.log('[VV][INCOMING_CALL] created new contact =', contact);
-      }
-
-      saveAll();
-      simulateIncomingCall(contact.id);
-      return;
-    }
-
-    if (data.type === 'VVPHONE_FEED_REPLY') {
-      console.log('[VV][listener] HIT VVPHONE_FEED_REPLY', data);
-
-      appendAICommentToFeed({
-        postId: data.postId,
-        senderName: data.senderName || '角色',
-        text: data.text || '……',
-        replyTo: data.replyTo || ''
-      });
-
-      return;
-    }
-
-    console.log('[VV][listener] unhandled message type:', data.type);
   });
 }
 
@@ -943,6 +827,9 @@ function parseVVChatBlocks(raw, fallback = {}) {
       div.innerHTML = text;
       const decoded = div.textContent || div.innerText || '';
       if (decoded && decoded.trim()) {
+        console.log('[VV] parseVVChatBlocks html decoded text >>>');
+        console.log(decoded);
+        console.log('<<< [VV] parseVVChatBlocks html decoded text');
         text = decoded;
       }
     } catch (err) {
@@ -954,6 +841,10 @@ function parseVVChatBlocks(raw, fallback = {}) {
     .replace(/\r/g, '')
     .replace(/\u00a0/g, ' ')
     .trim();
+
+  console.log('[VV] parseVVChatBlocks normalized text >>>');
+  console.log(text);
+  console.log('<<< [VV] parseVVChatBlocks normalized text');
 
   const syncMatch = text.match(/\[VV_CHAT_SYNC\]([\s\S]*?)\[\/VV_CHAT_SYNC\]/i);
 
@@ -977,7 +868,9 @@ function parseVVChatBlocks(raw, fallback = {}) {
 
   function readField(name) {
     const m = full.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*[=:]\\s*(.*)$', 'mi'));
-    return m ? m[1].trim() : '';
+    const value = m ? m[1].trim() : '';
+    console.log('[VV][parseVVChatBlocks][readField]', name, '=>', value);
+    return value;
   }
 
   function cleanValue(v) {
@@ -998,8 +891,21 @@ function parseVVChatBlocks(raw, fallback = {}) {
     messages: []
   };
 
+  console.log('[VV][parseVVChatBlocks] fallback =', fallback);
+  console.log('[VV][parseVVChatBlocks] top-level parsed chat meta =', {
+    chatId: chat.chatId,
+    target: chat.target,
+    time: chat.time,
+    myAvatarKey: chat.myAvatarKey,
+    targetAvatarId: chat.targetAvatarId,
+    myBubble: chat.myBubble,
+    targetBubble: chat.targetBubble,
+    chatBgKey: chat.chatBgKey
+  });
+
   const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/gi;
   let m;
+  let msgIndex = 0;
 
   while ((m = msgRegex.exec(full))) {
     const block = String(m[1] || '').replace(/\r/g, '').trim();
@@ -1010,7 +916,9 @@ function parseVVChatBlocks(raw, fallback = {}) {
 
     function readMsgField(name) {
       const mm = block.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*[=:]\\s*(.*)$', 'mi'));
-      return mm ? mm[1].trim() : '';
+      const value = mm ? mm[1].trim() : '';
+      console.log('[VV][parseVVChatBlocks][readMsgField][' + msgIndex + ']', name, '=>', value);
+      return value;
     }
 
     const msg = {
@@ -1032,11 +940,25 @@ function parseVVChatBlocks(raw, fallback = {}) {
 
     console.log('[VV] parsed msg:', msg);
     chat.messages.push(msg);
+    msgIndex++;
   }
 
   chat.messages = chat.messages.filter(Boolean);
 
   console.log('[VV] parseVVChatBlocks parsed chat:', chat);
+  console.log('[VV][parseVVChatBlocks][SUMMARY]', {
+    chatId: chat.chatId,
+    msgCount: chat.messages.length,
+    leftCount: chat.messages.filter(msg => {
+      const side = String(msg.side || '').trim().toLowerCase();
+      return side === 'left' || side === 'assistant' || side === 'them';
+    }).length,
+    rightCount: chat.messages.filter(msg => {
+      const side = String(msg.side || '').trim().toLowerCase();
+      return side === 'right' || side === 'user' || side === 'me';
+    }).length
+  });
+
   return chat;
 }
 
@@ -1268,19 +1190,36 @@ async function handleVVChatSyncRaw(payload) {
   const payloadChatId = typeof payload === 'object' ? (payload?.chatId || '') : '';
   const payloadViewId = typeof payload === 'object' ? (payload?.viewId || '') : '';
 
-  console.log('[VV][FIRST] raw =', raw);
-  console.log('[VV][FIRST] payloadChatId =', payloadChatId, 'payloadViewId =', payloadViewId);
+  console.log('[VV][HANDLE_SYNC][INPUT]', {
+    payload,
+    rawType: typeof raw,
+    rawLength: String(raw || '').length,
+    payloadChatId,
+    payloadViewId,
+    currentChatId,
+    currentChatType
+  });
+
+  console.log('[VV][SYNC][RAW_TEXT_BEGIN]');
+  console.log(raw);
+  console.log('[VV][SYNC][RAW_TEXT_END]');
 
   const parsed = parseVVChatBlocks(raw, {
-    chatId: payloadChatId,
+    chatId: payloadChatId || currentChatId,
     viewId: payloadViewId
   });
 
   console.log('[VV] parsed sync data:', parsed);
+  console.log('[VV][PARSE_CHECK] raw preview =', String(raw || '').slice(0, 1000));
+  console.log('[VV][PARSE_CHECK] parsed.chatId =', parsed?.chatId);
+  console.log('[VV][PARSE_CHECK] parsed.target =', parsed?.target);
+  console.log('[VV][PARSE_CHECK] parsed.time =', parsed?.time);
+  console.log('[VV][PARSE_CHECK] parsed.messages =', parsed?.messages);
+  console.log('[VV][PARSE_CHECK] parsed.messages.length =', Array.isArray(parsed?.messages) ? parsed.messages.length : 'not-array');
 
   if (!parsed || !parsed.chatId) {
     console.warn('[VV] handleVVChatSyncRaw: invalid parsed, request resend');
-    requestVVChatSyncResend(payloadChatId, payloadViewId);
+    requestResendLastVVChatSync(payloadChatId || currentChatId, payloadViewId);
     return false;
   }
 
@@ -1304,12 +1243,21 @@ async function handleVVChatSyncRaw(payload) {
   }
 
   const beforeThread = Array.isArray(messages[parsed.chatId]) ? messages[parsed.chatId].slice() : [];
+  const beforeLeftCount = beforeThread.filter(m => !m.isMe && !m.recalled).length;
+
   console.log('[VV][FIRST] thread before append =', beforeThread);
+  console.log('[VV][FIRST] beforeLeftCount =', beforeLeftCount);
 
   const appended = appendVVChatReplyToLocal(parsed);
+
+  const afterThread = Array.isArray(messages[parsed.chatId]) ? messages[parsed.chatId].slice() : [];
+  const afterLeftCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
+
   console.log('[VV][FIRST] appended =', appended);
   console.log('[VV][FIRST] parsed.chatId =', parsed.chatId, 'currentChatId =', currentChatId);
   console.log('[VV][FIRST] thread after append =', messages[parsed.chatId]);
+  console.log('[VV][FIRST] afterLeftCount =', afterLeftCount);
+  console.log('[VV][FIRST] leftCountDelta =', afterLeftCount - beforeLeftCount);
 
   if (typeof renderChatList === 'function') {
     console.log('[VV][FIRST] renderChatList()');
@@ -1342,7 +1290,9 @@ async function handleVVChatSyncRaw(payload) {
 
   console.log('[VV] handleVVChatSyncRaw done:', {
     chatId: parsed.chatId,
-    appended
+    appended,
+    beforeLeftCount,
+    afterLeftCount
   });
 
   return appended > 0;
@@ -3552,11 +3502,12 @@ async function triggerAIReply() {
   isTriggeringAIReply = true;
 
   try {
-    console.log('triggerAIReply check:', currentChatId, pendingReplyTargets[currentChatId]);
+    console.log('[VV][triggerAIReply] check:', currentChatId, pendingReplyTargets[currentChatId]);
 
     if (!currentChatId) return;
 
     if (!pendingReplyTargets[currentChatId]) {
+      console.log('[VV][triggerAIReply] skip: pendingReplyTargets false');
       return;
     }
 
@@ -3565,14 +3516,26 @@ async function triggerAIReply() {
     const thread = messages[chatIdAtRequest] || [];
     const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
+    console.log('[VV][triggerAIReply] thread snapshot =', thread);
+    console.log('[VV][triggerAIReply] pendingMessages =', pendingMessages);
+
     if (!pendingMessages.length) {
+      console.warn('[VV][triggerAIReply] no pendingMessages, clear pending flag');
       pendingReplyTargets[chatIdAtRequest] = false;
       saveAll();
       return;
     }
 
+    const beforeLeftCount = thread.filter(m => !m.isMe && !m.recalled).length;
+    console.log('[VV][triggerAIReply] beforeLeftCount =', beforeLeftCount);
+
     const bridgeName = getBridgeNameByChatId(chatIdAtRequest, chatTypeAtRequest);
     const promptText = buildVVEventPayload(chatIdAtRequest) || buildLatestUserPayload(chatIdAtRequest);
+
+    console.log('[VV][triggerAIReply] bridgeName =', bridgeName);
+    console.log('[VV][triggerAIReply] promptText >>>');
+    console.log(promptText);
+    console.log('<<< [VV][triggerAIReply] promptText');
 
     let slashOk = false;
 
@@ -3583,7 +3546,13 @@ async function triggerAIReply() {
         chatType: chatTypeAtRequest,
         promptText
       });
+
+      console.log('[VV][triggerAIReply] cmd >>>');
+      console.log(cmd);
+      console.log('<<< [VV][triggerAIReply] cmd');
+
       slashOk = await triggerSlash(cmd);
+      console.log('[VV][triggerAIReply] slashOk =', slashOk);
     }
 
     if (slashOk) {
@@ -3591,26 +3560,49 @@ async function triggerAIReply() {
 
       setTimeout(() => {
         const latestThread = messages[chatIdAtRequest] || [];
-        const hasLeftReply = latestThread.some(m => !m.isMe && !m.recalled);
+        const leftCountNow = latestThread.filter(m => !m.isMe && !m.recalled).length;
+        const hasNewLeftReply = leftCountNow > beforeLeftCount;
 
-        if (!hasLeftReply) {
-          console.warn('[VV] no left reply after slash ok, try resend last sync');
+        console.log('[VV][fallback-check][800]', {
+          chatIdAtRequest,
+          beforeLeftCount,
+          leftCountNow,
+          hasNewLeftReply,
+          latestThread
+        });
+
+        if (!hasNewLeftReply) {
+          console.warn('[VV] no new left reply after slash ok, try resend last sync');
           requestResendLastVVChatSync(chatIdAtRequest);
         }
       }, 800);
 
       setTimeout(() => {
         const latestThread = messages[chatIdAtRequest] || [];
-        const hasLeftReply = latestThread.some(m => !m.isMe && !m.recalled);
+        const leftCountNow = latestThread.filter(m => !m.isMe && !m.recalled).length;
+        const hasNewLeftReply = leftCountNow > beforeLeftCount;
 
-        if (!hasLeftReply) {
-          console.warn('[VV] still no left reply, try resend last sync again');
+        console.log('[VV][fallback-check][1600]', {
+          chatIdAtRequest,
+          beforeLeftCount,
+          leftCountNow,
+          hasNewLeftReply,
+          latestThread
+        });
+
+        if (!hasNewLeftReply) {
+          console.warn('[VV] still no new left reply, try resend last sync again');
           requestResendLastVVChatSync(chatIdAtRequest);
         }
       }, 1600);
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.chatMode === 'local') {
+      console.warn('[VV][triggerAIReply] using local simulateAutoReply fallback', {
+        slashOk,
+        chatMode: VV_BRIDGE_CONFIG.chatMode
+      });
+
       simulateAutoReply(chatIdAtRequest, chatTypeAtRequest);
       pendingMessages.forEach(m => {
         m.pendingForReply = false;
@@ -3622,6 +3614,7 @@ async function triggerAIReply() {
   } finally {
     setTimeout(() => {
       isTriggeringAIReply = false;
+      console.log('[VV][triggerAIReply] unlock isTriggeringAIReply = false');
     }, 300);
   }
 }
@@ -3657,19 +3650,19 @@ function triggerAIReplySoon(delay) {
   }, wait);
 }
 
-function requestResendLastVVChatSync(chatId) {
+function requestResendLastVVChatSync(chatId, viewId) {
   try {
-    const viewId = window.__vv_view_id || '';
+    const finalViewId = viewId || window.__vv_view_id || '';
 
     window.parent.postMessage({
       type: 'VVPHONE_RESEND_LAST_CHAT_SYNC',
       chatId: chatId || '',
-      viewId
+      viewId: finalViewId
     }, '*');
 
     console.log('[VV] requested resendLastChatSync by postMessage:', {
       chatId,
-      viewId
+      viewId: finalViewId
     });
 
     return true;
