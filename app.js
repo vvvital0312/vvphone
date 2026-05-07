@@ -120,11 +120,28 @@ function initSTBridgeListener() {
 
   window.addEventListener('message', event => {
     const data = event.data;
-    if (!data || typeof data !== 'object') return;
+
+    console.log('[VV][listener][RAW] origin =', event.origin);
+    console.log('[VV][listener][RAW] data =', data);
+
+    try {
+      console.log('[VV][listener][RAW_JSON] =', JSON.stringify(data, null, 2));
+    } catch (err) {
+      console.warn('[VV][listener][RAW_JSON] stringify failed:', err);
+    }
+
+    if (!data || typeof data !== 'object') {
+      console.log('[VV][listener][RETURN] data invalid:', data);
+      return;
+    }
 
     console.log('[VV][listener] ALL message =', data);
+    console.log('[VV][listener] type =', data.type);
+    console.log('[VV][listener] keys =', Object.keys(data || {}));
 
     const myViewId = window.__vv_view_id || '';
+
+    console.log('[VV][listener] myViewId =', myViewId, 'data.viewId =', data.viewId || '');
 
     // 聊天同步先不要严格拦 viewId，避免首轮因 viewId 初始化时序丢消息
     const allowWithoutStrictViewCheck =
@@ -132,34 +149,77 @@ function initSTBridgeListener() {
       data.type === 'VVPHONE_REPLY' ||
       data.type === 'VV_EXECUTE_RESULT';
 
+    console.log('[VV][listener] allowWithoutStrictViewCheck =', allowWithoutStrictViewCheck);
+
     if (!allowWithoutStrictViewCheck && data.viewId && myViewId && data.viewId !== myViewId) {
-      console.log('[VV] ignore message for other viewId:', data.viewId, 'mine=', myViewId, 'type=', data.type);
+      console.log('[VV][listener][RETURN] ignore message for other viewId:', {
+        dataViewId: data.viewId,
+        myViewId,
+        type: data.type
+      });
       return;
     }
 
     if (data.type === 'VVPHONE_CHAT_SYNC') {
       console.log('[VV][listener] HIT VVPHONE_CHAT_SYNC');
+      console.log('[VV][SYNC] chatId =', data.chatId || '');
+      console.log('[VV][SYNC] viewId =', data.viewId || '');
+      console.log('[VV][SYNC] raw =', data.raw || '');
+
+      try {
+        console.log('[VV][SYNC][RAW_JSON] =', JSON.stringify({
+          raw: data.raw || '',
+          chatId: data.chatId || '',
+          viewId: data.viewId || ''
+        }, null, 2));
+      } catch (err) {
+        console.warn('[VV][SYNC][RAW_JSON] stringify failed:', err);
+      }
+
+      console.log('[VV][SYNC] about to call handleVVChatSyncRaw');
+
       handleVVChatSyncRaw({
         raw: data.raw || '',
         chatId: data.chatId || '',
         viewId: data.viewId || ''
       });
+
+      console.log('[VV][SYNC] handleVVChatSyncRaw called');
       return;
     }
 
     if (data.type === 'VVPHONE_REPLY') {
       console.log('[VV][listener] HIT VVPHONE_REPLY (ignored because VV_CHAT_SYNC is enabled)');
+      console.log('[VV][VVPHONE_REPLY] raw =', data);
       return;
     }
 
     if (data.type === 'VV_EXECUTE_RESULT') {
       console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
+      console.log('[VV][EXECUTE_RESULT] chatId =', data.chatId || '');
+      console.log('[VV][EXECUTE_RESULT] viewId =', data.viewId || '');
+      console.log('[VV][EXECUTE_RESULT] raw =', data.raw || '');
+      console.log('[VV][EXECUTE_RESULT] text =', data.text || '');
+      console.log('[VV][EXECUTE_RESULT] payload =', data.payload);
+
+      try {
+        console.log('[VV][EXECUTE_RESULT][JSON] =', JSON.stringify(data, null, 2));
+      } catch (err) {
+        console.warn('[VV][EXECUTE_RESULT][JSON] stringify failed:', err);
+      }
+
       return;
     }
 
     if (data.type === 'VVPHONE_CALL_REPLY') {
+      console.log('[VV][listener] HIT VVPHONE_CALL_REPLY', data);
+
       const chatId = data.chatId || currentCallId;
-      if (!chatId) return;
+      if (!chatId) {
+        console.log('[VV][CALL_REPLY][RETURN] no chatId and no currentCallId');
+        return;
+      }
+
       if (!callLogs[chatId]) callLogs[chatId] = [];
       callLogs[chatId].push({
         speaker: data.senderName || getBridgeNameByChatId(chatId, 'direct'),
@@ -167,16 +227,26 @@ function initSTBridgeListener() {
         text: data.text || '我在听。',
         time: getNowTime()
       });
+
+      console.log('[VV][CALL_REPLY] appended to callLogs for chatId =', chatId);
+
       renderCallTranscript();
       saveAll();
       return;
     }
 
     if (data.type === 'VVPHONE_CALL_STATUS') {
+      console.log('[VV][listener] HIT VVPHONE_CALL_STATUS', data);
+
       const contactId = data.chatId || currentCallId;
-      if (!contactId) return;
+      if (!contactId) {
+        console.log('[VV][CALL_STATUS][RETURN] no contactId and no currentCallId');
+        return;
+      }
 
       const status = data.status;
+      console.log('[VV][CALL_STATUS] status =', status, 'contactId =', contactId);
+
       if (status === 'accepted') {
         openCallPage(contactId, true);
       } else if (status === 'rejected') {
@@ -186,12 +256,18 @@ function initSTBridgeListener() {
         document.getElementById('callStatus').innerText = '无人接听';
         document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
       }
+
       return;
     }
 
     if (data.type === 'VVPHONE_INCOMING_CALL') {
+      console.log('[VV][listener] HIT VVPHONE_INCOMING_CALL', data);
+
       const bridgeName = data.bridgeName || data.senderName || '角色';
       let contact = contactList.find(i => (i.bridgeName || i.name) === bridgeName || i.name === bridgeName);
+
+      console.log('[VV][INCOMING_CALL] bridgeName =', bridgeName);
+      console.log('[VV][INCOMING_CALL] found contact =', contact);
 
       if (!contact) {
         const id = 'c' + Date.now();
@@ -207,6 +283,8 @@ function initSTBridgeListener() {
         contactList.unshift(contact);
         getChatSetting(contact.id);
         getRelSetting(contact.id);
+
+        console.log('[VV][INCOMING_CALL] created new contact =', contact);
       }
 
       saveAll();
@@ -215,12 +293,15 @@ function initSTBridgeListener() {
     }
 
     if (data.type === 'VVPHONE_FEED_REPLY') {
+      console.log('[VV][listener] HIT VVPHONE_FEED_REPLY', data);
+
       appendAICommentToFeed({
         postId: data.postId,
         senderName: data.senderName || '角色',
         text: data.text || '……',
         replyTo: data.replyTo || ''
       });
+
       return;
     }
 
