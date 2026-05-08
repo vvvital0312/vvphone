@@ -1152,8 +1152,11 @@ function appendVVChatReplyToLocal(chatData) {
     messages[chatId] = [];
   }
 
-  let contact = contactList.find(i => i.id === chatId);
-  if (!contact) {
+  let contact = Array.isArray(contactList)
+    ? contactList.find(i => i.id === chatId)
+    : null;
+
+  if (!contact && Array.isArray(contactList)) {
     contact = {
       id: chatId,
       name: chatData.target || '联系人',
@@ -1165,7 +1168,7 @@ function appendVVChatReplyToLocal(chatData) {
       threadType: 'direct'
     };
     contactList.unshift(contact);
-  } else {
+  } else if (contact) {
     if (chatData.target && (!contact.name || contact.name === '联系人')) {
       contact.name = chatData.target;
     }
@@ -1200,6 +1203,7 @@ function appendVVChatReplyToLocal(chatData) {
   console.log('[VV][APPEND] allMsgs =', allMsgs);
   console.log('[VV][APPEND] leftMsgs to append =', leftMsgs);
   console.log('[VV][APPEND] thread before append =', thread.slice());
+  console.log('[VV][APPEND] pending before append =', pendingReplyTargets?.[chatId]);
 
   let appendedCount = 0;
 
@@ -1251,7 +1255,7 @@ function appendVVChatReplyToLocal(chatData) {
         sender: 'them',
         senderName: msg.sender || chatData.target || '对方',
         isMe: false,
-        type: 'text',
+        type: normalizedType || 'text',
         chunks: [normalizedContent],
         text: normalizedContent,
         replyTo: null,
@@ -1265,7 +1269,7 @@ function appendVVChatReplyToLocal(chatData) {
       thread.push(newMsg);
       console.log('[VV][APPEND] after push, thread =', thread.slice());
       appendedCount++;
-    } else if (!normalizedContent) {
+    } else if (!normalizedContent && !transferAction) {
       console.log('[VV][APPEND] skipped empty content msg =', msg);
     } else if (duplicated) {
       console.log('[VV][APPEND] skipped duplicate msg =', msg);
@@ -1343,6 +1347,10 @@ function appendVVChatReplyToLocal(chatData) {
 
     console.log('[VV][APPEND] updateLastMsg previewText =', previewText);
     updateLastMsg(chatId, previewText, time, 'direct');
+  }
+
+  if (appendedCount > 0) {
+    console.log('[VV][APPEND] clear pending flags because appendedCount > 0, chatId =', chatId);
 
     pendingReplyTargets[chatId] = false;
 
@@ -1351,12 +1359,15 @@ function appendVVChatReplyToLocal(chatData) {
         m.pendingForReply = false;
       }
     });
+  } else {
+    console.log('[VV][APPEND] no new left text appended, keep pending state, chatId =', chatId, 'pending =', pendingReplyTargets?.[chatId]);
   }
 
   saveAll();
 
   console.log('[VV][APPEND] appendedCount =', appendedCount);
   console.log('[VV][APPEND] final thread =', thread.slice());
+  console.log('[VV][APPEND] pending after append =', pendingReplyTargets?.[chatId]);
 
   return appendedCount;
 }
@@ -1407,25 +1418,12 @@ async function handleVVChatSyncRaw(payload) {
   const incomingChatId = String(parsed.chatId || '').trim();
   const incomingName = String(parsed.target || '').trim();
 
-  const hasIncomingReply = Array.isArray(parsed.messages) && parsed.messages.some(msg => {
-    const side = String(msg?.side || '').trim().toLowerCase();
-    const hasTransferSignal =
-      !!String(msg?.transferAction || '').trim() ||
-      !!String(msg?.transferAmount || '').trim() ||
-      !!String(msg?.transferNote || '').trim();
-    const content = String(msg?.content || '').trim();
-
-    return (side === 'left' || side === 'assistant' || side === 'them') &&
-      (!!content || hasTransferSignal);
-  });
-
   const area = document.getElementById('messageArea');
   const uiNotReady = !vvAppReady || !area;
 
-  console.log('[VV][FIRST] vvAppReady =', vvAppReady);
-  console.log('[VV][FIRST] messageArea exists =', !!area);
-  console.log('[VV][FIRST] uiNotReady =', uiNotReady);
-  console.log('[VV][FIRST] hasIncomingReply =', hasIncomingReply);
+  console.log('[VV][SYNC_FLOW] vvAppReady =', vvAppReady);
+  console.log('[VV][SYNC_FLOW] messageArea exists =', !!area);
+  console.log('[VV][SYNC_FLOW] uiNotReady =', uiNotReady);
 
   if (uiNotReady) {
     console.warn('[VV] UI not ready, queue sync:', parsed.chatId);
@@ -1435,43 +1433,23 @@ async function handleVVChatSyncRaw(payload) {
       viewId: payloadViewId,
       time: Date.now()
     });
-    console.log('[VV][FIRST] pendingVVChatSyncQueue =', pendingVVChatSyncQueue.slice());
+    console.log('[VV][SYNC_FLOW] pendingVVChatSyncQueue =', pendingVVChatSyncQueue.slice());
     return false;
   }
 
-  const shouldAutoOpen =false;
+  if (!messages || typeof messages !== 'object') {
+    console.warn('[VV][SYNC_FLOW] messages store invalid');
+    return false;
+  }
 
-  console.log('[VV][FIRST] auto open check =', {
-    incomingChatId,
-    currentChatId,
-    hasIncomingReply,
-    shouldAutoOpen
-  });
+  if (!Array.isArray(messages[incomingChatId])) {
+    messages[incomingChatId] = [];
+    console.log('[VV][SYNC_FLOW] created messages thread for chatId =', incomingChatId);
+  }
 
-  if (shouldAutoOpen && typeof openChatDetail === 'function') {
-    try {
-      console.log('[VV][FIRST] opening chat detail before append:', {
-        chatId: incomingChatId,
-        forceName: incomingName
-      });
-      await openChatDetail(incomingChatId, incomingName);
-      console.log('[VV][FIRST] openChatDetail done:', {
-        currentChatId,
-        currentChatType
-      });
-    } catch (err) {
-      console.error('[VV][FIRST] openChatDetail failed:', err);
-    }
-  } else {
-    if (!messages[incomingChatId]) {
-      messages[incomingChatId] = [];
-    }
-
-    let contact = Array.isArray(contactList)
-      ? contactList.find(i => i.id === incomingChatId)
-      : null;
-
-    if (!contact && Array.isArray(contactList)) {
+  if (Array.isArray(contactList)) {
+    let contact = contactList.find(i => String(i?.id || '') === incomingChatId);
+    if (!contact) {
       contact = {
         id: incomingChatId,
         name: incomingName || '联系人',
@@ -1483,15 +1461,18 @@ async function handleVVChatSyncRaw(payload) {
         threadType: 'direct'
       };
       contactList.unshift(contact);
-      console.log('[VV][FIRST] created fallback contact item:', contact);
-    } else if (contact) {
+      console.log('[VV][SYNC_FLOW] created contact item =', contact);
+    } else {
       if (incomingName && (!contact.name || contact.name === '联系人')) {
         contact.name = incomingName;
       }
       if (incomingName && !contact.bridgeName) {
         contact.bridgeName = incomingName;
       }
+      console.log('[VV][SYNC_FLOW] updated contact item =', contact);
     }
+  } else {
+    console.warn('[VV][SYNC_FLOW] contactList not available');
   }
 
   const beforeThread = Array.isArray(messages[parsed.chatId])
@@ -1499,8 +1480,9 @@ async function handleVVChatSyncRaw(payload) {
     : [];
   const beforeLeftCount = beforeThread.filter(m => !m.isMe && !m.recalled).length;
 
-  console.log('[VV][FIRST] thread before append =', beforeThread);
-  console.log('[VV][FIRST] beforeLeftCount =', beforeLeftCount);
+  console.log('[VV][SYNC_FLOW] thread before append =', beforeThread);
+  console.log('[VV][SYNC_FLOW] beforeLeftCount =', beforeLeftCount);
+  console.log('[VV][SYNC_FLOW] currentChatId before append =', currentChatId);
 
   const appended = appendVVChatReplyToLocal(parsed);
 
@@ -1509,17 +1491,18 @@ async function handleVVChatSyncRaw(payload) {
     : [];
   const afterLeftCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
 
-  console.log('[VV][FIRST] appended =', appended);
-  console.log('[VV][FIRST] parsed.chatId =', parsed.chatId, 'currentChatId =', currentChatId);
-  console.log('[VV][FIRST] thread after append =', messages[parsed.chatId]);
-  console.log('[VV][FIRST] afterLeftCount =', afterLeftCount);
-  console.log('[VV][FIRST] leftCountDelta =', afterLeftCount - beforeLeftCount);
+  console.log('[VV][SYNC_FLOW] appended =', appended);
+  console.log('[VV][SYNC_FLOW] parsed.chatId =', parsed.chatId);
+  console.log('[VV][SYNC_FLOW] currentChatId after append =', currentChatId);
+  console.log('[VV][SYNC_FLOW] thread after append =', afterThread);
+  console.log('[VV][SYNC_FLOW] afterLeftCount =', afterLeftCount);
+  console.log('[VV][SYNC_FLOW] leftCountDelta =', afterLeftCount - beforeLeftCount);
 
   if (typeof renderChatList === 'function') {
-    console.log('[VV][FIRST] renderChatList()');
+    console.log('[VV][SYNC_FLOW] renderChatList()');
     renderChatList();
   } else if (typeof renderAllPanels === 'function') {
-    console.log('[VV][FIRST] renderAllPanels()');
+    console.log('[VV][SYNC_FLOW] renderAllPanels()');
     renderAllPanels();
   }
 
@@ -1528,23 +1511,18 @@ async function handleVVChatSyncRaw(payload) {
       parsed.chatId === currentChatId &&
       typeof renderMessages === 'function';
 
-    console.log(
-      '[VV][FIRST] rerender tag =',
-      tag,
-      'shouldRender =',
+    console.log('[VV][SYNC_FLOW] rerender tag =', tag, {
       shouldRender,
-      'parsed.chatId =',
-      parsed.chatId,
-      'currentChatId =',
+      parsedChatId: parsed.chatId,
       currentChatId
-    );
+    });
 
     if (shouldRender) {
       try {
         await renderMessages();
-        console.log('[VV][FIRST] renderMessages done, tag =', tag);
+        console.log('[VV][SYNC_FLOW] renderMessages done, tag =', tag);
       } catch (err) {
-        console.error('[VV] renderMessages error:', err);
+        console.error('[VV][SYNC_FLOW] renderMessages error:', err);
       }
     }
   };
