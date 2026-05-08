@@ -1342,7 +1342,7 @@ function appendVVChatReplyToLocal(chatData) {
       : (leftMsgs[leftMsgs.length - 1].transferAction ? '[转账消息]' : '[新消息]');
 
     console.log('[VV][APPEND] updateLastMsg previewText =', previewText);
-    updateLastMsg(chatId, previewText, time, currentChatType);
+    updateLastMsg(chatId, previewText, time, 'direct');
 
     pendingReplyTargets[chatId] = false;
 
@@ -1393,7 +1393,10 @@ async function handleVVChatSyncRaw(payload) {
   console.log('[VV][PARSE_CHECK] parsed.target =', parsed?.target);
   console.log('[VV][PARSE_CHECK] parsed.time =', parsed?.time);
   console.log('[VV][PARSE_CHECK] parsed.messages =', parsed?.messages);
-  console.log('[VV][PARSE_CHECK] parsed.messages.length =', Array.isArray(parsed?.messages) ? parsed.messages.length : 'not-array');
+  console.log(
+    '[VV][PARSE_CHECK] parsed.messages.length =',
+    Array.isArray(parsed?.messages) ? parsed.messages.length : 'not-array'
+  );
 
   if (!parsed || !parsed.chatId) {
     console.warn('[VV] handleVVChatSyncRaw: invalid parsed, request resend');
@@ -1401,12 +1404,28 @@ async function handleVVChatSyncRaw(payload) {
     return false;
   }
 
+  const incomingChatId = String(parsed.chatId || '').trim();
+  const incomingName = String(parsed.target || '').trim();
+
+  const hasIncomingReply = Array.isArray(parsed.messages) && parsed.messages.some(msg => {
+    const side = String(msg?.side || '').trim().toLowerCase();
+    const hasTransferSignal =
+      !!String(msg?.transferAction || '').trim() ||
+      !!String(msg?.transferAmount || '').trim() ||
+      !!String(msg?.transferNote || '').trim();
+    const content = String(msg?.content || '').trim();
+
+    return (side === 'left' || side === 'assistant' || side === 'them') &&
+      (!!content || hasTransferSignal);
+  });
+
   const area = document.getElementById('messageArea');
   const uiNotReady = !vvAppReady || !area;
 
   console.log('[VV][FIRST] vvAppReady =', vvAppReady);
   console.log('[VV][FIRST] messageArea exists =', !!area);
   console.log('[VV][FIRST] uiNotReady =', uiNotReady);
+  console.log('[VV][FIRST] hasIncomingReply =', hasIncomingReply);
 
   if (uiNotReady) {
     console.warn('[VV] UI not ready, queue sync:', parsed.chatId);
@@ -1420,7 +1439,67 @@ async function handleVVChatSyncRaw(payload) {
     return false;
   }
 
-  const beforeThread = Array.isArray(messages[parsed.chatId]) ? messages[parsed.chatId].slice() : [];
+  const shouldAutoOpen =
+    !!incomingChatId &&
+    hasIncomingReply &&
+    currentChatId !== incomingChatId;
+
+  console.log('[VV][FIRST] auto open check =', {
+    incomingChatId,
+    currentChatId,
+    hasIncomingReply,
+    shouldAutoOpen
+  });
+
+  if (shouldAutoOpen && typeof openChatDetail === 'function') {
+    try {
+      console.log('[VV][FIRST] opening chat detail before append:', {
+        chatId: incomingChatId,
+        forceName: incomingName
+      });
+      await openChatDetail(incomingChatId, incomingName);
+      console.log('[VV][FIRST] openChatDetail done:', {
+        currentChatId,
+        currentChatType
+      });
+    } catch (err) {
+      console.error('[VV][FIRST] openChatDetail failed:', err);
+    }
+  } else {
+    if (!messages[incomingChatId]) {
+      messages[incomingChatId] = [];
+    }
+
+    let contact = Array.isArray(contactList)
+      ? contactList.find(i => i.id === incomingChatId)
+      : null;
+
+    if (!contact && Array.isArray(contactList)) {
+      contact = {
+        id: incomingChatId,
+        name: incomingName || '联系人',
+        bridgeName: incomingName || '',
+        avatar: DEFAULT_AVATAR,
+        isSticky: false,
+        lastTime: parsed?.time || getNowTime(),
+        lastPreview: '',
+        threadType: 'direct'
+      };
+      contactList.unshift(contact);
+      console.log('[VV][FIRST] created fallback contact item:', contact);
+    } else if (contact) {
+      if (incomingName && (!contact.name || contact.name === '联系人')) {
+        contact.name = incomingName;
+      }
+      if (incomingName && !contact.bridgeName) {
+        contact.bridgeName = incomingName;
+      }
+    }
+  }
+
+  const beforeThread = Array.isArray(messages[parsed.chatId])
+    ? messages[parsed.chatId].slice()
+    : [];
   const beforeLeftCount = beforeThread.filter(m => !m.isMe && !m.recalled).length;
 
   console.log('[VV][FIRST] thread before append =', beforeThread);
@@ -1428,7 +1507,9 @@ async function handleVVChatSyncRaw(payload) {
 
   const appended = appendVVChatReplyToLocal(parsed);
 
-  const afterThread = Array.isArray(messages[parsed.chatId]) ? messages[parsed.chatId].slice() : [];
+  const afterThread = Array.isArray(messages[parsed.chatId])
+    ? messages[parsed.chatId].slice()
+    : [];
   const afterLeftCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
 
   console.log('[VV][FIRST] appended =', appended);
@@ -1446,8 +1527,20 @@ async function handleVVChatSyncRaw(payload) {
   }
 
   const rerender = async (tag = '') => {
-    const shouldRender = parsed.chatId === currentChatId && typeof renderMessages === 'function';
-    console.log('[VV][FIRST] rerender tag =', tag, 'shouldRender =', shouldRender, 'parsed.chatId =', parsed.chatId, 'currentChatId =', currentChatId);
+    const shouldRender =
+      parsed.chatId === currentChatId &&
+      typeof renderMessages === 'function';
+
+    console.log(
+      '[VV][FIRST] rerender tag =',
+      tag,
+      'shouldRender =',
+      shouldRender,
+      'parsed.chatId =',
+      parsed.chatId,
+      'currentChatId =',
+      currentChatId
+    );
 
     if (shouldRender) {
       try {
