@@ -3752,18 +3752,27 @@ async function triggerAIReply() {
 
     if (!currentChatId) return;
 
-    if (!pendingReplyTargets[currentChatId]) {
+    const chatIdAtRequest = currentChatId;
+    const chatTypeAtRequest = currentChatType;
+    const thread = messages[chatIdAtRequest] || [];
+
+    let pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
+
+    if (!pendingReplyTargets[chatIdAtRequest] && pendingMessages.length > 0) {
+      console.warn('[VV][triggerAIReply] pendingReplyTargets false but pendingMessages exists, auto-fix true');
+      pendingReplyTargets[chatIdAtRequest] = true;
+    }
+
+    console.log('[VV][triggerAIReply] thread snapshot =', thread);
+    console.log('[VV][triggerAIReply] pendingMessages =', pendingMessages);
+    console.log('[VV][triggerAIReply] pending flag after auto-fix =', pendingReplyTargets[chatIdAtRequest]);
+
+    if (!pendingReplyTargets[chatIdAtRequest]) {
       console.log('[VV][triggerAIReply] skip: pendingReplyTargets false');
       return;
     }
 
-    const chatIdAtRequest = currentChatId;
-    const chatTypeAtRequest = currentChatType;
-    const thread = messages[chatIdAtRequest] || [];
-    const pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
-
-    console.log('[VV][triggerAIReply] thread snapshot =', thread);
-    console.log('[VV][triggerAIReply] pendingMessages =', pendingMessages);
+    pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
     if (!pendingMessages.length) {
       console.warn('[VV][triggerAIReply] no pendingMessages, clear pending flag');
