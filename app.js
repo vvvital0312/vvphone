@@ -158,6 +158,184 @@ const VV_BRIDGE_CONFIG = {
   }
 };
 
+(function installVVBridge(global) {
+  if (!global) return;
+
+  if (global.VVBridge && global.VVBridge.__installed) {
+    console.log('[VVBridge] already installed');
+    return;
+  }
+
+  function getHostFrame() {
+    const frames = document.querySelectorAll('iframe');
+    if (!frames || !frames.length) {
+      console.warn('[VVBridge] no iframe found');
+      return null;
+    }
+
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
+      try {
+        if (frame && frame.contentWindow) {
+          return frame;
+        }
+      } catch (err) {
+        console.warn('[VVBridge] iframe access failed at index =', i, err);
+      }
+    }
+
+    console.warn('[VVBridge] no usable iframe found');
+    return null;
+  }
+
+  function safeText(value) {
+    return String(value == null ? '' : value);
+  }
+
+  function extractChatId(raw) {
+    const text = safeText(raw);
+    return ((text.match(/(?:^|\n)chatId=([^\n\r]+)/) || [])[1] || '').trim();
+  }
+
+  function buildChatSyncRaw(data) {
+    data = data || {};
+    const messages = Array.isArray(data.messages) ? data.messages : [];
+
+    const lines = [
+      '[VV_CHAT_SYNC]',
+      'chatId=' + safeText(data.chatId),
+      'target=' + safeText(data.target),
+      'time=' + safeText(data.time),
+      'myAvatarKey=' + safeText(data.myAvatarKey || 'current_my_avatar'),
+      'targetAvatarId=' + safeText(data.targetAvatarId),
+      'myBubble=' + safeText(data.myBubble || '#5B86FF'),
+      'targetBubble=' + safeText(data.targetBubble || '#F8F8F8'),
+      'chatBgKey=' + safeText(data.chatBgKey || 'current_chat_bg'),
+      ''
+    ];
+
+    messages.forEach(function (msg) {
+      msg = msg || {};
+      lines.push('[消息]');
+      lines.push('side=' + safeText(msg.side || 'left'));
+      lines.push('sender=' + safeText(msg.sender));
+      lines.push('content=' + safeText(msg.content));
+      lines.push('state=' + safeText(msg.state || 'sent'));
+
+      if (msg.type) {
+        lines.push('type=' + safeText(msg.type));
+      }
+      if (msg.transferAction) {
+        lines.push('transferAction=' + safeText(msg.transferAction));
+      }
+      if (msg.transferAmount) {
+        lines.push('transferAmount=' + safeText(msg.transferAmount));
+      }
+      if (msg.transferNote) {
+        lines.push('transferNote=' + safeText(msg.transferNote));
+      }
+
+      lines.push('[/消息]');
+      lines.push('');
+    });
+
+    lines.push('[/VV_CHAT_SYNC]');
+    return lines.join('\n');
+  }
+
+  function forwardRaw(raw, extra) {
+    extra = extra || {};
+
+    const frame = getHostFrame();
+    if (!frame || !frame.contentWindow) {
+      console.warn('[VVBridge.forwardRaw] host iframe not found');
+      return false;
+    }
+
+    const text = safeText(raw);
+    const chatId = safeText(extra.chatId || extractChatId(text));
+    const payload = {
+      type: 'VV_RAW_LLM_REPLY',
+      raw: text,
+      chatId: chatId,
+      source: safeText(extra.source || 'VVBridge.forwardRaw')
+    };
+
+    try {
+      frame.contentWindow.postMessage(payload, '*');
+      console.log('[VVBridge.forwardRaw] sent payload =', payload);
+      return true;
+    } catch (err) {
+      console.error('[VVBridge.forwardRaw] postMessage failed:', err);
+      return false;
+    }
+  }
+
+  function sendChatSync(data) {
+    data = data || {};
+    const raw = buildChatSyncRaw(data);
+
+    console.log('[VVBridge.sendChatSync] data =', data);
+    console.log('[VVBridge.sendChatSync][RAW_BEGIN]');
+    console.log(raw);
+    console.log('[VVBridge.sendChatSync][RAW_END]');
+
+    return forwardRaw(raw, {
+      chatId: data.chatId,
+      source: 'VVBridge.sendChatSync'
+    });
+  }
+
+  function sendMessage(options) {
+    options = options || {};
+
+    const chatId = safeText(options.chatId || ('chat_' + Date.now()));
+    const target = safeText(options.target || '');
+    const time = safeText(options.time || '');
+    const myAvatarKey = safeText(options.myAvatarKey || 'current_my_avatar');
+    const targetAvatarId = safeText(options.targetAvatarId || '');
+    const myBubble = safeText(options.myBubble || '#5B86FF');
+    const targetBubble = safeText(options.targetBubble || '#F8F8F8');
+    const chatBgKey = safeText(options.chatBgKey || 'current_chat_bg');
+
+    const messages = Array.isArray(options.messages)
+      ? options.messages
+      : [
+          {
+            side: safeText(options.side || 'left'),
+            sender: safeText(options.sender || target),
+            content: safeText(options.content || ''),
+            state: safeText(options.state || 'sent'),
+            type: safeText(options.type || 'text')
+          }
+        ];
+
+    return sendChatSync({
+      chatId: chatId,
+      target: target,
+      time: time,
+      myAvatarKey: myAvatarKey,
+      targetAvatarId: targetAvatarId,
+      myBubble: myBubble,
+      targetBubble: targetBubble,
+      chatBgKey: chatBgKey,
+      messages: messages
+    });
+  }
+
+  global.VVBridge = {
+    __installed: true,
+    getHostFrame: getHostFrame,
+    extractChatId: extractChatId,
+    buildChatSyncRaw: buildChatSyncRaw,
+    forwardRaw: forwardRaw,
+    sendChatSync: sendChatSync,
+    sendMessage: sendMessage
+  };
+
+  console.log('[VVBridge] installed successfully');
+})(window);
+
 let vvBridgeListenerInited = false;
 
 function initSTBridgeListener() {
