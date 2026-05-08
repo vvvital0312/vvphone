@@ -1439,10 +1439,7 @@ async function handleVVChatSyncRaw(payload) {
     return false;
   }
 
-  const shouldAutoOpen =
-    !!incomingChatId &&
-    hasIncomingReply &&
-    currentChatId !== incomingChatId;
+  const shouldAutoOpen =false;
 
   console.log('[VV][FIRST] auto open check =', {
     incomingChatId,
