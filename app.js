@@ -1467,6 +1467,7 @@ async function handleVVChatSyncRaw(payload) {
 
   const incomingChatId = String(parsed.chatId || '').trim();
   const incomingName = String(parsed.target || '').trim();
+  parsed.chatId = incomingChatId;
 
   const area = document.getElementById('messageArea');
   const uiNotReady = !vvAppReady || !area;
@@ -1476,10 +1477,10 @@ async function handleVVChatSyncRaw(payload) {
   console.log('[VV][SYNC_FLOW] uiNotReady =', uiNotReady);
 
   if (uiNotReady) {
-    console.warn('[VV] UI not ready, queue sync:', parsed.chatId);
+    console.warn('[VV] UI not ready, queue sync:', incomingChatId);
     pendingVVChatSyncQueue.push({
       raw,
-      chatId: parsed.chatId,
+      chatId: incomingChatId,
       viewId: payloadViewId,
       time: Date.now()
     });
@@ -1525,8 +1526,8 @@ async function handleVVChatSyncRaw(payload) {
     console.warn('[VV][SYNC_FLOW] contactList not available');
   }
 
-  const beforeThread = Array.isArray(messages[parsed.chatId])
-    ? messages[parsed.chatId].slice()
+  const beforeThread = Array.isArray(messages[incomingChatId])
+    ? messages[incomingChatId].slice()
     : [];
   const beforeLeftCount = beforeThread.filter(m => !m.isMe && !m.recalled).length;
 
@@ -1536,13 +1537,13 @@ async function handleVVChatSyncRaw(payload) {
 
   const appended = appendVVChatReplyToLocal(parsed);
 
-  const afterThread = Array.isArray(messages[parsed.chatId])
-    ? messages[parsed.chatId].slice()
+  const afterThread = Array.isArray(messages[incomingChatId])
+    ? messages[incomingChatId].slice()
     : [];
   const afterLeftCount = afterThread.filter(m => !m.isMe && !m.recalled).length;
 
   console.log('[VV][SYNC_FLOW] appended =', appended);
-  console.log('[VV][SYNC_FLOW] parsed.chatId =', parsed.chatId);
+  console.log('[VV][SYNC_FLOW] incomingChatId =', incomingChatId);
   console.log('[VV][SYNC_FLOW] currentChatId after append =', currentChatId);
   console.log('[VV][SYNC_FLOW] thread after append =', afterThread);
   console.log('[VV][SYNC_FLOW] afterLeftCount =', afterLeftCount);
@@ -1558,12 +1559,12 @@ async function handleVVChatSyncRaw(payload) {
 
   const rerender = async (tag = '') => {
     const shouldRender =
-      parsed.chatId === currentChatId &&
+      incomingChatId === currentChatId &&
       typeof renderMessages === 'function';
 
     console.log('[VV][SYNC_FLOW] rerender tag =', tag, {
       shouldRender,
-      parsedChatId: parsed.chatId,
+      incomingChatId,
       currentChatId
     });
 
@@ -1585,7 +1586,7 @@ async function handleVVChatSyncRaw(payload) {
   saveAll();
 
   console.log('[VV] handleVVChatSyncRaw done:', {
-    chatId: parsed.chatId,
+    chatId: incomingChatId,
     appended,
     beforeLeftCount,
     afterLeftCount
@@ -3843,16 +3844,6 @@ async function triggerAIReply() {
     const chatTypeAtRequest = currentChatType;
     const thread = messages[chatIdAtRequest] || [];
 
-    const rel = typeof getRelSetting === 'function' ? (getRelSetting(chatIdAtRequest) || {}) : {};
-    const chatSetting = typeof getChatSetting === 'function' ? (getChatSetting(chatIdAtRequest) || {}) : {};
-    const targetName =
-      rel.name ||
-      chatSetting.name ||
-      (typeof getBridgeNameByChatId === 'function' ? getBridgeNameByChatId(chatIdAtRequest, chatTypeAtRequest) : '') ||
-      '';
-
-    notifyHostActiveChat(chatIdAtRequest, targetName);
-
     let pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
     if (!pendingReplyTargets[chatIdAtRequest] && pendingMessages.length > 0) {
@@ -4000,29 +3991,6 @@ function triggerAIReplySoon(delay) {
       console.error('[AI] triggerAIReplySoon error:', err);
     }
   }, wait);
-}
-
-function notifyHostActiveChat(chatId, target) {
-  try {
-    const resolvedChatId = String(chatId || '').trim();
-    const resolvedTarget = String(target || '').trim();
-    if (!resolvedChatId) return;
-
-    window.parent?.postMessage({
-      type: 'VVHOST_SET_ACTIVE_CHAT',
-      chatId: resolvedChatId,
-      viewId: resolvedChatId,
-      target: resolvedTarget,
-      source: 'vvphone'
-    }, '*');
-
-    console.log('[VV][notifyHostActiveChat]', {
-      chatId: resolvedChatId,
-      target: resolvedTarget
-    });
-  } catch (err) {
-    console.warn('[VV][notifyHostActiveChat] failed', err);
-  }
 }
 
 function requestResendLastVVChatSync(chatId, viewId) {
