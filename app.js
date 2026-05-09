@@ -3727,9 +3727,35 @@ function sendMessage() {
   closeEmojiPanel();
 }
 
+function getLatestPendingOutgoingMessages(list) {
+  if (!Array.isArray(list) || !list.length) return [];
+
+  const result = [];
+
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m || m.recalled) continue;
+
+    if (m.isMe && m.pendingForReply) {
+      result.unshift(m);
+      continue;
+    }
+
+    // 一旦尾部连续块被打断，就停止
+    if (result.length > 0) {
+      break;
+    }
+
+    // 尾部不是 pending 的我方消息，说明当前没有新一轮输入
+    break;
+  }
+
+  return result;
+}
+
 function buildVVEventPayload(chatId) {
   const list = messages[chatId] || [];
-  const myPendings = list.filter(m => m.isMe && !m.recalled && m.pendingForReply);
+  const myPendings = getLatestPendingOutgoingMessages(list);
 
   if (!myPendings.length) return '';
 
@@ -3751,7 +3777,7 @@ function buildVVEventPayload(chatId) {
 
   const pendingTexts = myPendings.map(toMessageText);
 
-  console.log('[VV_EVENT] selected pendings =', myPendings);
+  console.log('[VV_EVENT] selected latest pendings =', myPendings);
   console.log('[VV_EVENT] pendingTexts =', pendingTexts);
 
   const myAvatarKey = 'current_my_avatar';
@@ -3816,6 +3842,16 @@ async function triggerAIReply() {
     const chatIdAtRequest = currentChatId;
     const chatTypeAtRequest = currentChatType;
     const thread = messages[chatIdAtRequest] || [];
+
+    const rel = typeof getRelSetting === 'function' ? (getRelSetting(chatIdAtRequest) || {}) : {};
+    const chatSetting = typeof getChatSetting === 'function' ? (getChatSetting(chatIdAtRequest) || {}) : {};
+    const targetName =
+      rel.name ||
+      chatSetting.name ||
+      (typeof getBridgeNameByChatId === 'function' ? getBridgeNameByChatId(chatIdAtRequest, chatTypeAtRequest) : '') ||
+      '';
+
+    notifyHostActiveChat(chatIdAtRequest, targetName);
 
     let pendingMessages = thread.filter(m => m.isMe && !m.recalled && m.pendingForReply);
 
@@ -3964,6 +4000,29 @@ function triggerAIReplySoon(delay) {
       console.error('[AI] triggerAIReplySoon error:', err);
     }
   }, wait);
+}
+
+function notifyHostActiveChat(chatId, target) {
+  try {
+    const resolvedChatId = String(chatId || '').trim();
+    const resolvedTarget = String(target || '').trim();
+    if (!resolvedChatId) return;
+
+    window.parent?.postMessage({
+      type: 'VVHOST_SET_ACTIVE_CHAT',
+      chatId: resolvedChatId,
+      viewId: resolvedChatId,
+      target: resolvedTarget,
+      source: 'vvphone'
+    }, '*');
+
+    console.log('[VV][notifyHostActiveChat]', {
+      chatId: resolvedChatId,
+      target: resolvedTarget
+    });
+  } catch (err) {
+    console.warn('[VV][notifyHostActiveChat] failed', err);
+  }
 }
 
 function requestResendLastVVChatSync(chatId, viewId) {
@@ -5811,7 +5870,7 @@ function initVVHostNavigationBridge() {
       if (type === 'VVPHONE_SET_VIEW') {
         if (String(data.view || '') !== 'chat') return;
 
-        const chatId = String(data.chatId || '').trim();
+        const chatId = String(data.chatId || data.viewId || '').trim();
         const target = String(data.target || '').trim();
         const chatType = String(data.chatType || 'direct').trim() || 'direct';
 
@@ -5821,31 +5880,22 @@ function initVVHostNavigationBridge() {
           chatType
         });
 
-        if (chatId) {
-          if (chatType === 'direct' && typeof openChatDetail === 'function') {
-            await openChatDetail(chatId, target || '');
-          } else if (typeof openChat === 'function') {
-            await openChat(chatId, chatType);
-          }
-        } else {
-          document.querySelectorAll('.page').forEach(p => {
-            p.style.display = 'none';
-          });
+        if (!chatId) {
+          console.warn('[VV][NAV] VVPHONE_SET_VIEW ignored: empty chatId');
+          return;
+        }
 
-          const page =
-            document.getElementById('chatDetailPage') ||
-            document.getElementById('contactPage');
-
-          if (page) {
-            page.style.display = 'block';
-          }
+        if (chatType === 'direct' && typeof openChatDetail === 'function') {
+          await openChatDetail(chatId, target || '');
+        } else if (typeof openChat === 'function') {
+          await openChat(chatId, chatType);
         }
 
         return;
       }
 
       if (type === 'VVPHONE_OPEN_CHAT') {
-        const chatId = String(data.chatId || '').trim();
+        const chatId = String(data.chatId || data.viewId || '').trim();
         const target = String(data.target || '').trim();
         const chatType = String(data.chatType || 'direct').trim() || 'direct';
 
@@ -5855,7 +5905,10 @@ function initVVHostNavigationBridge() {
           chatType
         });
 
-        if (!chatId) return;
+        if (!chatId) {
+          console.warn('[VV][NAV] VVPHONE_OPEN_CHAT ignored: empty chatId');
+          return;
+        }
 
         if (chatType === 'direct' && typeof openChatDetail === 'function') {
           await openChatDetail(chatId, target || '');
