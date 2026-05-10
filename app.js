@@ -1191,235 +1191,262 @@ function parseVVChatBlocks(raw, fallback = {}) {
 }
 
 function appendVVChatReplyToLocal(chatData) {
-  if (!chatData || !chatData.chatId) {
-    console.warn('[VV][APPEND] invalid chatData');
-    return 0;
-  }
-
-  const chatId = chatData.chatId;
-
-  if (!messages[chatId]) {
-    messages[chatId] = [];
-  }
-
-  let contact = Array.isArray(contactList)
-    ? contactList.find(i => i.id === chatId)
-    : null;
-
-  if (!contact && Array.isArray(contactList)) {
-    contact = {
-      id: chatId,
-      name: chatData.target || '联系人',
-      bridgeName: chatData.target || '',
-      avatar: DEFAULT_AVATAR,
-      isSticky: false,
-      lastTime: getNowTime(),
-      lastPreview: '',
-      threadType: 'direct'
-    };
-    contactList.unshift(contact);
-  } else if (contact) {
-    if (chatData.target && (!contact.name || contact.name === '联系人')) {
-      contact.name = chatData.target;
+  try {
+    if (!chatData || !chatData.chatId) {
+      console.warn('[VV][APPEND] invalid chatData');
+      return 0;
     }
-    if (chatData.target && !contact.bridgeName) {
-      contact.bridgeName = chatData.target;
+
+    if (typeof window.pendingReplyTargets !== 'object' || !window.pendingReplyTargets) {
+      window.pendingReplyTargets = {};
     }
-  }
 
-  const setting = normalizeChatSetting(chatId);
-  const rel = getRelSetting(chatId);
+    const chatId = chatData.chatId;
 
-  const thread = messages[chatId];
-  const time = getNowTime();
-  const timeLabel = chatData.time || getNowFullLabel();
-  const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+    if (!messages[chatId]) {
+      messages[chatId] = [];
+    }
 
-  const leftMsgs = allMsgs.filter(msg => {
-    const side = String(msg.side || '').trim().toLowerCase();
-    const hasTransferSignal =
-      !!String(msg.transferAction || '').trim() ||
-      !!String(msg.transferAmount || '').trim() ||
-      !!String(msg.transferNote || '').trim();
+    let contact = Array.isArray(contactList)
+      ? contactList.find(i => i.id === chatId)
+      : null;
 
-    const content = String(msg.content || '').trim();
-
-    return (side === 'left' || side === 'assistant' || side === 'them') &&
-      (!!content || hasTransferSignal);
-  });
-
-  console.log('[VV][APPEND] chatId =', chatId);
-  console.log('[VV][APPEND] currentChatId =', currentChatId);
-  console.log('[VV][APPEND] allMsgs =', allMsgs);
-  console.log('[VV][APPEND] leftMsgs to append =', leftMsgs);
-  console.log('[VV][APPEND] thread before append =', thread.slice());
-  console.log('[VV][APPEND] pending before append =', pendingReplyTargets?.[chatId]);
-
-  let appendedCount = 0;
-
-  for (let i = 0; i < leftMsgs.length; i++) {
-    const msg = leftMsgs[i];
-
-    const normalizedContent = String(msg.content || '').trim();
-    const normalizedType = String(msg.type || 'text').trim().toLowerCase() || 'text';
-    const transferAction = String(msg.transferAction || '').trim().toLowerCase();
-    const transferAmount = String(msg.transferAmount || '').trim();
-    const transferNote = String(msg.transferNote || '').trim();
-
-    console.log('[VV][APPEND] processing msg =', {
-      index: i,
-      msg,
-      normalizedContent,
-      normalizedType,
-      transferAction,
-      transferAmount,
-      transferNote,
-      timeLabel
-    });
-
-    const duplicated = thread.some(item => {
-      const oldText = Array.isArray(item.chunks)
-        ? item.chunks.join('\n').trim()
-        : String(item.text || '').trim();
-
-      const same = (
-        !item.isMe &&
-        !item.recalled &&
-        String(item.type || 'text') === 'text' &&
-        oldText === normalizedContent &&
-        String(item.timeLabel || '') === String(timeLabel || '')
-      );
-
-      if (same) {
-        console.log('[VV][APPEND] duplicate matched existing item =', item);
-      }
-
-      return same;
-    });
-
-    console.log('[VV][APPEND] duplicated =', duplicated);
-
-    if (normalizedContent && !duplicated) {
-      const newMsg = {
-        id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
-        sender: 'them',
-        senderName: msg.sender || chatData.target || '对方',
-        isMe: false,
-        type: normalizedType || 'text',
-        chunks: [normalizedContent],
-        text: normalizedContent,
-        replyTo: null,
-        recalled: false,
-        time,
-        timeLabel,
-        state: msg.state || 'reply'
+    if (!contact && Array.isArray(contactList)) {
+      contact = {
+        id: chatId,
+        name: chatData.target || '联系人',
+        bridgeName: chatData.target || '',
+        avatar: DEFAULT_AVATAR,
+        isSticky: false,
+        lastTime: getNowTime(),
+        lastPreview: '',
+        threadType: 'direct'
       };
-
-      console.log('[VV][APPEND] before push newMsg =', newMsg);
-      thread.push(newMsg);
-      console.log('[VV][APPEND] after push, thread =', thread.slice());
-      appendedCount++;
-    } else if (!normalizedContent && !transferAction) {
-      console.log('[VV][APPEND] skipped empty content msg =', msg);
-    } else if (duplicated) {
-      console.log('[VV][APPEND] skipped duplicate msg =', msg);
-    }
-
-    if (transferAction === 'accept') {
-      const transferMsg = findLastPendingMyTransfer(chatId);
-      console.log('[VV][APPEND] transferAction=accept transferMsg =', transferMsg);
-      if (transferMsg) {
-        acceptMyTransferByAI(chatId, transferMsg);
+      contactList.unshift(contact);
+    } else if (contact) {
+      if (chatData.target && (!contact.name || contact.name === '联系人')) {
+        contact.name = chatData.target;
+      }
+      if (chatData.target && !contact.bridgeName) {
+        contact.bridgeName = chatData.target;
       }
     }
 
-    if (transferAction === 'return') {
-      const transferMsg = findLastPendingMyTransfer(chatId);
-      console.log('[VV][APPEND] transferAction=return transferMsg =', transferMsg);
-      if (transferMsg) {
-        returnMyTransferByAI(chatId, transferMsg);
+    const setting = typeof normalizeChatSetting === 'function'
+      ? (normalizeChatSetting(chatId) || {})
+      : {};
+
+    const rel = typeof getRelSetting === 'function'
+      ? (getRelSetting(chatId) || {})
+      : {};
+
+    const thread = messages[chatId];
+    const time = typeof getNowTime === 'function' ? getNowTime() : Date.now();
+    const timeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
+    const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
+
+    const leftMsgs = allMsgs.filter(msg => {
+      const side = String(msg.side || '').trim().toLowerCase();
+      const hasTransferSignal =
+        !!String(msg.transferAction || '').trim() ||
+        !!String(msg.transferAmount || '').trim() ||
+        !!String(msg.transferNote || '').trim();
+
+      const content = String(msg.content || '').trim();
+
+      return (side === 'left' || side === 'assistant' || side === 'them') &&
+        (!!content || hasTransferSignal);
+    });
+
+    console.log('[VV][APPEND] chatId =', chatId);
+    console.log('[VV][APPEND] currentChatId =', currentChatId);
+    console.log('[VV][APPEND] allMsgs =', allMsgs);
+    console.log('[VV][APPEND] leftMsgs to append =', leftMsgs);
+    console.log('[VV][APPEND] thread before append =', thread.slice());
+    console.log('[VV][APPEND] pending before append =', pendingReplyTargets?.[chatId]);
+
+    let appendedCount = 0;
+
+    for (let i = 0; i < leftMsgs.length; i++) {
+      const msg = leftMsgs[i];
+
+      const normalizedContent = String(msg.content || '').trim();
+      const normalizedType = String(msg.type || 'text').trim().toLowerCase() || 'text';
+      const transferAction = String(msg.transferAction || '').trim().toLowerCase();
+      const transferAmount = String(msg.transferAmount || '').trim();
+      const transferNote = String(msg.transferNote || '').trim();
+
+      console.log('[VV][APPEND] processing msg =', {
+        index: i,
+        msg,
+        normalizedContent,
+        normalizedType,
+        transferAction,
+        transferAmount,
+        transferNote,
+        timeLabel
+      });
+
+      const duplicated = thread.some(item => {
+        const oldText = Array.isArray(item.chunks)
+          ? item.chunks.join('\n').trim()
+          : String(item.text || '').trim();
+
+        const same = (
+          !item.isMe &&
+          !item.recalled &&
+          String(item.type || 'text') === 'text' &&
+          oldText === normalizedContent &&
+          String(item.timeLabel || '') === String(timeLabel || '')
+        );
+
+        if (same) {
+          console.log('[VV][APPEND] duplicate matched existing item =', item);
+        }
+
+        return same;
+      });
+
+      console.log('[VV][APPEND] duplicated =', duplicated);
+
+      if (normalizedContent && !duplicated) {
+        const newMsg = {
+          id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
+          sender: 'them',
+          senderName: msg.sender || chatData.target || '对方',
+          isMe: false,
+          type: normalizedType || 'text',
+          chunks: [normalizedContent],
+          text: normalizedContent,
+          replyTo: null,
+          recalled: false,
+          time,
+          timeLabel,
+          state: msg.state || 'reply'
+        };
+
+        console.log('[VV][APPEND] before push newMsg =', newMsg);
+        thread.push(newMsg);
+        console.log('[VV][APPEND] after push, thread =', thread.slice());
+        appendedCount++;
+      } else if (!normalizedContent && !transferAction) {
+        console.log('[VV][APPEND] skipped empty content msg =', msg);
+      } else if (duplicated) {
+        console.log('[VV][APPEND] skipped duplicate msg =', msg);
       }
-    }
 
-    if (transferAction === 'send') {
-      const amount = Number(transferAmount || 0);
-      const note = transferNote || '给你的转账';
+      if (transferAction === 'accept') {
+        const transferMsg = typeof findLastPendingMyTransfer === 'function'
+          ? findLastPendingMyTransfer(chatId)
+          : null;
+        console.log('[VV][APPEND] transferAction=accept transferMsg =', transferMsg);
+        if (transferMsg && typeof acceptMyTransferByAI === 'function') {
+          acceptMyTransferByAI(chatId, transferMsg);
+        }
+      }
 
-      console.log('[VV][APPEND] transferAction=send amount/note =', amount, note);
+      if (transferAction === 'return') {
+        const transferMsg = typeof findLastPendingMyTransfer === 'function'
+          ? findLastPendingMyTransfer(chatId)
+          : null;
+        console.log('[VV][APPEND] transferAction=return transferMsg =', transferMsg);
+        if (transferMsg && typeof returnMyTransferByAI === 'function') {
+          returnMyTransferByAI(chatId, transferMsg);
+        }
+      }
 
-      if (amount > 0) {
-        const alreadyExists = thread.some(item => {
-          const same = (
-            !item.isMe &&
-            item.type === 'transfer' &&
-            Number(item.amount || 0) === amount &&
-            String(item.note || '').trim() === note &&
-            item.status === '待收款'
-          );
-          if (same) {
-            console.log('[VV][APPEND] existing transfer matched item =', item);
+      if (transferAction === 'send') {
+        const amount = Number(transferAmount || 0);
+        const note = transferNote || '给你的转账';
+
+        console.log('[VV][APPEND] transferAction=send amount/note =', amount, note);
+
+        if (amount > 0) {
+          const alreadyExists = thread.some(item => {
+            const same = (
+              !item.isMe &&
+              item.type === 'transfer' &&
+              Number(item.amount || 0) === amount &&
+              String(item.note || '').trim() === note &&
+              item.status === '待收款'
+            );
+            if (same) {
+              console.log('[VV][APPEND] existing transfer matched item =', item);
+            }
+            return same;
+          });
+
+          console.log('[VV][APPEND] transfer alreadyExists =', alreadyExists);
+
+          if (!alreadyExists && typeof receiveTransferFromAI === 'function') {
+            receiveTransferFromAI(chatId, amount, note);
           }
-          return same;
-        });
-
-        console.log('[VV][APPEND] transfer alreadyExists =', alreadyExists);
-
-        if (!alreadyExists) {
-          receiveTransferFromAI(chatId, amount, note);
         }
       }
     }
-  }
 
-  if (chatData.target && rel && !rel.name) {
-    rel.name = chatData.target;
-  }
+    if (chatData.target && rel && !rel.name) {
+      rel.name = chatData.target;
+    }
 
-  if (chatData.myBubble) setting.myBubble = chatData.myBubble;
-  if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
+    if (chatData.myBubble) setting.myBubble = chatData.myBubble;
+    if (chatData.targetBubble) setting.targetBubble = chatData.targetBubble;
 
-  if (chatData.targetAvatarId && (
-    String(chatData.targetAvatarId).startsWith('idb:') ||
-    String(chatData.targetAvatarId).startsWith('http') ||
-    String(chatData.targetAvatarId).startsWith('data:image/')
-  )) {
-    setting.theirAvatar = chatData.targetAvatarId;
-    setting.targetAvatarId = chatData.targetAvatarId;
-  }
+    if (chatData.targetAvatarId && (
+      String(chatData.targetAvatarId).startsWith('idb:') ||
+      String(chatData.targetAvatarId).startsWith('http') ||
+      String(chatData.targetAvatarId).startsWith('data:image/')
+    )) {
+      setting.theirAvatar = chatData.targetAvatarId;
+      setting.targetAvatarId = chatData.targetAvatarId;
+    }
 
-  if (chatData.target) setting.target = chatData.target;
+    if (chatData.target) setting.target = chatData.target;
 
-  if (leftMsgs.length > 0) {
-    const lastTextMsg = [...leftMsgs].reverse().find(item => String(item.content || '').trim());
-    const previewText = lastTextMsg
-      ? lastTextMsg.content
-      : (leftMsgs[leftMsgs.length - 1].transferAction ? '[转账消息]' : '[新消息]');
+    if (leftMsgs.length > 0) {
+      const lastTextMsg = [...leftMsgs].reverse().find(item => String(item.content || '').trim());
+      const previewText = lastTextMsg
+        ? lastTextMsg.content
+        : (leftMsgs[leftMsgs.length - 1].transferAction ? '[转账消息]' : '[新消息]');
 
-    console.log('[VV][APPEND] updateLastMsg previewText =', previewText);
-    updateLastMsg(chatId, previewText, time, 'direct');
-  }
+      console.log('[VV][APPEND] updateLastMsg previewText =', previewText);
 
-  if (appendedCount > 0) {
-    console.log('[VV][APPEND] clear pending flags because appendedCount > 0, chatId =', chatId);
-
-    pendingReplyTargets[chatId] = false;
-
-    thread.forEach(m => {
-      if (m.isMe && !m.recalled && m.pendingForReply) {
-        m.pendingForReply = false;
+      if (typeof updateLastMsg === 'function') {
+        updateLastMsg(chatId, previewText, time, 'direct');
+      } else {
+        console.warn('[VV][APPEND] updateLastMsg not available');
       }
-    });
-  } else {
-    console.log('[VV][APPEND] no new left text appended, keep pending state, chatId =', chatId, 'pending =', pendingReplyTargets?.[chatId]);
+    }
+
+    if (appendedCount > 0) {
+      console.log('[VV][APPEND] clear pending flags because appendedCount > 0, chatId =', chatId);
+
+      pendingReplyTargets[chatId] = false;
+
+      thread.forEach(m => {
+        if (m.isMe && !m.recalled && m.pendingForReply) {
+          m.pendingForReply = false;
+        }
+      });
+    } else {
+      console.log('[VV][APPEND] no new left text appended, keep pending state, chatId =', chatId, 'pending =', pendingReplyTargets?.[chatId]);
+    }
+
+    if (typeof saveAll === 'function') {
+      saveAll();
+    } else {
+      console.warn('[VV][APPEND] saveAll not available');
+    }
+
+    console.log('[VV][APPEND] appendedCount =', appendedCount);
+    console.log('[VV][APPEND] final thread =', thread.slice());
+    console.log('[VV][APPEND] pending after append =', pendingReplyTargets?.[chatId]);
+
+    return appendedCount;
+  } catch (err) {
+    console.error('[VV][APPEND] fatal error:', err, chatData);
+    return 0;
   }
-
-  saveAll();
-
-  console.log('[VV][APPEND] appendedCount =', appendedCount);
-  console.log('[VV][APPEND] final thread =', thread.slice());
-  console.log('[VV][APPEND] pending after append =', pendingReplyTargets?.[chatId]);
-
-  return appendedCount;
 }
 
 async function handleVVChatSyncRaw(payload) {
