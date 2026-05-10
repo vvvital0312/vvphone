@@ -959,3 +959,42 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   position: relative;
   z-index: 1;
 }
+
+/* 已绑定角色列表项 */
+.bridge-list-item {
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  background: #fff;
+  transition: background 0.2s;
+}
+.bridge-list-item:active,
+.bridge-list-item.selected {
+  background: #d4e6ff;
+  border-color: #5B86FF;
+}
+.bridge-list-item .bridge-item-name {
+  font-weight: bold;
+  color: #111;
+}
+.bridge-list-item .bridge-item-count {
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+.bridge-list-empty {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 20px 0;
+}
+
+/* 聊天顶栏长按提示 */
+.chat-title {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}

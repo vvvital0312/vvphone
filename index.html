@@ -311,6 +311,32 @@
           </div>
 
           <div class="setting-group">
+            <div class="setting-group-title">时间设置</div>
+            <div class="setting-row">
+              <div class="setting-row-left">
+                <div class="setting-row-title">时间模式</div>
+              </div>
+              <select id="timeModeSelect" onchange="playClickSound();onTimeModeChange()" title="时间模式选择">
+                <option value="story">跟随剧情</option>
+                <option value="manual">手动设置</option>
+                <option value="real">跟随现实</option>
+              </select>
+            </div>
+            <div class="setting-row" id="manualTimeRow" style="display:none;">
+              <div class="setting-row-left">
+                <div class="setting-row-title">设置时间</div>
+              </div>
+              <input type="datetime-local" id="manualTimeInput" onchange="onManualTimeChange()" style="font-size:13px;padding:6px 8px;border:1px solid #000;border-radius:8px;background:#fff;">
+            </div>
+            <div class="setting-row" id="currentTimePreview">
+              <div class="setting-row-left">
+                <div class="setting-row-title">当前时间</div>
+              </div>
+              <div id="timePreviewValue" style="font-size:13px;color:#555;">--</div>
+            </div>
+          </div>
+
+          <div class="setting-group">
             <div class="setting-group-title">关系与状态</div>
             <div class="setting-row">
               <div class="setting-row-left">
@@ -446,14 +472,53 @@
       </div>
     </div>
 
+    <!-- 添加联系人 - 主选择弹窗 -->
     <div id="addContactDialog" class="dialog">
       <div class="dialog-content">
         <h3>添加联系人</h3>
-        <input type="text" id="contactName" placeholder="请输入角色名称">
-        <input type="text" id="contactBridgeName" placeholder="绑定角色名（可与上面相同）">
+        <div class="dialog-buttons" style="flex-direction:column;gap:12px;">
+          <button onclick="playClickSound();closeDialog('addContactDialog');showDialog('existingBridgeDialog')" style="width:100%;padding:12px;font-size:15px;">已绑定角色（新建会话）</button>
+          <button onclick="playClickSound();closeDialog('addContactDialog');showDialog('newBridgeDialog')" style="width:100%;padding:12px;font-size:15px;">新绑定角色</button>
+          <button onclick="playClickSound();closeDialog('addContactDialog')" style="width:100%;padding:12px;font-size:15px;color:#999;">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 已绑定角色 - 选择并新建会话 -->
+    <div id="existingBridgeDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>选择已绑定角色</h3>
+        <div id="existingBridgeList" style="max-height:200px;overflow-y:auto;margin-bottom:12px;"></div>
+        <input type="text" id="existingBridgeDisplayName" placeholder="备注名（选填，默认同角色名）">
         <div class="dialog-buttons">
-          <button onclick="playClickSound();addContact()">确认添加</button>
-          <button onclick="playClickSound();closeDialog('addContactDialog')">取消</button>
+          <button onclick="playClickSound();addContactFromExisting()">新建会话</button>
+          <button onclick="playClickSound();closeDialog('existingBridgeDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新绑定角色 -->
+    <div id="newBridgeDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>新绑定角色</h3>
+        <input type="text" id="newBridgeName" placeholder="绑定角色名（必填，ST角色名）">
+        <input type="text" id="newBridgeDisplayName" placeholder="备注名（选填，默认同角色名）">
+        <div class="dialog-buttons">
+          <button onclick="playClickSound();addContactFromNew()">确认添加</button>
+          <button onclick="playClickSound();closeDialog('newBridgeDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 修改备注弹窗 -->
+    <div id="renameDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>修改备注</h3>
+        <input type="text" id="renameInput" placeholder="输入新备注名">
+        <div style="font-size:12px;color:#888;margin-bottom:12px;" id="renameInfo"></div>
+        <div class="dialog-buttons">
+          <button onclick="playClickSound();confirmRename()">确认</button>
+          <button onclick="playClickSound();closeDialog('renameDialog')">取消</button>
         </div>
       </div>
     </div>

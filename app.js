@@ -1525,6 +1525,10 @@ async function handleVVChatSyncRaw(payload) {
   }
 
   const incomingChatId = String(parsed.chatId || '').trim();
+    // 记录剧情时间
+    if (parsed.time) {
+      updateStoryTime(incomingChatId, parsed.time);
+    }
   const incomingName = String(parsed.target || '').trim();
   parsed.chatId = incomingChatId;
 
@@ -2064,14 +2068,198 @@ function initProfilePage() {
   updateProfileUI();
 }
 
-function getNowTime() {
+// ===== 时间系统 =====
+
+// 时间模式存储：每个 chatId 独立
+// timeSettings[chatId] = {
+//   mode: 'story' | 'manual' | 'real',   // 默认 'story'
+//   storyTime: '5月10日 22:30',           // AI 最后回复的剧情时间
+//   manualTime: '2026-05-10T22:30',       // 手动设置的时间（ISO格式）
+//   storyBaseReal: 1234567890000           // 记录收到剧情时间时的真实时间戳
+// }
+
+if (typeof window.timeSettings !== 'object' || !window.timeSettings) {
+  window.timeSettings = {};
+  // 尝试从 localStorage 恢复
+  try {
+    const saved = localStorage.getItem('vv_timeSettings');
+    if (saved) window.timeSettings = JSON.parse(saved);
+  } catch(e) {}
+}
+
+function saveTimeSettings() {
+  try {
+    localStorage.setItem('vv_timeSettings', JSON.stringify(window.timeSettings));
+  } catch(e) {}
+}
+
+function getTimeSetting(chatId) {
+  if (!chatId) return { mode: 'real' };
+  if (!window.timeSettings[chatId]) {
+    window.timeSettings[chatId] = { mode: 'story' };
+  }
+  return window.timeSettings[chatId];
+}
+
+function setTimeMode(chatId, mode) {
+  if (!chatId) return;
+  const ts = getTimeSetting(chatId);
+  ts.mode = mode;
+  saveTimeSettings();
+  console.log('[VV][TIME] setTimeMode:', chatId, mode);
+}
+
+// AI 回复时调用：记录剧情时间
+function updateStoryTime(chatId, timeStr) {
+  if (!chatId || !timeStr) return;
+  const ts = getTimeSetting(chatId);
+  ts.storyTime = String(timeStr).trim();
+  ts.storyBaseReal = Date.now();
+  saveTimeSettings();
+  console.log('[VV][TIME] updateStoryTime:', chatId, timeStr);
+}
+
+// 手动设置时调用
+function setManualTime(chatId, isoString) {
+  if (!chatId) return;
+  const ts = getTimeSetting(chatId);
+  ts.manualTime = isoString;
+  saveTimeSettings();
+  console.log('[VV][TIME] setManualTime:', chatId, isoString);
+}
+
+// 解析中文时间标签为 Date 对象（尽力解析）
+function parseChineseTimeLabel(label) {
+  if (!label) return null;
+  const str = String(label).trim();
+
+  // 匹配 "X月X日 HH:MM"
+  const m = str.match(/(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+
   const now = new Date();
+  const year = now.getFullYear();
+  const month = parseInt(m[1], 10) - 1;
+  const day = parseInt(m[2], 10);
+  const hour = parseInt(m[3], 10);
+  const minute = parseInt(m[4], 10);
+
+  const d = new Date(year, month, day, hour, minute, 0, 0);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// 根据剧情时间 + 经过的真实时间差，计算当前剧情时间
+function getStoryDate(chatId) {
+  const ts = getTimeSetting(chatId);
+  if (!ts.storyTime) return null;
+
+  const base = parseChineseTimeLabel(ts.storyTime);
+  if (!base) return null;
+
+  // 如果有基准真实时间，加上经过的时间差
+  if (ts.storyBaseReal) {
+    const elapsed = Date.now() - ts.storyBaseReal;
+    return new Date(base.getTime() + elapsed);
+  }
+
+  return base;
+}
+
+// 核心：获取当前聊天的时间（替代原来的 new Date()）
+function getChatNow(chatId) {
+  const cid = chatId || (typeof currentChatId !== 'undefined' ? currentChatId : '');
+  const ts = getTimeSetting(cid);
+
+  if (ts.mode === 'manual' && ts.manualTime) {
+    const d = new Date(ts.manualTime);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  if (ts.mode === 'story' || ts.mode === undefined) {
+    const storyDate = getStoryDate(cid);
+    if (storyDate) return storyDate;
+    // story 模式但还没有剧情时间，fallback 到现实时间
+  }
+
+  // real 模式或 fallback
+  return new Date();
+}
+
+// ===== 替换原来的时间函数 =====
+
+function getNowTime(chatId) {
+  const now = getChatNow(chatId);
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
-function getNowFullLabel() {
-  const now = new Date();
+function getNowFullLabel(chatId) {
+  const now = getChatNow(chatId);
   return `${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+// ===== 时间设置交互 =====
+
+function onTimeModeChange() {
+  if (!currentChatId) return;
+  const select = document.getElementById('timeModeSelect');
+  if (!select) return;
+
+  const mode = select.value;
+  setTimeMode(currentChatId, mode);
+
+  // 显示/隐藏手动时间输入
+  const manualRow = document.getElementById('manualTimeRow');
+  if (manualRow) {
+    manualRow.style.display = mode === 'manual' ? 'flex' : 'none';
+  }
+
+  updateTimePreview();
+}
+
+function onManualTimeChange() {
+  if (!currentChatId) return;
+  const input = document.getElementById('manualTimeInput');
+  if (!input || !input.value) return;
+
+  setManualTime(currentChatId, input.value);
+  updateTimePreview();
+}
+
+function updateTimePreview() {
+  const el = document.getElementById('timePreviewValue');
+  if (!el) return;
+
+  const chatId = currentChatId || '';
+  const ts = getTimeSetting(chatId);
+  const now = getChatNow(chatId);
+
+  const timeStr = `${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  let modeLabel = '';
+  if (ts.mode === 'story') {
+    modeLabel = ts.storyTime ? '（剧情）' : '（等待剧情时间…）';
+  } else if (ts.mode === 'manual') {
+    modeLabel = '（手动）';
+  } else {
+    modeLabel = '（现实）';
+  }
+
+  el.textContent = timeStr + ' ' + modeLabel;
+}
+
+let _timePreviewTimer = null;
+
+function startTimePreviewUpdate() {
+  stopTimePreviewUpdate();
+  updateTimePreview();
+  _timePreviewTimer = setInterval(updateTimePreview, 10000);
+}
+
+function stopTimePreviewUpdate() {
+  if (_timePreviewTimer) {
+    clearInterval(_timePreviewTimer);
+    _timePreviewTimer = null;
+  }
 }
 
 function isSameTimeDivider(a, b) {
@@ -2497,6 +2685,7 @@ function backToChatDetail() {
   if (a) a.style.display = 'none';
   if (b) b.style.display = 'block';
   renderMessages();
+  stopTimePreviewUpdate();
 }
 
 function closeCallPage() {
@@ -2689,13 +2878,16 @@ function generateItem(item, type) {
     ? (getChatSetting(item.id).theirAvatar || item.avatar || DEFAULT_AVATAR)
     : (item.avatar || DEFAULT_AVATAR);
 
+  // 优先显示 displayName（备注），其次 name，最后 bridgeName
+  const showName = item.displayName || item.name || item.bridgeName || '联系人';
+
   return `
     <div class="chat-item" data-id="${item.id}" onclick="openChat('${item.id}','${type}')" oncontextmenu="showOperationMenu(event,'${item.id}')">
       ${item.isSticky ? '<div class="sticky-tag">置顶</div>' : ''}
       <div class="chat-avatar"><img ${buildMediaSrcAttrs(avatar)} alt=""></div>
       <div class="chat-info">
         <div class="chat-name-row">
-          <div class="chat-name">${escapeHTML(item.name)}${rel.blockedByMe ? '（已拉黑）' : ''}</div>
+          <div class="chat-name">${escapeHTML(showName)}${rel.blockedByMe ? '（已拉黑）' : ''}</div>
           <div class="chat-type-badge">${typeLabel}</div>
         </div>
         <div class="chat-time">${escapeHTML(item.lastTime || '')}</div>
@@ -2993,30 +3185,115 @@ function deleteFeedComment(postId, commentIndex) {
   renderFeedList();
 }
 
-function addContact() {
-  const name = document.getElementById('contactName')?.value.trim();
-  const bridgeName = document.getElementById('contactBridgeName')?.value.trim();
+// ===== 获取所有不重复的已绑定角色列表 =====
+function getUniqueBridgeNames() {
+  if (!Array.isArray(contactList)) return [];
+  const map = {};
+  contactList.forEach(item => {
+    const bn = String(item.bridgeName || item.name || '').trim();
+    if (!bn) return;
+    if (!map[bn]) {
+      map[bn] = { bridgeName: bn, count: 0 };
+    }
+    map[bn].count++;
+  });
+  return Object.values(map);
+}
 
-  if (!name) {
-    alert('请输入角色名称！');
+// ===== 打开"已绑定角色"弹窗时，渲染列表 =====
+let _selectedExistingBridge = '';
+
+function renderExistingBridgeList() {
+  const container = document.getElementById('existingBridgeList');
+  if (!container) return;
+
+  const bridges = getUniqueBridgeNames();
+  _selectedExistingBridge = '';
+
+  if (bridges.length === 0) {
+    container.innerHTML = '<div class="bridge-list-empty">暂无已绑定角色，请选择"新绑定角色"</div>';
     return;
   }
 
-  if (contactList.find(i => i.name === name)) {
-    alert('这个联系人已经存在了');
+  container.innerHTML = bridges.map(b => {
+    return `<div class="bridge-list-item" onclick="selectExistingBridge(this, '${escapeHTML(b.bridgeName)}')" data-bridge="${escapeHTML(b.bridgeName)}">
+      <div class="bridge-item-name">${escapeHTML(b.bridgeName)}</div>
+      <div class="bridge-item-count">已有 ${b.count} 个会话</div>
+    </div>`;
+  }).join('');
+}
+
+function selectExistingBridge(el, bridgeName) {
+  _selectedExistingBridge = bridgeName;
+
+  // 高亮选中
+  const container = document.getElementById('existingBridgeList');
+  if (container) {
+    container.querySelectorAll('.bridge-list-item').forEach(item => {
+      item.classList.remove('selected');
+    });
+  }
+  el.classList.add('selected');
+
+  // 自动填入默认备注名
+  const input = document.getElementById('existingBridgeDisplayName');
+  if (input && !input.value.trim()) {
+    input.placeholder = '备注名（默认：' + bridgeName + '）';
+  }
+}
+
+// ===== 从已绑定角色新建会话 =====
+function addContactFromExisting() {
+  if (!_selectedExistingBridge) {
+    alert('请先选择一个已绑定角色');
     return;
   }
 
-  const id = 'c' + Date.now();
+  const bridgeName = _selectedExistingBridge;
+  const displayName = document.getElementById('existingBridgeDisplayName')?.value.trim() || bridgeName;
+
+  createNewContact(bridgeName, displayName);
+
+  // 清理
+  _selectedExistingBridge = '';
+  const input = document.getElementById('existingBridgeDisplayName');
+  if (input) input.value = '';
+  closeDialog('existingBridgeDialog');
+}
+
+// ===== 新绑定角色 =====
+function addContactFromNew() {
+  const bridgeName = document.getElementById('newBridgeName')?.value.trim();
+  const displayName = document.getElementById('newBridgeDisplayName')?.value.trim();
+
+  if (!bridgeName) {
+    alert('请输入绑定角色名！');
+    return;
+  }
+
+  createNewContact(bridgeName, displayName || bridgeName);
+
+  // 清理
+  const b = document.getElementById('newBridgeName');
+  if (b) b.value = '';
+  const d = document.getElementById('newBridgeDisplayName');
+  if (d) d.value = '';
+  closeDialog('newBridgeDialog');
+}
+
+// ===== 核心：创建新联系人/会话 =====
+function createNewContact(bridgeName, displayName) {
+  const id = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   const time = getNowTime();
 
   contactList.unshift({
     id,
-    name,
+    name: displayName,                     // 兼容旧代码
+    displayName: displayName,              // 备注名
+    bridgeName: bridgeName,                // 绑定角色名
     avatar: DEFAULT_AVATAR,
     isSticky: false,
     lastTime: time,
-    bridgeName: bridgeName || name,
     threadType: 'direct'
   });
 
@@ -3036,7 +3313,114 @@ function addContact() {
 
   saveAll();
   renderChatList();
-  closeDialog('addContactDialog');
+
+  console.log('[VV] createNewContact:', { id, bridgeName, displayName });
+}
+
+// ===== 覆盖 showDialog，让已绑定角色弹窗自动渲染列表 =====
+const _origShowDialog = showDialog;
+showDialog = function(dialogId) {
+  if (dialogId === 'existingBridgeDialog') {
+    renderExistingBridgeList();
+  }
+  _origShowDialog(dialogId);
+};
+
+// ===== 长按改备注 =====
+let _longPressTimer = null;
+
+function initChatTitleLongPress() {
+  const titleEl = document.getElementById('chatDetailName');
+  if (!titleEl) return;
+  if (titleEl._longPressInited) return;
+  titleEl._longPressInited = true;
+
+  // 触摸设备
+  titleEl.addEventListener('touchstart', function(e) {
+    _longPressTimer = setTimeout(function() {
+      openRenameDialog();
+    }, 600);
+  }, { passive: true });
+
+  titleEl.addEventListener('touchend', function() {
+    clearTimeout(_longPressTimer);
+  });
+
+  titleEl.addEventListener('touchmove', function() {
+    clearTimeout(_longPressTimer);
+  });
+
+  // 鼠标设备
+  titleEl.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    _longPressTimer = setTimeout(function() {
+      openRenameDialog();
+    }, 600);
+  });
+
+  titleEl.addEventListener('mouseup', function() {
+    clearTimeout(_longPressTimer);
+  });
+
+  titleEl.addEventListener('mouseleave', function() {
+    clearTimeout(_longPressTimer);
+  });
+}
+
+function openRenameDialog() {
+  if (!currentChatId) return;
+
+  const list = currentChatType === 'group' ? groupList : contactList;
+  const item = list.find(i => i.id === currentChatId);
+  if (!item) return;
+
+  const input = document.getElementById('renameInput');
+  const info = document.getElementById('renameInfo');
+
+  if (input) {
+    input.value = item.displayName || item.name || '';
+  }
+  if (info) {
+    info.textContent = '绑定角色：' + (item.bridgeName || item.name || '未知');
+  }
+
+  showDialog('renameDialog');
+}
+
+function confirmRename() {
+  if (!currentChatId) return;
+
+  const input = document.getElementById('renameInput');
+  const newName = input?.value.trim();
+
+  if (!newName) {
+    alert('备注名不能为空');
+    return;
+  }
+
+  const list = currentChatType === 'group' ? groupList : contactList;
+  const item = list.find(i => i.id === currentChatId);
+  if (!item) return;
+
+  item.displayName = newName;
+  item.name = newName;  // 兼容旧代码
+
+  // 更新顶栏
+  const title = document.getElementById('chatDetailName');
+  if (title) title.innerText = newName;
+
+  saveAll();
+  renderChatList();
+  closeDialog('renameDialog');
+
+  console.log('[VV] renamed:', { chatId: currentChatId, newName, bridgeName: item.bridgeName });
+}
+
+// ===== 页面加载后初始化长按 =====
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initChatTitleLongPress);
+} else {
+  initChatTitleLongPress();
 }
 
 function addGroup() {
@@ -3125,7 +3509,9 @@ async function openChat(id, type = 'direct') {
   const a = document.getElementById('contactPage');
   const b = document.getElementById('chatDetailPage');
 
-  if (title) title.innerText = item.name;
+  // 优先显示备注名
+  const showName = item.displayName || item.name || item.bridgeName || '联系人';
+  if (title) title.innerText = showName;
   if (a) a.style.display = 'none';
   if (b) b.style.display = 'block';
 
@@ -3133,6 +3519,9 @@ async function openChat(id, type = 'direct') {
   await applyCurrentChatBackground();
   await renderMessages();
   renderChatList?.();
+
+  // 初始化长按改备注
+  initChatTitleLongPress();
 }
 
 async function applyCurrentChatBackground() {
@@ -4988,7 +5377,7 @@ function confirmTransfer() {
 
   closeDialog('transferDialog');
   closeEmojiPanel?.();
-  triggerAIReplySoon(80);
+  //triggerAIReplySoon(80);
 }
 
 function startCallFromDialog() {
@@ -5307,6 +5696,24 @@ async function openChatSettingPage() {
 
   document.getElementById('chatDetailPage').style.display = 'none';
   document.getElementById('chatSettingPage').style.display = 'block';
+    // 初始化时间设置 UI
+  const ts = getTimeSetting(currentChatId);
+  const timeModeSelect = document.getElementById('timeModeSelect');
+  if (timeModeSelect) {
+    timeModeSelect.value = ts.mode || 'story';
+  }
+
+  const manualRow = document.getElementById('manualTimeRow');
+  if (manualRow) {
+    manualRow.style.display = ts.mode === 'manual' ? 'flex' : 'none';
+  }
+
+  const manualInput = document.getElementById('manualTimeInput');
+  if (manualInput && ts.manualTime) {
+    manualInput.value = ts.manualTime;
+  }
+
+  startTimePreviewUpdate();
 }
 
 function toggleBlockCurrentContact() {
