@@ -1131,12 +1131,43 @@ function parseVVChatBlocks(raw, fallback = {}) {
     chatBgKey: chat.chatBgKey
   });
 
-  const msgRegex = /\[消息\]([\s\S]*?)\[\/消息\]/gi;
-  let m;
-  let msgIndex = 0;
+    // ===== 修复：支持无闭合标签的 [消息] 块 =====
+    const msgBlocks = [];
+    const msgSplitRegex = /\[消息\]/gi;
+    let splitMatch;
+    const splitPositions = [];
 
-  while ((m = msgRegex.exec(full))) {
-    const block = String(m[1] || '').replace(/\r/g, '').trim();
+    while ((splitMatch = msgSplitRegex.exec(full))) {
+      splitPositions.push(splitMatch.index + splitMatch[0].length);
+    }
+
+    for (let si = 0; si < splitPositions.length; si++) {
+      const start = splitPositions[si];
+      let end;
+      if (si + 1 < splitPositions.length) {
+        // 到下一个 [消息] 标签之前
+        const nextTagStart = full.lastIndexOf('[消息]', splitPositions[si + 1]);
+        end = nextTagStart > start ? nextTagStart : splitPositions[si + 1];
+      } else {
+        // 最后一个：到 [/VV_CHAT_SYNC] 或 [/消息] 或末尾
+        const closeSyncIdx = full.indexOf('[/VV_CHAT_SYNC]', start);
+        const closeMsgIdx = full.indexOf('[/消息]', start);
+        if (closeMsgIdx !== -1 && (closeSyncIdx === -1 || closeMsgIdx < closeSyncIdx)) {
+          end = closeMsgIdx;
+        } else if (closeSyncIdx !== -1) {
+          end = closeSyncIdx;
+        } else {
+          end = full.length;
+        }
+      }
+      const block = full.substring(start, end).replace(/\[\/消息\]\s*$/i, '').trim();
+      if (block) msgBlocks.push(block);
+    }
+
+  console.log('[VV][parseVVChatBlocks] msgBlocks found:', msgBlocks.length);
+
+  let msgIndex = 0;
+  for (const block of msgBlocks) {
 
     console.log('[VV] found [消息] block >>>');
     console.log(block);
@@ -1170,6 +1201,7 @@ function parseVVChatBlocks(raw, fallback = {}) {
     chat.messages.push(msg);
     msgIndex++;
   }
+  // ===== 修复结束 =====
 
   chat.messages = chat.messages.filter(Boolean);
 
