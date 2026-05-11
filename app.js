@@ -2263,7 +2263,26 @@ function stopTimePreviewUpdate() {
 }
 
 function isSameTimeDivider(a, b) {
-  return a === b;
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  // 解析 "X月X日 HH:MM" 格式为分钟数
+  function parseToMinutes(str) {
+    const match = str.match(/(\d+)月(\d+)日\s*(\d+):(\d+)/);
+    if (!match) return NaN;
+    const month = parseInt(match[1]);
+    const day = parseInt(match[2]);
+    const hour = parseInt(match[3]);
+    const minute = parseInt(match[4]);
+    return ((month * 31 + day) * 24 + hour) * 60 + minute;
+  }
+
+  const minA = parseToMinutes(a);
+  const minB = parseToMinutes(b);
+
+  if (isNaN(minA) || isNaN(minB)) return a === b;
+
+  return Math.abs(minA - minB) < 3;
 }
 
 function splitInputToChunks(text) {
@@ -3618,10 +3637,12 @@ async function openChatDetail(chatId, forceName = '') {
 
   if (typeof renderMessages === 'function') {
     await renderMessages();
+    applyBubbleToChat(chatId);
 
     setTimeout(() => {
       if (currentChatId === chatId && typeof renderMessages === 'function') {
         renderMessages();
+        applyBubbleToChat(chatId);
       }
       if (typeof flushPendingVVChatSyncQueue === 'function') {
         flushPendingVVChatSyncQueue();
@@ -3631,6 +3652,7 @@ async function openChatDetail(chatId, forceName = '') {
     setTimeout(() => {
       if (currentChatId === chatId && typeof renderMessages === 'function') {
         renderMessages();
+        applyBubbleToChat(chatId);
       }
       if (typeof flushPendingVVChatSyncQueue === 'function') {
         flushPendingVVChatSyncQueue();
@@ -3797,7 +3819,6 @@ function renderMessageOriginal(m) {
       return `
         <div class="message-bubble image-bubble">
           <img ${buildMediaSrcAttrs(m.src)} alt="">
-          ${m.desc ? `<div class="image-desc">${escapeHTML(m.desc)}</div>` : ''}
         </div>`;
 
     case 'voice':
@@ -3898,6 +3919,10 @@ async function renderMessages() {
 
   await hydrateMediaRefs(area);
   console.log('[renderMessages] hydrate done');
+  // 应用气泡样式
+  if (typeof applyBubbleToChat === 'function') {
+    applyBubbleToChat(currentChatId);
+  }
 
   area.scrollTop = area.scrollHeight;
 }
@@ -4172,6 +4197,7 @@ function sendMessage() {
   input.value = '';
   clearComposerDraft();
   renderMessages();
+  applyBubbleToChat(currentChatId);
   saveAll();
   closeEmojiPanel();
 }
@@ -6662,6 +6688,174 @@ function closeCropDialog() {
   document.querySelectorAll('.page, .app-container, .tab-bar').forEach(el => {
     el.style.pointerEvents = '';
   });
+}
+
+/* ===== 气泡设置功能 ===== */
+
+let currentBubbleTab = 'ai';
+
+let bubbleDraft = {
+  ai:   { bgColor: '#ffffff', textColor: '#000000', radius: 18 },
+  user: { bgColor: '#0c6cde', textColor: '#ffffff', radius: 18 }
+};
+
+// ---------- 默认值 ----------
+const DEFAULT_BUBBLE = {
+  ai:   { bgColor: '#ffffff', textColor: '#000000', radius: 18 },
+  user: { bgColor: '#0c6cde', textColor: '#ffffff', radius: 18 }
+};
+
+// ---------- 读取当前会话的气泡设置 ----------
+function getBubbleSettings(contactId) {
+  const id = contactId || currentChatId;
+  if (!id) return JSON.parse(JSON.stringify(DEFAULT_BUBBLE));
+
+  const cs = chatSettings[id];
+  if (cs && cs.bubble) {
+    // 合并默认值，防止缺字段
+    return {
+      ai: Object.assign({}, DEFAULT_BUBBLE.ai, cs.bubble.ai || {}),
+      user: Object.assign({}, DEFAULT_BUBBLE.user, cs.bubble.user || {})
+    };
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_BUBBLE));
+}
+
+// ---------- 保存气泡设置到 chatSettings ----------
+function saveBubbleToStorage(contactId, bubbleData) {
+  const id = contactId || currentChatId;
+  if (!id) return;
+
+  if (!chatSettings[id]) {
+    chatSettings[id] = {};
+  }
+  chatSettings[id].bubble = JSON.parse(JSON.stringify(bubbleData));
+  saveAll();
+}
+
+// ---------- 打开气泡面板 ----------
+function openBubbleSettingPanel() {
+  const settings = getBubbleSettings(currentChatId);
+  bubbleDraft = JSON.parse(JSON.stringify(settings));
+  currentBubbleTab = 'ai';
+
+  updateBubbleTabUI();
+  updateBubblePreview();
+
+  document.getElementById('bubbleSettingPanel').style.display = 'flex';
+}
+
+// ---------- 关闭面板 ----------
+function closeBubbleSettingPanel() {
+  document.getElementById('bubbleSettingPanel').style.display = 'none';
+}
+
+// ---------- 切换Tab ----------
+function switchBubbleTab(tab) {
+  currentBubbleTab = tab;
+  updateBubbleTabUI();
+  updateBubblePreview();
+}
+
+// ---------- 更新Tab和控件 ----------
+function updateBubbleTabUI() {
+  document.querySelectorAll('.bubble-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === currentBubbleTab);
+  });
+
+  const data = bubbleDraft[currentBubbleTab];
+
+  document.getElementById('bubbleBgColorPicker').value = data.bgColor;
+  document.getElementById('bubbleTextColorPicker').value = data.textColor;
+  document.getElementById('bubbleRadiusRange').value = data.radius;
+  document.getElementById('bubbleBgHex').textContent = data.bgColor.toUpperCase();
+  document.getElementById('bubbleTextHex').textContent = data.textColor.toUpperCase();
+  document.getElementById('bubbleRadiusValue').textContent = data.radius + 'px';
+}
+
+// ---------- 颜色/圆角变化 ----------
+function onBubbleColorChange() {
+  const bg = document.getElementById('bubbleBgColorPicker').value;
+  const text = document.getElementById('bubbleTextColorPicker').value;
+  const radius = parseInt(document.getElementById('bubbleRadiusRange').value);
+
+  bubbleDraft[currentBubbleTab] = { bgColor: bg, textColor: text, radius: radius };
+
+  document.getElementById('bubbleBgHex').textContent = bg.toUpperCase();
+  document.getElementById('bubbleTextHex').textContent = text.toUpperCase();
+  document.getElementById('bubbleRadiusValue').textContent = radius + 'px';
+
+  updateBubblePreview();
+}
+
+// ---------- 更新预览 ----------
+function updateBubblePreview() {
+  const box = document.getElementById('bubblePreviewBox');
+  const data = bubbleDraft[currentBubbleTab];
+
+  box.style.background = data.bgColor;
+  box.style.color = data.textColor;
+  box.style.borderRadius = data.radius + 'px';
+  box.textContent = currentBubbleTab === 'ai' ? '角色预览' : '我的预览';
+}
+
+// ---------- 重置 ----------
+function resetBubbleSetting() {
+  if (!confirm('确定要重置气泡格式为默认吗？')) return;
+
+  bubbleDraft = JSON.parse(JSON.stringify(DEFAULT_BUBBLE));
+  updateBubbleTabUI();
+  updateBubblePreview();
+}
+
+// ---------- 保存 ----------
+function saveBubbleSetting() {
+  saveBubbleToStorage(currentChatId, bubbleDraft);
+  applyBubbleToChat(currentChatId);
+  closeBubbleSettingPanel();
+}
+
+// ---------- 应用气泡到聊天页 ----------
+function applyBubbleToChat(contactId) {
+  const settings = getBubbleSettings(contactId);
+  const aiS = settings.ai;
+  const userS = settings.user;
+
+  // AI气泡
+  document.querySelectorAll('.message-row:not(.me) .message-bubble').forEach(el => {
+    if (el.classList.contains('sticker-bubble') || el.classList.contains('image-bubble')) return;
+    el.style.background = aiS.bgColor;
+    el.style.color = aiS.textColor;
+    el.style.borderRadius = aiS.radius + 'px';
+  });
+
+  // 用户气泡
+  document.querySelectorAll('.message-row.me .message-bubble').forEach(el => {
+    if (el.classList.contains('sticker-bubble') || el.classList.contains('image-bubble')) return;
+    el.style.background = userS.bgColor;
+    el.style.color = userS.textColor;
+    el.style.borderRadius = userS.radius + 'px';
+  });
+
+  // 联动 input-row button
+  const sendBtn = document.querySelector('.input-row button');
+  if (sendBtn) {
+    sendBtn.style.background = userS.bgColor;
+    sendBtn.style.color = userS.textColor;
+  }
+}
+
+// ---------- 给单个新消息应用气泡样式 ----------
+function applyBubbleToSingleMessage(msgEl, isUser, contactId) {
+  const settings = getBubbleSettings(contactId);
+  const s = isUser ? settings.user : settings.ai;
+  const bubble = msgEl.querySelector('.message-bubble');
+
+  if (bubble && !bubble.classList.contains('sticker-bubble') && !bubble.classList.contains('image-bubble')) {
+    bubble.style.background = s.bgColor;
+    bubble.style.color = s.textColor;
+    bubble.style.borderRadius = s.radius + 'px';
+  }
 }
 
 window.addEventListener('beforeunload', () => {

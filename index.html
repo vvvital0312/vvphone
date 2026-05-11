@@ -178,14 +178,6 @@
 
               <div class="profile-setting-item">
                 <div class="profile-setting-text">
-                  <div class="profile-setting-title">聊天气泡</div>
-                  <div class="profile-setting-desc">下一步接入颜色与形状设置</div>
-                </div>
-                <div class="profile-setting-value">待开发</div>
-              </div>
-
-              <div class="profile-setting-item">
-                <div class="profile-setting-text">
                   <div class="profile-setting-title">界面字体</div>
                   <div class="profile-setting-desc">下一步接入字体切换</div>
                 </div>
@@ -234,7 +226,7 @@
         <div class="composer-attachments" id="composerAttachments"></div>
 
         <div class="input-row">
-          <textarea id="chatInput" placeholder="输入消息，换行可拆成多个气泡..."></textarea>
+          <textarea id="chatInput" placeholder></textarea>
           <button onclick="playClickSound();sendMessage()">发送</button>
         </div>
 
@@ -307,6 +299,12 @@
                 <div class="setting-row-title">聊天背景</div>
               </div>
               <button type="button" onclick="playClickSound();document.getElementById('chatBgInput')?.click()">上传</button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-row-left">
+                <div class="setting-row-title">气泡格式</div>
+              </div>
+              <button type="button" onclick="playClickSound();openBubbleSettingPanel()">设置</button>
             </div>
           </div>
 
@@ -501,8 +499,8 @@
     <div id="newBridgeDialog" class="dialog">
       <div class="dialog-content">
         <h3>新绑定角色</h3>
-        <input type="text" id="newBridgeName" placeholder="绑定角色名（必填，ST角色名）">
         <input type="text" id="newBridgeDisplayName" placeholder="备注名（选填，默认同角色名）">
+        <input type="text" id="newBridgeName" placeholder="绑定角色名（必填）">
         <div class="dialog-buttons">
           <button onclick="playClickSound();addContactFromNew()">确认添加</button>
           <button onclick="playClickSound();closeDialog('newBridgeDialog')">取消</button>
@@ -641,6 +639,68 @@
         <div class="dialog-buttons">
           <button onclick="playClickSound();confirmProfileNicknameChange()">确认</button>
           <button onclick="playClickSound();closeDialog('profileNicknameDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 气泡设置面板 -->
+    <div id="bubbleSettingPanel" class="bubble-setting-overlay" style="display:none;">
+      <div class="bubble-setting-container">
+        <!-- 顶部栏 -->
+        <div class="bubble-setting-header">
+          <button class="bubble-back-btn" onclick="playClickSound();closeBubbleSettingPanel()">←</button>
+          <div class="bubble-setting-title">气泡格式</div>
+          <button class="bubble-reset-btn" onclick="playClickSound();resetBubbleSetting()">重置</button>
+        </div>
+
+        <!-- 角色/用户 切换 Tab -->
+        <div class="bubble-tab-bar">
+          <div class="bubble-tab active" data-tab="ai" onclick="playClickSound();switchBubbleTab('ai')">角色气泡</div>
+          <div class="bubble-tab" data-tab="user" onclick="playClickSound();switchBubbleTab('user')">我的气泡</div>
+        </div>
+
+        <!-- 预览区 -->
+        <div class="bubble-preview-area">
+          <div class="bubble-preview-wrapper">
+            <div id="bubblePreviewBox" class="bubble-preview-box" style="background:#fff;color:#000;">
+              预览
+            </div>
+          </div>
+        </div>
+
+        <!-- 设置区 -->
+        <div class="bubble-controls">
+          <div class="bubble-control-row">
+            <span class="bubble-control-label">气泡颜色</span>
+            <div class="bubble-color-group">
+              <input type="color" id="bubbleBgColorPicker" value="#ffffff"
+                    oninput="onBubbleColorChange()">
+              <span class="bubble-color-hex" id="bubbleBgHex">#FFFFFF</span>
+            </div>
+          </div>
+
+          <div class="bubble-control-row">
+            <span class="bubble-control-label">字体颜色</span>
+            <div class="bubble-color-group">
+              <input type="color" id="bubbleTextColorPicker" value="#000000"
+                    oninput="onBubbleColorChange()">
+              <span class="bubble-color-hex" id="bubbleTextHex">#000000</span>
+            </div>
+          </div>
+
+          <div class="bubble-control-row">
+            <span class="bubble-control-label">圆角大小</span>
+            <div class="bubble-range-group">
+              <input type="range" id="bubbleRadiusRange" min="0" max="30" value="18"
+                    oninput="onBubbleColorChange()">
+              <span id="bubbleRadiusValue">18px</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 保存按钮 -->
+        <div class="bubble-save-row">
+          <button class="bubble-save-btn" onclick="playClickSound();saveBubbleSetting()">保存</button>
         </div>
       </div>
     </div>
