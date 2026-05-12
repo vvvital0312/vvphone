@@ -50,6 +50,14 @@ let stickerManageMode = false;
 let stickerPressTimer = null;
 let stickerRenameId = null;
 let stickerRenameDraft = '';
+// 通话状态管理
+let currentCallPhase = 'idle'; // idle | calling | ringing | talking | ended
+let callStartTimestamp = null;
+let callTimerInterval = null;
+let isWaitingCallAIReply = false;
+
+// 在 VV_BRIDGE_CONFIG 中新增 buildCallEventCommand（不要删除原来的 buildCallCommand）
+// 找到 VV_BRIDGE_CONFIG 对象，在 buildCallCommand 后面加上这个新方法：
 
 // ==================== 图片裁剪功能模块 ====================
 let currentCropper = null;
@@ -153,6 +161,32 @@ const VV_BRIDGE_CONFIG = {
     console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_BEGIN]');
     console.log(cmd);
     console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_END]');
+
+    return cmd;
+  },
+
+  // 在 VV_BRIDGE_CONFIG 对象内部，buildFeedCommentCommand 的逗号后面加上：
+
+  buildCallEventCommand: function (params) {
+    const bridgeName = params.bridgeName;
+    const chatId = params.chatId;
+    const callPhase = params.callPhase;
+    const promptText = params.promptText;
+
+    const cmd =
+      '/send ' + bridgeName +
+      '\n[电话模式]' +
+      '\n通话阶段:' + callPhase +
+      '\n聊天ID:' + chatId +
+      '\n' + promptText +
+      '\n|/trigger';
+
+    console.log('[VV_BRIDGE_CONFIG][buildCallEventCommand]', {
+      bridgeName,
+      chatId,
+      callPhase,
+      promptLength: String(promptText || '').length
+    });
 
     return cmd;
   }
@@ -394,6 +428,40 @@ function initSTBridgeListener() {
           await openChatDetail(chatId, target || '');
         } else if (typeof openChat === 'function') {
           await openChat(chatId, chatType);
+        }
+        return;
+      }
+
+      if (data.type === 'VVPHONE_CALL_SYNC') {
+        console.log('[VV][listener] HIT VVPHONE_CALL_SYNC');
+        console.log('[VV][CALL_SYNC][RECV]', data);
+
+        try {
+          await handleVVCallSyncRaw(data);
+        } catch (err) {
+          console.error('[VV][listener] handleVVCallSyncRaw error:', err);
+        }
+        return;
+      }
+
+      // ★★★ 新增：通话同步 ★★★
+      if (data.type === 'VVPHONE_CALL_SYNC') {
+        console.log('[VV][listener] HIT VVPHONE_CALL_SYNC');
+        try {
+          await handleVVCallSyncRaw(data);
+        } catch (err) {
+          console.error('[VV][listener] handleVVCallSyncRaw error:', err);
+        }
+        return;
+      }
+
+      // ★★★ 新增：AI主动来电 ★★★
+      if (data.type === 'VVPHONE_INCOMING_CALL') {
+        console.log('[VV][listener] HIT VVPHONE_INCOMING_CALL');
+        try {
+          checkForIncomingCallTrigger(data.raw || '');
+        } catch (err) {
+          console.error('[VV][listener] incoming call trigger error:', err);
         }
         return;
       }
@@ -1654,6 +1722,12 @@ async function handleVVChatSyncRaw(payload) {
     beforeLeftCount,
     afterLeftCount
   });
+  // 检测AI输出中是否有来电触发
+  try {
+    checkForIncomingCallTrigger(raw);
+  } catch (err) {
+    console.error('[VV_CALL] checkForIncomingCallTrigger error:', err);
+  }
 
   return appended > 0;
 }
@@ -1811,6 +1885,8 @@ function escapeHTMLAttr(str) {
     .split(c4).join(r4)
     .split(c5).join(r5);
 }
+
+const escapeHtml = escapeHTML;
 
 function ensureProfileData() {
   if (!myProfile || typeof myProfile !== 'object') {
@@ -2283,10 +2359,6 @@ function isSameTimeDivider(a, b) {
   if (isNaN(minA) || isNaN(minB)) return a === b;
 
   return Math.abs(minA - minB) < 3;
-}
-
-function splitInputToChunks(text) {
-  return String(text || '').split('\n').map(i => i.trim()).filter(Boolean);
 }
 
 function playClickSound() {
@@ -3802,6 +3874,10 @@ function renderMessageOriginal(m) {
     return renderTransferNoticeMessage(m);
   }
 
+  if (m.type === 'call-record') {
+    return renderCallRecordMessage(m);
+  }
+
   switch (m.type) {
     case 'text': {
       const chunks = Array.isArray(m.chunks) && m.chunks.length
@@ -4303,6 +4379,96 @@ function buildVVEventPayload(chatId) {
     'targetBubble=' + targetBubble,
     'chatBgKey=' + chatBgKey,
     '[/VV_EVENT]'
+  );
+
+  return lines.join('\n');
+}
+
+// ============================================================
+// 电话功能 - 构建通话事件payload
+// ============================================================
+
+function buildVVCallEventPayload(contactId, callPhase, userMessage) {
+  const contact = contactList.find(i => i.id === contactId);
+  if (!contact) return '';
+
+  const targetName = contact.bridgeName || contact.name || '角色';
+  const time = typeof getNowFullLabel === 'function' ? getNowFullLabel() : getNowTime();
+  const chatSetting = getChatSetting(contactId) || {};
+
+  const lines = [
+    '以下是一次手机电话通话事件。',
+    '你正在和用户打电话，请像真实打电话一样自然对话。',
+    '不要复述事件字段，不要解释字段内容。',
+    '',
+    '你必须只输出一个完整的 [VV_CALL_SYNC] ... [/VV_CALL_SYNC] 块。',
+    '不要输出其他任何内容。',
+    ''
+  ];
+
+  if (callPhase === 'calling') {
+    lines.push(
+      '用户正在拨打电话给你。',
+      '请根据当前剧情和你与用户的关系决定：接听、拒接或不接（无人接听）。',
+      '如果接听，callPhase=accept，并说一句接电话的话。',
+      '如果拒接，callPhase=reject。',
+      '如果无人接听，callPhase=miss。',
+      ''
+    );
+  } else if (callPhase === 'talking') {
+    lines.push(
+      '你们正在通话中，用户刚刚说了以下内容：',
+      userMessage || '',
+      '',
+      '请自然地回复，就像真的在打电话一样。',
+      '可以输出1到3个 [通话] 块（代表你说的1到3句话）。',
+      ''
+    );
+
+    // 附上最近的通话记录作为上下文
+    const recentLogs = (callLogs[contactId] || []).slice(-10);
+    if (recentLogs.length > 0) {
+      lines.push('以下是之前的通话记录（供你参考上下文）：');
+      recentLogs.forEach(log => {
+        lines.push(`${log.isMe ? '用户' : log.speaker}：${log.text}`);
+      });
+      lines.push('');
+    }
+  } else if (callPhase === 'incoming') {
+    lines.push(
+      '你主动给用户打了电话，用户已经接听。',
+      '请说一句打电话过来的开场白，要符合你当前的心情和剧情。',
+      'callPhase=reply。',
+      ''
+    );
+  }
+
+  lines.push(
+    '[VV_EVENT]',
+    'type=call',
+    'chatId=' + contactId,
+    'target=' + targetName,
+    'callPhase=' + callPhase,
+    'time=' + time,
+    'myAvatarKey=current_my_avatar',
+    'targetAvatarId=' + (chatSetting.theirAvatar || 'contact_unknown_avatar'),
+    '[/VV_EVENT]'
+  );
+
+  lines.push(
+    '',
+    '输出格式要求：',
+    '[VV_CALL_SYNC]',
+    'chatId=' + contactId,
+    'target=' + targetName,
+    'callPhase=accept 或 reject 或 miss 或 reply',
+    'time=当前时间',
+    '',
+    '[通话]',
+    'speaker=' + targetName,
+    'content=你要说的话',
+    '',
+    '[/VV_CALL_SYNC]'
   );
 
   return lines.join('\n');
@@ -4898,6 +5064,60 @@ function appendAIMessageToCurrentChat({ chatId, senderName, text, type = 'text' 
   saveAll();
 }
 
+// ============================================================
+// 电话功能 - 解析 VV_CALL_SYNC
+// ============================================================
+
+function parseVVCallSync(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+
+  // 提取 [VV_CALL_SYNC] ... [/VV_CALL_SYNC] 块
+  const blockMatch = raw.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
+  if (!blockMatch) {
+    console.warn('[VV_CALL] no VV_CALL_SYNC block found in raw');
+    return null;
+  }
+
+  const blockText = blockMatch[1];
+
+  // 解析头部字段
+  const getField = (name) => {
+    const re = new RegExp('^\\s*' + name + '\\s*=\\s*(.+)', 'im');
+    const m = blockText.match(re);
+    return m ? m[1].trim() : '';
+  };
+
+  const result = {
+    chatId: getField('chatId'),
+    target: getField('target'),
+    callPhase: getField('callPhase'),
+    time: getField('time'),
+    messages: []
+  };
+
+  // 解析 [通话] 块
+  const callBlockRegex = /\[通话\]([\s\S]*?)(?=\[通话\]|\[\/VV_CALL_SYNC\]|$)/gi;
+  let match;
+  while ((match = callBlockRegex.exec(blockText)) !== null) {
+    const content = match[1];
+    const speaker = (() => {
+      const m = content.match(/^\s*speaker\s*=\s*(.+)/im);
+      return m ? m[1].trim() : '';
+    })();
+    const text = (() => {
+      const m = content.match(/^\s*content\s*=\s*(.+)/im);
+      return m ? m[1].trim() : '';
+    })();
+
+    if (speaker && text) {
+      result.messages.push({ speaker, text });
+    }
+  }
+
+  console.log('[VV_CALL] parsed call sync:', result);
+  return result;
+}
+
 function appendAICommentToFeed({ postId, senderName, text, replyTo = '' }) {
   const post = feedPosts.find(i => i.id === postId);
   if (!post) return;
@@ -5450,45 +5670,165 @@ function startCallFromDialog() {
   simulateOutgoingCall(contact.id);
 }
 
+// ============================================================
+// 电话功能 - 拨打电话
+// ============================================================
 async function simulateOutgoingCall(contactId) {
   const contact = contactList.find(i => i.id === contactId);
   if (!contact) return;
 
+  // 重置通话状态
   currentCallId = contactId;
+  currentCallPhase = 'calling';
+  callStartTimestamp = null;
+  if (callTimerInterval) clearInterval(callTimerInterval);
+  callTimerInterval = null;
+  callLogs[contactId] = [];
+
+  // 显示呼叫界面
   hideAllPages();
   document.getElementById('callPage').style.display = 'block';
   document.getElementById('callName').innerText = contact.name;
-  document.getElementById('callAvatar').src = await resolveImageRefToUrl(getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR);
+  document.getElementById('callAvatar').src = await resolveImageRefToUrl(
+    getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR
+  );
   document.getElementById('callStatus').innerText = '正在呼叫…';
-  document.getElementById('callTranscript').innerHTML = '<div class="call-line">拨号中…</div>';
+  document.getElementById('callTranscript').innerHTML = '<div class="call-line system">拨号中…</div>';
+
+  // 隐藏输入区（呼叫中不能说话）
+  setCallInputVisible(false);
 
   const bridgeName = contact.bridgeName || contact.name;
-  let ok = false;
 
-  if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
-    const cmd = VV_BRIDGE_CONFIG.buildCallCommand({
+  let slashOk = false;
+
+  if (VV_BRIDGE_CONFIG.enabled &&
+      (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
+
+    const promptText = buildVVCallEventPayload(contactId, 'calling', '');
+
+    const cmd = VV_BRIDGE_CONFIG.buildCallEventCommand({
       bridgeName,
-      promptText: '用户正在拨打电话，请根据当前剧情决定：接听、拒接或无人接听。请由宿主根据结果回传 VVPHONE_CALL_STATUS。'
+      chatId: contactId,
+      callPhase: 'calling',
+      promptText
     });
-    ok = await triggerSlash(cmd);
+
+    slashOk = await triggerSlash(cmd);
   }
 
-  if (!ok || VV_BRIDGE_CONFIG.callMode === 'local') {
+  if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
+    // 本地降级：随机决定接听/拒接/未接
     const outcomes = ['accepted', 'rejected', 'missed'];
     const result = outcomes[Math.floor(Math.random() * outcomes.length)];
 
     setTimeout(() => {
+      if (currentCallId !== contactId) return; // 用户已离开
+
       if (result === 'accepted') {
-        openCallPage(contactId, true);
+        handleCallAccepted(contactId, contact.name, '喂，你好。');
       } else if (result === 'rejected') {
-        document.getElementById('callStatus').innerText = '对方已拒接';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方拒接了你的来电。</div>';
+        handleCallRejected(contactId);
       } else {
-        document.getElementById('callStatus').innerText = '无人接听';
-        document.getElementById('callTranscript').innerHTML = '<div class="call-line">通话未接通，对方暂时没有接听。</div>';
+        handleCallMissed(contactId);
       }
-    }, 1200);
+    }, 2000 + Math.random() * 1500);
   }
+}
+
+// ============================================================
+// 电话功能 - 通话状态处理
+// ============================================================
+
+function handleCallAccepted(contactId, speakerName, firstLine) {
+  if (currentCallId !== contactId) return;
+
+  currentCallPhase = 'talking';
+  callStartTimestamp = Date.now();
+
+  document.getElementById('callStatus').innerText = '通话中 00:00';
+  setCallInputVisible(true);
+
+  // 启动通话计时器
+  if (callTimerInterval) clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    if (!callStartTimestamp) return;
+    const elapsed = Math.floor((Date.now() - callStartTimestamp) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    const statusEl = document.getElementById('callStatus');
+    if (statusEl) statusEl.innerText = '通话中 ' + mm + ':' + ss;
+  }, 1000);
+
+  // 添加对方的第一句话
+  if (firstLine) {
+    if (!callLogs[contactId]) callLogs[contactId] = [];
+    callLogs[contactId].push({
+      speaker: speakerName,
+      isMe: false,
+      text: firstLine,
+      time: getNowTime()
+    });
+  }
+
+  renderCallTranscript();
+  saveAll();
+}
+
+function handleCallRejected(contactId) {
+  if (currentCallId !== contactId) return;
+
+  currentCallPhase = 'ended';
+  document.getElementById('callStatus').innerText = '对方已拒接';
+  document.getElementById('callTranscript').innerHTML =
+    '<div class="call-line system">通话未接通，对方拒接了你的来电。</div>';
+  setCallInputVisible(false);
+
+  // 写一条系统消息到聊天记录
+  writeCallSystemMessage(contactId, '呼叫被拒接');
+}
+
+function handleCallMissed(contactId) {
+  if (currentCallId !== contactId) return;
+
+  currentCallPhase = 'ended';
+  document.getElementById('callStatus').innerText = '无人接听';
+  document.getElementById('callTranscript').innerHTML =
+    '<div class="call-line system">通话未接通，对方暂时没有接听。</div>';
+  setCallInputVisible(false);
+
+  writeCallSystemMessage(contactId, '呼叫无人接听');
+}
+
+function writeCallSystemMessage(contactId, text) {
+  if (!messages[contactId]) messages[contactId] = [];
+  messages[contactId].push({
+    id: 'm' + Date.now(),
+    sender: 'system',
+    senderName: '系统',
+    isMe: false,
+    type: 'system',
+    chunks: [text],
+    time: getNowTime(),
+    timeLabel: getNowFullLabel()
+  });
+  saveAll();
+}
+
+function setCallInputVisible(visible) {
+  const inputArea = document.querySelector('.call-input-area');
+  if (inputArea) {
+    inputArea.style.display = visible ? 'flex' : 'none';
+  }
+}
+
+function getCallDurationText() {
+  if (!callStartTimestamp) return '0秒';
+  const elapsed = Math.floor((Date.now() - callStartTimestamp) / 1000);
+  if (elapsed < 60) return elapsed + '秒';
+  const mm = Math.floor(elapsed / 60);
+  const ss = elapsed % 60;
+  return mm + '分' + (ss > 0 ? ss + '秒' : '');
 }
 
 async function openCallPage(contactId, accepted = false) {
@@ -5513,17 +5853,44 @@ async function openCallPage(contactId, accepted = false) {
   saveAll();
 }
 
+function splitInputToChunks(raw) {
+  if (!raw) return [];
+  return raw.split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+}
+
 function renderCallTranscript() {
   const box = document.getElementById('callTranscript');
-  if (!box) return;
+  if (!box || !currentCallId) return;
 
   const logs = callLogs[currentCallId] || [];
-  if (!logs.length) {
-    box.innerHTML = '<div class="call-line">通话已连接。</div>';
+
+  if (logs.length === 0) {
+    box.innerHTML = '<div class="call-line system">通话已接通</div>';
     return;
   }
 
-  box.innerHTML = logs.map(item => `<div class="call-line ${item.isMe ? 'me' : ''}">${escapeHTML(item.text)}</div>`).join('');
+  let html = '';
+
+  logs.forEach((log, idx) => {
+    const cls = log.isMe ? 'call-line me' : 'call-line them';
+    const label = log.isMe ? '我' : log.speaker;
+    const escapedText = escapeHtml(log.text);
+
+    html += '<div class="' + cls + '">'
+      + '<span class="call-speaker">' + escapeHtml(label) + '：</span>'
+      + '<span class="call-text">' + escapedText + '</span>'
+      + '</div>';
+  });
+
+  box.innerHTML = html;
+
+  // 保留typing indicator如果存在
+  if (isWaitingCallAIReply) {
+    appendCallTypingIndicator();
+  }
+
   box.scrollTop = box.scrollHeight;
 }
 
@@ -5531,12 +5898,15 @@ async function sendCallMessage() {
   const input = document.getElementById('callInput');
   const raw = input?.value.trim();
   if (!raw || !currentCallId) return;
+  if (currentCallPhase !== 'talking') return;
+  if (isWaitingCallAIReply) return; // 防止连续发送
 
   const lines = splitInputToChunks(raw);
   if (!lines.length) return;
 
   if (!callLogs[currentCallId]) callLogs[currentCallId] = [];
 
+  // 添加用户的话
   lines.forEach(line => {
     callLogs[currentCallId].push({
       speaker: '我',
@@ -5550,38 +5920,74 @@ async function sendCallMessage() {
   renderCallTranscript();
   saveAll();
 
+  // 显示"对方正在说话"
+  isWaitingCallAIReply = true;
+  appendCallTypingIndicator();
+
   const contact = contactList.find(i => i.id === currentCallId);
   const bridgeName = contact?.bridgeName || contact?.name || '角色';
+  const contactId = currentCallId;
 
-  let ok = false;
-  if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
-    const cmd = VV_BRIDGE_CONFIG.buildCallCommand({
+  let slashOk = false;
+
+  if (VV_BRIDGE_CONFIG.enabled &&
+      (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
+
+    const promptText = buildVVCallEventPayload(contactId, 'talking', lines.join('\n'));
+
+    const cmd = VV_BRIDGE_CONFIG.buildCallEventCommand({
       bridgeName,
-      promptText: lines.join('\n')
+      chatId: contactId,
+      callPhase: 'talking',
+      promptText
     });
-    ok = await triggerSlash(cmd);
+
+    slashOk = await triggerSlash(cmd);
   }
 
-  if (!ok || VV_BRIDGE_CONFIG.callMode === 'local') {
+  if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
+    // 本地降级回复
     setTimeout(() => {
-      callLogs[currentCallId].push({
+      if (currentCallId !== contactId) return;
+
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+
+      callLogs[contactId].push({
         speaker: contact?.name || '对方',
         isMe: false,
-        text: '我听见了，你继续说。',
+        text: '嗯，我听到了，你继续说。',
         time: getNowTime()
       });
       renderCallTranscript();
       saveAll();
-    }, 900);
+    }, 1000 + Math.random() * 1000);
   }
+
+  // 超时兜底：如果AI长时间没回复
+  setTimeout(() => {
+    if (isWaitingCallAIReply && currentCallId === contactId) {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+      console.warn('[VV_CALL] AI reply timeout');
+    }
+  }, 15000);
 }
 
 function jumpCallToChat() {
   if (!currentCallId) return;
-  const id = currentCallId;
-  document.getElementById('callPage').style.display = 'none';
-  document.getElementById('contactPage').style.display = 'block';
-  openChat(id, 'direct');
+
+  const contactId = currentCallId;
+
+  // 先挂断
+  endCall();
+
+  // 延迟后跳转到聊天
+  setTimeout(() => {
+    if (typeof openChatDetail === 'function') {
+      openChatDetail(contactId, '');
+    }
+  }, 300);
 }
 
 function endCall() {
@@ -5590,27 +5996,77 @@ function endCall() {
     return;
   }
 
-  const contact = contactList.find(i => i.id === currentCallId);
-  if (contact) {
-    document.getElementById('callStatus').innerText = '通话结束';
+  const contactId = currentCallId;
+  const contact = contactList.find(i => i.id === contactId);
+  const duration = getCallDurationText();
+  const logs = callLogs[contactId] || [];
 
-    if (!messages[currentCallId]) messages[currentCallId] = [];
-    messages[currentCallId].push({
-      id: 'm' + Date.now(),
+  // 停止计时器
+  if (callTimerInterval) {
+    clearInterval(callTimerInterval);
+    callTimerInterval = null;
+  }
+
+  // 更新UI
+  document.getElementById('callStatus').innerText = '通话结束';
+  setCallInputVisible(false);
+  removeCallTypingIndicator();
+  isWaitingCallAIReply = false;
+  currentCallPhase = 'ended';
+
+  // 把完整通话记录写入聊天消息
+  if (contact && logs.length > 0) {
+    if (!messages[contactId]) messages[contactId] = [];
+
+    // 写入一条通话记录类型的消息
+    messages[contactId].push({
+      id: 'm' + Date.now() + '_callrecord',
       sender: 'system',
       senderName: '系统',
       isMe: false,
-      type: 'system',
-      chunks: [`与${contact.name}的通话已结束`],
+      type: 'call-record',
+      callWith: contact.name,
+      callDuration: duration,
+      callStartTime: callStartTimestamp
+        ? new Date(callStartTimestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        : getNowTime(),
+      callEndTime: getNowTime(),
+      callTranscript: JSON.parse(JSON.stringify(logs)), // 深拷贝完整通话记录
       time: getNowTime(),
-      timeLabel: getNowFullLabel()
+      timeLabel: getNowFullLabel(),
+      recalled: false
     });
 
-    contact.lastTime = getNowTime();
-    saveAll();
+    // 更新联系人最后消息
+    updateLastMsg(contactId, '通话 ' + duration, getNowTime(), 'direct');
+  } else if (contact) {
+    writeCallSystemMessage(contactId, '与' + contact.name + '的通话已结束');
   }
 
-  setTimeout(closeCallPage, 300);
+  saveAll();
+
+  // 延迟关闭
+  setTimeout(closeCallPage, 600);
+}
+
+function appendCallTypingIndicator() {
+  const box = document.getElementById('callTranscript');
+  if (!box) return;
+
+  // 移除旧的
+  removeCallTypingIndicator();
+
+  const div = document.createElement('div');
+  div.className = 'call-line typing-indicator';
+  div.id = 'callTypingIndicator';
+  div.innerHTML = '<span class="typing-dots">对方正在说话<span>.</span><span>.</span><span>.</span></span>';
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function removeCallTypingIndicator() {
+  const el = document.getElementById('callTypingIndicator');
+  if (el) el.remove();
 }
 
 function openCallFromChat() {
@@ -5621,53 +6077,526 @@ function openCallFromChat() {
   simulateOutgoingCall(currentChatId);
 }
 
+// ============================================================
+// 电话功能 - 来电（替换旧的 simulateIncomingCall）
+// ============================================================
+
 async function simulateIncomingCall(contactId) {
   const contact = contactList.find(i => i.id === contactId);
   if (!contact) return;
 
+  // 如果正在通话中，忽略来电
+  if (currentCallPhase === 'talking' || currentCallPhase === 'calling') {
+    console.log('[VV_CALL] ignored incoming call: already in call');
+    return;
+  }
+
   currentIncomingCallId = contactId;
+  currentCallPhase = 'ringing';
+
   hideAllPages();
   document.getElementById('incomingCallPage').style.display = 'block';
   document.getElementById('incomingName').innerText = contact.name;
-  document.getElementById('incomingAvatar').src = await resolveImageRefToUrl(getChatSetting(contactId).theirAvatar || DEFAULT_AVATAR);
+  document.getElementById('incomingAvatar').src = await resolveImageRefToUrl(
+    getChatSetting(contactId).theirAvatar || DEFAULT_AVATAR
+  );
   resetSwipeThumb();
-}
-
-function resetSwipeThumb() {
-  const thumb = document.getElementById('swipeThumb');
-  if (!thumb) return;
-  thumb.classList.remove('reject');
-  thumb.style.left = 'calc(50% - 22px)';
 }
 
 function acceptIncomingCall() {
   if (!currentIncomingCallId) return;
-  document.getElementById('incomingCallPage').style.display = 'none';
-  openCallPage(currentIncomingCallId, true);
+
+  const contactId = currentIncomingCallId;
+  const contact = contactList.find(i => i.id === contactId);
+  if (!contact) return;
+
+  currentIncomingCallId = null;
+
+  // 初始化通话
+  currentCallId = contactId;
+  currentCallPhase = 'talking';
+  callStartTimestamp = Date.now();
+  callLogs[contactId] = [];
+
+  // 切到通话界面
+  hideAllPages();
+  document.getElementById('callPage').style.display = 'block';
+  document.getElementById('callName').innerText = contact.name;
+
+  resolveImageRefToUrl(
+    getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR
+  ).then(url => {
+    document.getElementById('callAvatar').src = url;
+  });
+
+  document.getElementById('callStatus').innerText = '通话中 00:00';
+  setCallInputVisible(true);
+
+  // 启动计时器
+  if (callTimerInterval) clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    if (!callStartTimestamp) return;
+    const elapsed = Math.floor((Date.now() - callStartTimestamp) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    const statusEl = document.getElementById('callStatus');
+    if (statusEl) statusEl.innerText = '通话中 ' + mm + ':' + ss;
+  }, 1000);
+
+  // 请求AI说开场白
+  requestIncomingCallGreeting(contactId);
+
+  renderCallTranscript();
+  saveAll();
 }
 
 function rejectIncomingCall() {
   if (!currentIncomingCallId) return;
-  const id = currentIncomingCallId;
-  const contact = contactList.find(i => i.id === id);
 
-  if (contact) {
-    if (!messages[id]) messages[id] = [];
-    messages[id].push({
-      id: 'm' + Date.now(),
-      sender: 'system',
-      senderName: '系统',
-      isMe: false,
-      type: 'system',
-      chunks: [`你拒接了${contact.name}的来电`],
-      time: getNowTime(),
-      timeLabel: getNowFullLabel()
-    });
-  }
+  const contactId = currentIncomingCallId;
+  currentIncomingCallId = null;
+  currentCallPhase = 'idle';
 
-  saveAll();
+  writeCallSystemMessage(contactId, '你拒接了来电');
+
   hideAllPages();
   document.getElementById('homePage').style.display = 'block';
+}
+
+async function requestIncomingCallGreeting(contactId) {
+  const contact = contactList.find(i => i.id === contactId);
+  if (!contact) return;
+
+  const bridgeName = contact.bridgeName || contact.name;
+
+  isWaitingCallAIReply = true;
+  appendCallTypingIndicator();
+
+  let slashOk = false;
+
+  if (VV_BRIDGE_CONFIG.enabled &&
+      (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
+
+    const promptText = buildVVCallEventPayload(contactId, 'incoming', '');
+
+    const cmd = VV_BRIDGE_CONFIG.buildCallEventCommand({
+      bridgeName,
+      chatId: contactId,
+      callPhase: 'incoming',
+      promptText
+    });
+
+    slashOk = await triggerSlash(cmd);
+  }
+
+  if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
+    setTimeout(() => {
+      if (currentCallId !== contactId) return;
+
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+
+      callLogs[contactId].push({
+        speaker: contact.name,
+        isMe: false,
+        text: '喂，你好，我刚才想找你聊聊。',
+        time: getNowTime()
+      });
+      renderCallTranscript();
+      saveAll();
+    }, 1200);
+  }
+
+  // 超时兜底
+  setTimeout(() => {
+    if (isWaitingCallAIReply && currentCallId === contactId) {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+    }
+  }, 15000);
+}
+
+function resetSwipeThumb() {
+  const thumb = document.getElementById('swipeThumb');
+  const track = document.getElementById('swipeTrack');
+  if (thumb && track) {
+    const center = (track.clientWidth - 44) / 2;
+    thumb.style.transition = 'left 0.15s ease';
+    thumb.style.left = center + 'px';
+    thumb.classList.remove('reject');
+  }
+}
+
+// ============================================================
+// 电话功能 - 处理AI返回的通话同步
+// ============================================================
+
+async function handleVVCallSyncRaw(payload) {
+  console.log('[VV_CALL] handleVVCallSyncRaw called:', payload);
+
+  const raw = typeof payload === 'string' ? payload : (payload?.raw || '');
+
+  // 先尝试从raw中解析 VV_CALL_SYNC
+  let parsed = parseVVCallSync(raw);
+
+  // 如果没有 VV_CALL_SYNC 块，尝试从 VV_CHAT_SYNC 中提取（AI可能混用格式）
+  if (!parsed && raw.includes('[VV_CHAT_SYNC]')) {
+    console.log('[VV_CALL] no VV_CALL_SYNC found, trying to extract from VV_CHAT_SYNC');
+    // 交给原有的聊天同步处理，但标记为通话
+    await handleVVChatSyncAsCall(raw);
+    return;
+  }
+
+  if (!parsed) {
+    // 最后尝试：直接从文本中提取对话内容
+    parsed = extractCallContentFromFreeText(raw);
+  }
+
+  if (!parsed || !parsed.callPhase) {
+    console.warn('[VV_CALL] could not parse call sync');
+    removeCallTypingIndicator();
+    isWaitingCallAIReply = false;
+    return;
+  }
+
+  const contactId = parsed.chatId || currentCallId;
+  if (!contactId) return;
+
+  console.log('[VV_CALL] parsed result:', parsed);
+
+  // 根据通话阶段处理
+  switch (parsed.callPhase.toLowerCase()) {
+    case 'accept':
+    case 'accepted': {
+      const firstLine = parsed.messages.length > 0 ? parsed.messages[0].text : '喂，你好。';
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+      handleCallAccepted(contactId, parsed.target || parsed.messages[0]?.speaker || '对方', firstLine);
+
+      // 如果有多句话，把第2句开始的也加进去
+      if (parsed.messages.length > 1) {
+        for (let i = 1; i < parsed.messages.length; i++) {
+          callLogs[contactId].push({
+            speaker: parsed.messages[i].speaker,
+            isMe: false,
+            text: parsed.messages[i].text,
+            time: getNowTime()
+          });
+        }
+        renderCallTranscript();
+        saveAll();
+      }
+      break;
+    }
+
+    case 'reject':
+    case 'rejected': {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+      handleCallRejected(contactId);
+      break;
+    }
+
+    case 'miss':
+    case 'missed': {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+      handleCallMissed(contactId);
+      break;
+    }
+
+    case 'reply':
+    case 'talking': {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+
+      if (!callLogs[contactId]) callLogs[contactId] = [];
+
+      parsed.messages.forEach(msg => {
+        callLogs[contactId].push({
+          speaker: msg.speaker,
+          isMe: false,
+          text: msg.text,
+          time: getNowTime()
+        });
+      });
+
+      renderCallTranscript();
+      saveAll();
+      break;
+    }
+
+    case 'hangup': {
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+
+      // AI主动挂断
+      if (parsed.messages.length > 0) {
+        parsed.messages.forEach(msg => {
+          callLogs[contactId].push({
+            speaker: msg.speaker,
+            isMe: false,
+            text: msg.text,
+            time: getNowTime()
+          });
+        });
+        renderCallTranscript();
+      }
+
+      // 延迟后自动挂断
+      setTimeout(() => {
+        if (currentCallId === contactId) {
+          endCall();
+        }
+      }, 1500);
+      break;
+    }
+
+    default:
+      console.warn('[VV_CALL] unknown callPhase:', parsed.callPhase);
+      removeCallTypingIndicator();
+      isWaitingCallAIReply = false;
+  }
+}
+
+// 从VV_CHAT_SYNC格式中提取通话内容的兼容处理
+async function handleVVChatSyncAsCall(raw) {
+  const parsed = parseVVChatBlocks(raw, { chatId: currentCallId });
+  if (!parsed || !parsed.messages || !parsed.messages.length) {
+    removeCallTypingIndicator();
+    isWaitingCallAIReply = false;
+    return;
+  }
+
+  removeCallTypingIndicator();
+  isWaitingCallAIReply = false;
+
+  const contactId = parsed.chatId || currentCallId;
+  if (!contactId || !callLogs[contactId]) return;
+
+  // 只取对方的消息（side=left）
+  const theirMsgs = parsed.messages.filter(m => m.side === 'left');
+  theirMsgs.forEach(m => {
+    callLogs[contactId].push({
+      speaker: m.sender || parsed.target || '对方',
+      isMe: false,
+      text: m.content || '',
+      time: getNowTime()
+    });
+  });
+
+  renderCallTranscript();
+  saveAll();
+}
+
+// 从自由文本中提取对话内容（最终降级方案）
+function extractCallContentFromFreeText(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+
+  const lines = raw.split('\n').filter(l => l.trim());
+  const messages = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // 匹配 "角色名：内容" 或 "角色名: 内容" 格式
+    const colonMatch = trimmed.match(/^(.{1,20})[：:]\s*(.+)/);
+    if (colonMatch) {
+      const speaker = colonMatch[1].trim();
+      const text = colonMatch[2].trim().replace(/^["「『]|["」』]$/g, '');
+      if (speaker && text && speaker !== '用户' && speaker !== '我') {
+        messages.push({ speaker, text });
+      }
+    }
+    // 匹配引号内容
+    else {
+      const quoteMatch = trimmed.match(/["「『](.+?)["」』]/);
+      if (quoteMatch && quoteMatch[1].length > 1) {
+        messages.push({ speaker: '对方', text: quoteMatch[1] });
+      }
+    }
+  }
+
+  if (messages.length === 0) return null;
+
+  return {
+    chatId: currentCallId || '',
+    target: messages[0]?.speaker || '',
+    callPhase: currentCallPhase === 'calling' ? 'accept' : 'reply',
+    time: getNowTime(),
+    messages
+  };
+}
+/**
+ * 检测AI输出中是否包含来电触发信号
+ * 调用时机：在收到任何AI消息后调用此函数
+ * 例如在 handleVVChatSyncRaw 末尾、或酒馆消息监听中调用
+ */
+function checkForIncomingCallTrigger(aiOutputText) {
+  if (!aiOutputText || typeof aiOutputText !== 'string') return;
+
+  // 如果正在通话中，不触发新来电
+  if (currentCallPhase === 'talking' || currentCallPhase === 'calling' || currentCallPhase === 'ringing') {
+    return;
+  }
+
+  // 方式1：检查明确的来电指令块
+  const blockMatch = aiOutputText.match(
+    /\[VV_INCOMING_CALL\]([\s\S]*?)\[\/VV_INCOMING_CALL\]/i
+  );
+
+  if (blockMatch) {
+    const block = blockMatch[1];
+    const callerMatch = block.match(/^\s*caller\s*=\s*(.+)/im);
+    const chatIdMatch = block.match(/^\s*chatId\s*=\s*(.+)/im);
+
+    const callerName = callerMatch ? callerMatch[1].trim() : '';
+    const chatId = chatIdMatch ? chatIdMatch[1].trim() : '';
+
+    if (callerName) {
+      console.log('[VV_CALL] detected incoming call block, caller:', callerName);
+      triggerIncomingCallByName(callerName, chatId);
+      return;
+    }
+  }
+
+  // 方式2：检测自然语言中的"打电话"意图
+  // 匹配类似：
+  //   "西西给用户打去了电话"
+  //   "她拨通了用户的电话"
+  //   "XXX打开手机拨打了用户的号码"
+  //   "XXX想给用户打电话"
+  //   "XXX拨出了电话"
+  const callPatterns = [
+    /(.{1,15}?)(?:给|向|朝).{0,10}?(?:用户|你|玩家).{0,10}?(?:打|拨|拨打|拨通|打去|打来|打了|拨了|拨去).{0,6}?(?:电话|手机|来电)/,
+    /(.{1,15}?)(?:打|拨|拨打|拨通).{0,6}?(?:用户|你|玩家).{0,10}?(?:电话|手机|号码)/,
+    /(.{1,15}?)(?:拨出了电话|拨通了电话|打来了电话|打来电话|来电了)/,
+    /(.{1,15}?)(?:想(?:要)?(?:给|跟|和).{0,8}?(?:用户|你|玩家).{0,6}?打电话)/,
+    /(.{1,15}?)(?:拿起手机|打开手机).了|拨给)/
+  ];
+
+  for (const pattern of callPatterns) {
+    const match = aiOutputText.match(pattern);
+    if (match) {
+      let callerName = match[1].trim();
+
+      // 清理常见的前缀噪音
+      callerName = callerName
+        .replace(/^[，。、！？\s"「『（(]+/, '')
+        .replace(/[，。、！？\s"」』）)]+$/, '')
+        .trim();
+
+      // 过滤掉太短或明显不是名字的结果
+      if (callerName.length >= 1 && callerName.length <= 12) {
+        console.log('[VV_CALL] detected incoming call intent from text, caller:', callerName);
+
+        // 延迟触发，给用户一个"剧情过渡"的感觉
+        setTimeout(() => {
+          triggerIncomingCallByName(callerName, '');
+        }, 1500 + Math.random() * 2000);
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * 根据角色名触发来电
+ */
+function triggerIncomingCallByName(callerName, chatId) {
+  if (!callerName) return;
+
+  let contact = null;
+
+  // 优先通过chatId查找
+  if (chatId) {
+    contact = contactList.find(i => String(i.id) === String(chatId));
+  }
+
+  // 其次通过名字查找（模糊匹配）
+  if (!contact) {
+    contact = contactList.find(i =>
+      i.name === callerName ||
+      i.bridgeName === callerName ||
+      (i.name && i.name.includes(callerName)) ||
+      (callerName && callerName.includes(i.name))
+    );
+  }
+
+  // 如果联系人不存在，自动创建一个
+  if (!contact) {
+    const newId = 'contact_' + Date.now();
+    contact = {
+      id: newId,
+      name: callerName,
+      bridgeName: callerName,
+      avatar: DEFAULT_AVATAR,
+      isSticky: false,
+      lastTime: getNowTime(),
+      lastPreview: '',
+      threadType: 'direct'
+    };
+    contactList.unshift(contact);
+    if (!messages[newId]) messages[newId] = [];
+    console.log('[VV_CALL] auto-created contact for incoming call:', contact);
+  }
+
+  console.log('[VV_CALL] triggering incoming call from:', contact.name, contact.id);
+  simulateIncomingCall(contact.id);
+}
+
+function renderCallRecordMessage(m) {
+  const transcript = m.callTranscript || [];
+  const duration = m.callDuration || '未知时长';
+  const callWith = m.callWith || '联系人';
+  const callTime = m.callStartTime || m.time || '';
+  const msgId = m.id || ('call_' + Date.now());
+
+  let transcriptHtml = '';
+  transcript.forEach(function(log) {
+    const cls = log.isMe ? 'transcript-me' : 'transcript-them';
+    const label = log.isMe ? '我' : (log.speaker || '对方');
+    transcriptHtml += '<div class="' + cls + '">'
+      + '<b>' + escapeHTML(label) + '：</b>'
+      + escapeHTML(log.text || '')
+      + '</div>';
+  });
+
+  // 如果没有通话内容（未接/拒接）
+  if (transcript.length === 0) {
+    return '<div class="message-bubble call-record-bubble">'
+      + '<div class="call-record-header">'
+      + '<span class="call-record-icon">📞</span>'
+      + '<span>与 ' + escapeHTML(callWith) + ' 的通话 · ' + escapeHTML(duration) + '</span>'
+      + '</div>'
+      + '</div>';
+  }
+
+  return '<div class="message-bubble call-record-bubble" onclick="toggleCallTranscript(\'' + msgId + '\')">'
+    + '<div class="call-record-header">'
+    + '<span class="call-record-icon">📞</span>'
+    + '<span>与 ' + escapeHTML(callWith) + ' 的通话 · ' + escapeHTML(duration) + '</span>'
+    + '<span class="call-expand-hint">点击展开</span>'
+    + '</div>'
+    + '<div class="call-transcript-detail" id="callDetail_' + msgId + '">'
+    + transcriptHtml
+    + '</div>'
+    + '</div>';
+}
+
+function toggleCallTranscript(msgId) {
+  const el = document.getElementById('callDetail_' + msgId);
+  if (el) {
+    el.classList.toggle('expanded');
+    // 更新提示文字
+    const bubble = el.parentElement;
+    if (bubble) {
+      const hint = bubble.querySelector('.call-expand-hint');
+      if (hint) {
+        hint.textContent = el.classList.contains('expanded') ? '点击收起' : '点击展开';
+      }
+    }
+  }
 }
 
 async function openChatSettingPage() {

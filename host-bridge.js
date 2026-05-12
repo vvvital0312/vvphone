@@ -349,14 +349,55 @@
 
       if (parsed.type === 'call') {
         const status = this.getSelectedCallStatus();
+        const sender = parsed.senderName || this.getDefaultSender();
+        const chatId = parsed.chatId || '';
+        const time = this.formatNowLabel();
+
+        let callPhase = 'accept';
+        let replyText = '我接到了，你说吧。';
+
+        if (status === 'rejected') {
+          callPhase = 'reject';
+          replyText = '';
+        } else if (status === 'missed') {
+          callPhase = 'miss';
+          replyText = '';
+        }
+
+        // 尝试从命令中判断是否是通话中的对话（talking阶段）
+        const command = String(parsed.command || this.lastContext.command || '');
+        if (command.includes('通话阶段:talking')) {
+          callPhase = 'reply';
+          replyText = '嗯，我听到了，你继续说。';
+        } else if (command.includes('通话阶段:incoming')) {
+          callPhase = 'reply';
+          replyText = '喂，我刚才想找你聊点事。';
+        }
+
+        // 构建 VV_CALL_SYNC 格式的 raw
+        const callMsgBlock = replyText ? [
+          '',
+          '[通话]',
+          `speaker=${this.normalizeSyncFieldText(sender)}`,
+          `content=${this.normalizeSyncFieldText(replyText)}`,
+          '[/通话]'
+        ].join('\n') : '';
+
+        const raw = [
+          '[VV_CALL_SYNC]',
+          `chatId=${this.normalizeSyncFieldText(chatId)}`,
+          `target=${this.normalizeSyncFieldText(sender)}`,
+          `callPhase=${callPhase}`,
+          `time=${this.normalizeSyncFieldText(time)}`,
+          callMsgBlock,
+          '[/VV_CALL_SYNC]'
+        ].join('\n');
+
         return {
           kind: 'call',
           status,
-          text: status === 'accepted'
-            ? '我接到了，你说吧。'
-            : status === 'rejected'
-              ? '现在不方便接。'
-              : '刚才没能及时接到。'
+          raw,
+          text: replyText
         };
       }
 
@@ -399,6 +440,27 @@
       if (result.kind === 'call') {
         console.log('[VV_BRIDGE][handleMockResult] enter call branch');
 
+        const raw = result.raw || result.text || '';
+
+        // 如果AI返回了 [VV_CALL_SYNC] 块，用新格式转发
+        if (raw && raw.includes('[VV_CALL_SYNC]')) {
+          console.log('[VV_BRIDGE][handleMockResult][call] detected VV_CALL_SYNC block');
+
+          this.emitToPhone({
+            type: 'VVPHONE_CALL_SYNC',
+            chatId: parsed.chatId || '',
+            raw,
+            viewId
+          });
+
+          this.log('已回传 VVPHONE_CALL_SYNC', 'ok', {
+            chatId: parsed.chatId || '',
+            raw: raw.slice(0, 500)
+          });
+          return;
+        }
+
+        // 兼容旧格式
         this.emitToPhone({
           type: 'VVPHONE_CALL_STATUS',
           chatId: parsed.chatId || '',
@@ -440,6 +502,48 @@
 
         console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncChatId =', this.lastChatSyncChatId);
         console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncRaw preview =', String(this.lastChatSyncRaw || '').slice(0, 500));
+
+        // 检测通话同步块（AI可能在聊天回复中夹带通话数据）
+        if (raw && raw.includes('[VV_CALL_SYNC]')) {
+          console.log('[VV_BRIDGE][handleMockResult][chat] detected VV_CALL_SYNC in chat result');
+
+          this.emitToPhone({
+            type: 'VVPHONE_CALL_SYNC',
+            chatId: parsed.chatId || '',
+            raw,
+            viewId
+          });
+
+          this.log('已回传 VVPHONE_CALL_SYNC (from chat)', 'ok', {
+            chatId: parsed.chatId || '',
+            raw: raw.slice(0, 500)
+          });
+
+          // 如果同时也包含聊天同步，不return，继续往下走
+          if (!raw.includes('[VV_CHAT_SYNC]')) {
+            return;
+          }
+        }
+
+        // 检测来电触发块
+        if (raw && raw.includes('[VV_INCOMING_CALL]')) {
+          console.log('[VV_BRIDGE][handleMockResult][chat] detected VV_INCOMING_CALL');
+
+          this.emitToPhone({
+            type: 'VVPHONE_INCOMING_CALL',
+            raw,
+            viewId
+          });
+
+          this.log('已回传 VVPHONE_INCOMING_CALL', 'ok', {
+            raw: raw.slice(0, 300)
+          });
+
+          // 如果同时也包含聊天同步，不return，继续往下走
+          if (!raw.includes('[VV_CHAT_SYNC]')) {
+            return;
+          }
+        }
 
         if (raw && raw.includes('[VV_CHAT_SYNC]')) {
           console.log('[VV_BRIDGE][handleMockResult][chat] about to emit VVPHONE_CHAT_SYNC');
@@ -652,18 +756,34 @@
       }
 
       if (manualType === 'call') {
+        const chatId = this.lastContext.chatId || '';
+        const time = this.formatNowLabel();
+
+        const raw = [
+          '[VV_CALL_SYNC]',
+          `chatId=${this.normalizeSyncFieldText(chatId)}`,
+          `target=${this.normalizeSyncFieldText(senderName)}`,
+          'callPhase=reply',
+          `time=${this.normalizeSyncFieldText(time)}`,
+          '',
+          '[通话]',
+          `speaker=${this.normalizeSyncFieldText(senderName)}`,
+          `content=${this.normalizeSyncFieldText(text)}`,
+          '[/通话]',
+          '[/VV_CALL_SYNC]'
+        ].join('\n');
+
         this.emitToPhone({
-          type: 'VVPHONE_CALL_REPLY',
-          chatId: this.lastContext.chatId || '',
-          senderName,
-          text,
+          type: 'VVPHONE_CALL_SYNC',
+          chatId,
+          raw,
           viewId
         });
 
-        this.log('手动回传 VVPHONE_CALL_REPLY', 'ok', {
-          chatId: this.lastContext.chatId || '',
+        this.log('手动回传 VVPHONE_CALL_SYNC', 'ok', {
+          chatId,
           senderName,
-          text
+          raw: raw.slice(0, 500)
         });
         return;
       }
@@ -725,14 +845,23 @@
       const senderName = this.getDefaultSender();
       const viewId = window.__vv_view_id || '';
 
+      // 构建一个 VV_INCOMING_CALL 格式的 raw，让 app.js 端能正确解析
+      const raw = [
+        '[VV_INCOMING_CALL]',
+        `caller=${senderName}`,
+        `chatId=${this.lastContext.chatId || ''}`,
+        '[/VV_INCOMING_CALL]'
+      ].join('\n');
+
       this.emitToPhone({
         type: 'VVPHONE_INCOMING_CALL',
+        raw,
         senderName,
         bridgeName: senderName,
         viewId
       });
 
-      this.log('已发送测试来电', 'ok', { senderName });
+      this.log('已发送测试来电', 'ok', { senderName, raw });
     },
 
     getReplyMode() {

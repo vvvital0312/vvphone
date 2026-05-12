@@ -1309,3 +1309,133 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .bubble-save-btn:active {
   background: #0a5bbe;
 }
+
+/* ============================================================
+   电话功能 - 通话界面样式
+   ============================================================ */
+
+.call-line {
+  padding: 6px 12px;
+  margin: 4px 0;
+  border-radius: 10px;
+  max-width: 85%;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.call-line.me {
+  background: #5B86FF;
+  color: #fff;
+  margin-left: auto;
+  text-align: right;
+  border-bottom-right-radius: 4px;
+}
+
+.call-line.them {
+  background: #f0f0f0;
+  color: #333;
+  margin-right: auto;
+  border-bottom-left-radius: 4px;
+}
+
+.call-line.system {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  background: transparent;
+  margin: 8px auto;
+}
+
+.call-speaker {
+  font-weight: 600;
+  margin-right: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.call-text {
+  font-size: 14px;
+}
+
+/* typing indicator */
+.typing-indicator {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+}
+
+.typing-dots span {
+  animation: typingDot 1.2s infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.2; }
+  30% { opacity: 1; }
+}
+
+/* 通话记录在聊天页的展示 */
+.msg-call-record {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border: 1px solid #e8e8e8;
+  max-width: 280px;
+}
+
+.call-record-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #333;
+}
+
+.call-record-header .expand-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: #999;
+}
+
+.call-transcript-detail {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  margin-top: 0;
+}
+
+.call-transcript-detail.expanded {
+  max-height: 500px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+}
+
+.transcript-me,
+.transcript-them {
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.transcript-me {
+  color: #5B86FF;
+}
+
+.transcript-them {
+  color: #333;
+}
+
+.transcript-me b,
+.transcript-them b {
+  font-weight: 600;
+}
