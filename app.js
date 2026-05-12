@@ -53,8 +53,10 @@ let stickerRenameDraft = '';
 // 通话状态管理
 let currentCallPhase = 'idle'; // idle | calling | ringing | talking | ended
 let callStartTimestamp = null;
+let callStartTime = null;
 let callTimerInterval = null;
 let isWaitingCallAIReply = false;
+let callTranscript = [];
 
 // 在 VV_BRIDGE_CONFIG 中新增 buildCallEventCommand（不要删除原来的 buildCallCommand）
 // 找到 VV_BRIDGE_CONFIG 对象，在 buildCallCommand 后面加上这个新方法：
@@ -2589,7 +2591,12 @@ function closeDialog(dialogId) {
 
     if (dialogId === 'addCallDialog') {
       const el = document.getElementById('callTargetName');
-      if (el) el.value = '';
+      if (el) {
+        el.value = '';
+        delete el.dataset.selectedId;
+      }
+      const suggestions = document.getElementById('callContactSuggestions');
+      if (suggestions) suggestions.innerHTML = '';
     }
 
     if (dialogId === 'addGroupDialog') {
@@ -2629,6 +2636,13 @@ function closeDialog(dialogId) {
     if (dialogId === 'voiceDialog') {
       const a = document.getElementById('voiceTextInput');
       const b = document.getElementById('voiceDurationInput');
+      if (a) a.value = '';
+      if (b) b.value = '';
+    }
+
+    if (dialogId === 'fontDialog') {
+      const a = document.getElementById('importFontName');
+      const b = document.getElementById('importFontFile');
       if (a) a.value = '';
       if (b) b.value = '';
     }
@@ -2780,6 +2794,10 @@ function backToChatDetail() {
 }
 
 function closeCallPage() {
+  if (currentCallPhase === 'talking') {
+    if (!confirm('通话进行中，确定要离开吗？这将挂断电话。')) return;
+    endCall();
+  }
   hideAllPages();
   const page = document.getElementById('homePage');
   if (page) page.style.display = 'block';
@@ -5626,14 +5644,122 @@ function confirmTransfer() {
   //triggerAIReplySoon(80);
 }
 
-function startCallFromDialog() {
-  const name = document.getElementById('callTargetName')?.value.trim();
-  if (!name) {
-    alert('请输入要拨打的角色名称');
+// 拨号弹窗中的搜索过滤
+function filterCallContactList() {
+  const keyword = document.getElementById('callTargetName')?.value.trim().toLowerCase() || '';
+  const container = document.getElementById('callContactSuggestions');
+  if (!container) return;
+
+  if (!keyword) {
+    // 没输入时显示所有联系人
+    renderCallContactList(contactList);
     return;
   }
 
-  let contact = contactList.find(i => i.name === name || i.bridgeName === name);
+  const matched = contactList.filter(c => {
+    const name = (c.name || '').toLowerCase();
+    const bridge = (c.bridgeName || '').toLowerCase();
+    return name.includes(keyword) || bridge.includes(keyword);
+  });
+
+  renderCallContactList(matched);
+}
+
+function renderCallContactList(list) {
+  const container = document.getElementById('callContactSuggestions');
+  if (!container) return;
+
+  if (!list || list.length === 0) {
+    container.innerHTML = '<div style="color:#999;font-size:13px;padding:8px;">没有匹配的联系人</div>';
+    return;
+  }
+
+  container.innerHTML = list.map(c => {
+    const displayName = c.name || c.bridgeName || '未知';
+    const bridgeLabel = c.bridgeName && c.bridgeName !== c.name
+      ? `<span style="color:#999;font-size:12px;margin-left:6px;">(${c.bridgeName})</span>`
+      : '';
+
+    return `
+      <div onclick="playClickSound();selectCallContact('${c.id}')"
+           style="padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;align-items:center;gap:8px;"
+           onmouseenter="this.style.background='#f5f5f5'"
+           onmouseleave="this.style.background='white'">
+        <div style="width:32px;height:32px;border-radius:50%;overflow:hidden;flex-shrink:0;">
+          <img src="${c.avatar || DEFAULT_AVATAR}" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div>
+          <div style="font-size:14px;color:#333;">${displayName}${bridgeLabel}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 点击列表中的联系人，填入输入框
+function selectCallContact(contactId) {
+  const contact = contactList.find(i => i.id === contactId);
+  if (!contact) return;
+
+  const input = document.getElementById('callTargetName');
+  if (input) {
+    input.value = contact.name || contact.bridgeName || '';
+    input.dataset.selectedId = contactId; // 记住选中的ID
+  }
+
+  // 清空建议列表
+  const container = document.getElementById('callContactSuggestions');
+  if (container) {
+    container.innerHTML = `
+      <div style="padding:10px 12px;color:#07c160;font-size:13px;">
+        ✓ 已选择：${contact.name || contact.bridgeName}
+        ${contact.bridgeName && contact.bridgeName !== contact.name
+          ? ' (角色: ' + contact.bridgeName + ')'
+          : ''}
+      </div>
+    `;
+  }
+}
+
+function startCallFromDialog() {
+  const input = document.getElementById('callTargetName');
+  const name = input?.value.trim();
+  if (!name) {
+    alert('请输入要拨打的联系人');
+    return;
+  }
+
+  // 优先用选中的ID
+  const selectedId = input?.dataset?.selectedId;
+  let contact = null;
+
+  if (selectedId) {
+    contact = contactList.find(i => i.id === selectedId);
+  }
+
+  // 如果没通过点击选中，按输入内容匹配
+  if (!contact) {
+    // 优先匹配备注名（精确）
+    contact = contactList.find(i => i.name === name);
+  }
+  if (!contact) {
+    // 再匹配角色名（精确）
+    contact = contactList.find(i => i.bridgeName === name);
+  }
+  if (!contact) {
+    // 模糊匹配备注名
+    contact = contactList.find(i =>
+      (i.name || '').includes(name) || name.includes(i.name || '')
+    );
+  }
+  if (!contact) {
+    // 模糊匹配角色名
+    contact = contactList.find(i =>
+      (i.bridgeName || '').includes(name) || name.includes(i.bridgeName || '')
+    );
+  }
+
+  // 都没找到，新建联系人
   if (!contact) {
     const id = 'c' + Date.now();
     const time = getNowTime();
@@ -5665,6 +5791,11 @@ function startCallFromDialog() {
     getRelSetting(id);
   }
 
+  // 清理选中状态
+  if (input) {
+    delete input.dataset.selectedId;
+  }
+
   saveAll();
   closeDialog('addCallDialog');
   simulateOutgoingCall(contact.id);
@@ -5679,11 +5810,16 @@ async function simulateOutgoingCall(contactId) {
 
   // 重置通话状态
   currentCallId = contactId;
+  currentCallTarget = contact.name || '';
+  currentCallContact = contact;
   currentCallPhase = 'calling';
   callStartTimestamp = null;
+  callStartTime = null;
   if (callTimerInterval) clearInterval(callTimerInterval);
   callTimerInterval = null;
   callLogs[contactId] = [];
+  callTranscript = [];
+  isWaitingCallAIReply = false;
 
   // 显示呼叫界面
   hideAllPages();
@@ -5718,12 +5854,11 @@ async function simulateOutgoingCall(contactId) {
   }
 
   if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
-    // 本地降级：随机决定接听/拒接/未接
     const outcomes = ['accepted', 'rejected', 'missed'];
     const result = outcomes[Math.floor(Math.random() * outcomes.length)];
 
     setTimeout(() => {
-      if (currentCallId !== contactId) return; // 用户已离开
+      if (currentCallId !== contactId) return;
 
       if (result === 'accepted') {
         handleCallAccepted(contactId, contact.name, '喂，你好。');
@@ -5732,7 +5867,7 @@ async function simulateOutgoingCall(contactId) {
       } else {
         handleCallMissed(contactId);
       }
-    }, 2000 + Math.random() * 1500);
+    }, 800 + Math.random() * 700);
   }
 }
 
@@ -5745,14 +5880,17 @@ function handleCallAccepted(contactId, speakerName, firstLine) {
 
   currentCallPhase = 'talking';
   callStartTimestamp = Date.now();
+  callStartTime = Date.now();
 
-  document.getElementById('callStatus').innerText = '通话中 00:00';
-  setCallInputVisible(true);
+  document.getElementById('callStatus').innerText = '通话中';
 
-  // 启动通话计时器
+  // 启动计时器
   if (callTimerInterval) clearInterval(callTimerInterval);
   callTimerInterval = setInterval(() => {
-    if (!callStartTimestamp) return;
+    if (currentCallPhase !== 'talking') {
+      clearInterval(callTimerInterval);
+      return;
+    }
     const elapsed = Math.floor((Date.now() - callStartTimestamp) / 1000);
     const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
     const ss = String(elapsed % 60).padStart(2, '0');
@@ -5760,19 +5898,30 @@ function handleCallAccepted(contactId, speakerName, firstLine) {
     if (statusEl) statusEl.innerText = '通话中 ' + mm + ':' + ss;
   }, 1000);
 
-  // 添加对方的第一句话
+  // 初始化
+  if (!callLogs[contactId]) callLogs[contactId] = [];
+  if (!Array.isArray(callTranscript)) callTranscript = [];
+
   if (firstLine) {
-    if (!callLogs[contactId]) callLogs[contactId] = [];
     callLogs[contactId].push({
-      speaker: speakerName,
+      speaker: speakerName || '对方',
       isMe: false,
       text: firstLine,
       time: getNowTime()
     });
+    callTranscript.push({
+      speaker: speakerName || '对方',
+      content: firstLine
+    });
   }
 
+  // 显示输入区
+  setCallInputVisible(true);
   renderCallTranscript();
   saveAll();
+
+  removeCallTypingIndicator();
+  isWaitingCallAIReply = false;
 }
 
 function handleCallRejected(contactId) {
@@ -5816,10 +5965,15 @@ function writeCallSystemMessage(contactId, text) {
 }
 
 function setCallInputVisible(visible) {
-  const inputArea = document.querySelector('.call-input-area');
-  if (inputArea) {
-    inputArea.style.display = visible ? 'flex' : 'none';
+  const area = document.querySelector('#callPage .call-input-area');
+  if (area) {
+    area.style.display = visible ? 'flex' : 'none';
   }
+}
+
+function removeCallTypingIndicator() {
+  const el = document.getElementById('callTypingIndicator');
+  if (el) el.remove();
 }
 
 function getCallDurationText() {
@@ -5861,37 +6015,39 @@ function splitInputToChunks(raw) {
 }
 
 function renderCallTranscript() {
-  const box = document.getElementById('callTranscript');
-  if (!box || !currentCallId) return;
+  const container = document.getElementById('callTranscript');
+  if (!container) return;
 
-  const logs = callLogs[currentCallId] || [];
+  const contactId = currentCallId;
+  const logs = callLogs[contactId] || [];
 
   if (logs.length === 0) {
-    box.innerHTML = '<div class="call-line system">通话已接通</div>';
+    if (currentCallPhase === 'talking') {
+      container.innerHTML = '<div class="call-line system">通话已接通</div>';
+    }
     return;
   }
 
   let html = '';
+  logs.forEach(item => {
+    const cssClass = item.isMe ? 'me' : 'them';
+    const speakerName = escapeHTML(item.speaker || '');
+    const text = escapeHTML(item.text || '');
 
-  logs.forEach((log, idx) => {
-    const cls = log.isMe ? 'call-line me' : 'call-line them';
-    const label = log.isMe ? '我' : log.speaker;
-    const escapedText = escapeHtml(log.text);
-
-    html += '<div class="' + cls + '">'
-      + '<span class="call-speaker">' + escapeHtml(label) + '：</span>'
-      + '<span class="call-text">' + escapedText + '</span>'
-      + '</div>';
+    html += '<div class="call-line ' + cssClass + '">';
+    if (!item.isMe) {
+      html += '<span class="call-speaker">' + speakerName + '：</span>';
+    }
+    html += '<span class="call-text">' + text + '</span>';
+    html += '</div>';
   });
 
-  box.innerHTML = html;
+  container.innerHTML = html;
 
-  // 保留typing indicator如果存在
-  if (isWaitingCallAIReply) {
-    appendCallTypingIndicator();
-  }
-
-  box.scrollTop = box.scrollHeight;
+  // 滚动到底部
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
 async function sendCallMessage() {
@@ -5899,14 +6055,14 @@ async function sendCallMessage() {
   const raw = input?.value.trim();
   if (!raw || !currentCallId) return;
   if (currentCallPhase !== 'talking') return;
-  if (isWaitingCallAIReply) return; // 防止连续发送
+  if (isWaitingCallAIReply) return;
 
   const lines = splitInputToChunks(raw);
   if (!lines.length) return;
 
   if (!callLogs[currentCallId]) callLogs[currentCallId] = [];
+  if (!Array.isArray(callTranscript)) callTranscript = [];
 
-  // 添加用户的话
   lines.forEach(line => {
     callLogs[currentCallId].push({
       speaker: '我',
@@ -5914,13 +6070,16 @@ async function sendCallMessage() {
       text: line,
       time: getNowTime()
     });
+    callTranscript.push({
+      speaker: '我',
+      content: line
+    });
   });
 
   input.value = '';
   renderCallTranscript();
   saveAll();
 
-  // 显示"对方正在说话"
   isWaitingCallAIReply = true;
   appendCallTypingIndicator();
 
@@ -5946,25 +6105,30 @@ async function sendCallMessage() {
   }
 
   if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
-    // 本地降级回复
     setTimeout(() => {
       if (currentCallId !== contactId) return;
 
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
 
+      const replyText = '嗯，我听到了，你继续说。';
+
       callLogs[contactId].push({
         speaker: contact?.name || '对方',
         isMe: false,
-        text: '嗯，我听到了，你继续说。',
+        text: replyText,
         time: getNowTime()
       });
+      callTranscript.push({
+        speaker: contact?.name || '对方',
+        content: replyText
+      });
+
       renderCallTranscript();
       saveAll();
     }, 1000 + Math.random() * 1000);
   }
 
-  // 超时兜底：如果AI长时间没回复
   setTimeout(() => {
     if (isWaitingCallAIReply && currentCallId === contactId) {
       removeCallTypingIndicator();
@@ -5979,15 +6143,52 @@ function jumpCallToChat() {
 
   const contactId = currentCallId;
 
-  // 先挂断
-  endCall();
+  // 停止计时器
+  if (callTimerInterval) {
+    clearInterval(callTimerInterval);
+    callTimerInterval = null;
+  }
 
-  // 延迟后跳转到聊天
-  setTimeout(() => {
+  // 生成通话摘要写入聊天记录
+  const contact = contactList.find(i => i.id === contactId);
+  const duration = callStartTimestamp
+    ? Math.floor((Date.now() - callStartTimestamp) / 1000)
+    : 0;
+
+  if (duration > 0 && contact) {
+    const mm = String(Math.floor(duration / 60)).padStart(2, '0');
+    const ss = String(duration % 60).padStart(2, '0');
+
+    // 把通话记录作为系统消息插入聊天
+    if (!chatHistories[contactId]) chatHistories[contactId] = [];
+    chatHistories[contactId].push({
+      role: 'system',
+      content: `📞 通话结束，时长 ${mm}:${ss}`,
+      time: getNowTime(),
+      type: 'call-summary'
+    });
+  }
+
+  // 重置通话状态（不调用endCall避免页面跳转冲突）
+  currentCallPhase = 'ended';
+  isWaitingCallAIReply = false;
+  removeCallTypingIndicator();
+
+  // 隐藏通话页，打开聊天页
+  document.getElementById('callPage').style.display = 'none';
+
+  // 给一点点延迟确保DOM更新完
+  requestAnimationFrame(() => {
     if (typeof openChatDetail === 'function') {
       openChatDetail(contactId, '');
     }
-  }, 300);
+  });
+
+  // 最后清理
+  currentCallId = null;
+  callStartTimestamp = null;
+  callStartTime = null;
+  saveAll();
 }
 
 function endCall() {
@@ -6050,23 +6251,20 @@ function endCall() {
 }
 
 function appendCallTypingIndicator() {
-  const box = document.getElementById('callTranscript');
-  if (!box) return;
-
-  // 移除旧的
+  const container = document.getElementById('callTranscript');
+  if (!container) return;
+  // 先移除旧的
   removeCallTypingIndicator();
 
-  const div = document.createElement('div');
-  div.className = 'call-line typing-indicator';
-  div.id = 'callTypingIndicator';
-  div.innerHTML = '<span class="typing-dots">对方正在说话<span>.</span><span>.</span><span>.</span></span>';
-  box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
-}
+  const indicator = document.createElement('div');
+  indicator.className = 'call-line system call-typing-indicator';
+  indicator.id = 'callTypingIndicator';
+  indicator.textContent = '对方正在说话...';
+  container.appendChild(indicator);
 
-function removeCallTypingIndicator() {
-  const el = document.getElementById('callTypingIndicator');
-  if (el) el.remove();
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
 function openCallFromChat() {
@@ -6236,19 +6434,15 @@ async function handleVVCallSyncRaw(payload) {
 
   const raw = typeof payload === 'string' ? payload : (payload?.raw || '');
 
-  // 先尝试从raw中解析 VV_CALL_SYNC
   let parsed = parseVVCallSync(raw);
 
-  // 如果没有 VV_CALL_SYNC 块，尝试从 VV_CHAT_SYNC 中提取（AI可能混用格式）
   if (!parsed && raw.includes('[VV_CHAT_SYNC]')) {
     console.log('[VV_CALL] no VV_CALL_SYNC found, trying to extract from VV_CHAT_SYNC');
-    // 交给原有的聊天同步处理，但标记为通话
     await handleVVChatSyncAsCall(raw);
     return;
   }
 
   if (!parsed) {
-    // 最后尝试：直接从文本中提取对话内容
     parsed = extractCallContentFromFreeText(raw);
   }
 
@@ -6264,7 +6458,10 @@ async function handleVVCallSyncRaw(payload) {
 
   console.log('[VV_CALL] parsed result:', parsed);
 
-  // 根据通话阶段处理
+  // 确保 callTranscript 存在
+  if (!Array.isArray(callTranscript)) callTranscript = [];
+  if (!callLogs[contactId]) callLogs[contactId] = [];
+
   switch (parsed.callPhase.toLowerCase()) {
     case 'accept':
     case 'accepted': {
@@ -6276,11 +6473,16 @@ async function handleVVCallSyncRaw(payload) {
       // 如果有多句话，把第2句开始的也加进去
       if (parsed.messages.length > 1) {
         for (let i = 1; i < parsed.messages.length; i++) {
+          const msg = parsed.messages[i];
           callLogs[contactId].push({
-            speaker: parsed.messages[i].speaker,
+            speaker: msg.speaker,
             isMe: false,
-            text: parsed.messages[i].text,
+            text: msg.text,
             time: getNowTime()
+          });
+          callTranscript.push({
+            speaker: msg.speaker,
+            content: msg.text
           });
         }
         renderCallTranscript();
@@ -6310,14 +6512,16 @@ async function handleVVCallSyncRaw(payload) {
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
 
-      if (!callLogs[contactId]) callLogs[contactId] = [];
-
       parsed.messages.forEach(msg => {
         callLogs[contactId].push({
           speaker: msg.speaker,
           isMe: false,
           text: msg.text,
           time: getNowTime()
+        });
+        callTranscript.push({
+          speaker: msg.speaker,
+          content: msg.text
         });
       });
 
@@ -6326,11 +6530,11 @@ async function handleVVCallSyncRaw(payload) {
       break;
     }
 
+    case 'end':
     case 'hangup': {
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
 
-      // AI主动挂断
       if (parsed.messages.length > 0) {
         parsed.messages.forEach(msg => {
           callLogs[contactId].push({
@@ -6339,11 +6543,14 @@ async function handleVVCallSyncRaw(payload) {
             text: msg.text,
             time: getNowTime()
           });
+          callTranscript.push({
+            speaker: msg.speaker,
+            content: msg.text
+          });
         });
         renderCallTranscript();
       }
 
-      // 延迟后自动挂断
       setTimeout(() => {
         if (currentCallId === contactId) {
           endCall();
@@ -6472,7 +6679,7 @@ function checkForIncomingCallTrigger(aiOutputText) {
     /(.{1,15}?)(?:打|拨|拨打|拨通).{0,6}?(?:用户|你|玩家).{0,10}?(?:电话|手机|号码)/,
     /(.{1,15}?)(?:拨出了电话|拨通了电话|打来了电话|打来电话|来电了)/,
     /(.{1,15}?)(?:想(?:要)?(?:给|跟|和).{0,8}?(?:用户|你|玩家).{0,6}?打电话)/,
-    /(.{1,15}?)(?:拿起手机|打开手机).了|拨给)/
+    /(.{1,15}?)(?:(?:拿起手机|打开手机).{0,4}(?:拨给|打给)|拨给)/
   ];
 
   for (const pattern of callPatterns) {
@@ -7787,6 +7994,278 @@ function applyBubbleToSingleMessage(msgEl, isUser, contactId) {
   }
 }
 
+// ========================
+// 字体管理系统
+// ========================
+
+// 内置字体（不需要字体文件，用系统自带的）
+const BUILTIN_FONTS = [
+  {
+    id: 'default',
+    name: '默认字体',
+    family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    preview: '默认系统字体 ABCabc 123'
+  },
+  {
+    id: 'serif',
+    name: '衬线宋体',
+    family: '"Noto Serif SC", "Songti SC", "SimSun", "Source Han Serif SC", serif',
+    preview: '衬线宋体风格 ABCabc 123'
+  },
+  {
+    id: 'kaiti',
+    name: '系统楷体',
+    family: '"Kaiti SC", "STKaiti", "KaiTi", "楷体", serif',
+    preview: '楷体手写风格 ABCabc 123'
+  }
+];
+
+// 自定义字体存储（保存在 localStorage）
+let customFonts = [];
+// 当前选中的字体ID
+let currentFontId = 'default';
+
+// 初始化字体系统
+function initFontSystem() {
+  // 读取已保存的自定义字体
+  try {
+    const saved = localStorage.getItem('vv_custom_fonts');
+    if (saved) customFonts = JSON.parse(saved);
+  } catch (e) {
+    customFonts = [];
+  }
+
+  // 读取当前选中字体
+  currentFontId = localStorage.getItem('vv_current_font') || 'default';
+
+  // 注册所有已导入的自定义字体
+  customFonts.forEach(f => {
+    registerFontFace(f.id, f.dataUrl);
+  });
+
+  // 应用当前字体
+  applyFont(currentFontId);
+
+  // 更新标签显示
+  updateFontLabel();
+}
+
+// 注册一个 @font-face
+function registerFontFace(fontId, dataUrl) {
+  const familyName = `CustomFont_${fontId}`;
+
+  // 检查是否已经注册过
+  const existingStyle = document.getElementById(`font-style-${fontId}`);
+  if (existingStyle) existingStyle.remove();
+
+  const style = document.createElement('style');
+  style.id = `font-style-${fontId}`;
+  style.textContent = `
+    @font-face {
+      font-family: "${familyName}";
+      src: url("${dataUrl}");
+      font-display: swap;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// 应用字体到整个手机界面
+function applyFont(fontId) {
+  currentFontId = fontId;
+
+  let fontFamily = '';
+
+  // 查找内置字体
+  const builtin = BUILTIN_FONTS.find(f => f.id === fontId);
+  if (builtin) {
+    fontFamily = builtin.family;
+  } else {
+    // 查找自定义字体
+    const custom = customFonts.find(f => f.id === fontId);
+    if (custom) {
+      fontFamily = `"CustomFont_${fontId}", -apple-system, sans-serif`;
+    } else {
+      // 找不到，回退默认
+      fontFamily = BUILTIN_FONTS[0].family;
+      currentFontId = 'default';
+    }
+  }
+
+  // 应用到整个页面
+  document.body.style.fontFamily = fontFamily;
+
+  // 确保按钮、输入框等也跟随变化
+  document.querySelectorAll('button, input, select, textarea, .dialog, .dialog-content').forEach(el => {
+    el.style.fontFamily = fontFamily;
+  });
+
+  // 保存选择
+  localStorage.setItem('vv_current_font', currentFontId);
+  updateFontLabel();
+}
+
+// 更新设置页面的字体标签
+function updateFontLabel() {
+  const label = document.getElementById('currentFontLabel');
+  if (!label) return;
+
+  const builtin = BUILTIN_FONTS.find(f => f.id === currentFontId);
+  if (builtin) {
+    label.textContent = builtin.name;
+    return;
+  }
+
+  const custom = customFonts.find(f => f.id === currentFontId);
+  if (custom) {
+    label.textContent = custom.name;
+    return;
+  }
+
+  label.textContent = '默认字体';
+}
+
+// 渲染字体选择列表
+function renderFontList() {
+  const builtinContainer = document.getElementById('builtinFontList');
+  const customContainer = document.getElementById('customFontList');
+  const emptyTip = document.getElementById('customFontEmpty');
+
+  // 内置字体
+  if (builtinContainer) {
+    builtinContainer.innerHTML = BUILTIN_FONTS.map(f => `
+      <div class="font-option ${currentFontId === f.id ? 'active' : ''}"
+           onclick="playClickSound();applyFont('${f.id}');renderFontList();">
+        <div class="font-info">
+          <div class="font-name">${f.name}</div>
+          <div class="font-preview" style="font-family:${f.family};">${f.preview}</div>
+        </div>
+        <div class="font-actions">
+          ${currentFontId === f.id ? '<span class="font-check">✓</span>' : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // 自定义字体
+  if (customContainer) {
+    if (customFonts.length === 0) {
+      customContainer.innerHTML = '';
+      if (emptyTip) emptyTip.style.display = 'block';
+    } else {
+      if (emptyTip) emptyTip.style.display = 'none';
+      customContainer.innerHTML = customFonts.map(f => `
+        <div class="font-option ${currentFontId === f.id ? 'active' : ''}"
+             onclick="playClickSound();applyFont('${f.id}');renderFontList();">
+          <div class="font-info">
+            <div class="font-name">${f.name}</div>
+            <div class="font-preview" style="font-family:'CustomFont_${f.id}', sans-serif;">
+              自定义字体预览 ABCabc 你好世界
+            </div>
+          </div>
+          <div class="font-actions">
+            ${currentFontId === f.id ? '<span class="font-check">✓</span>' : ''}
+            <button class="font-delete" onclick="event.stopPropagation();playClickSound();deleteCustomFont('${f.id}');">删除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+// 导入自定义字体
+function importCustomFont() {
+  const nameInput = document.getElementById('importFontName');
+  const fileInput = document.getElementById('importFontFile');
+
+  const name = nameInput?.value.trim();
+  if (!name) {
+    alert('请输入字体名称');
+    return;
+  }
+
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    alert('请选择字体文件（支持 .ttf .otf .woff .woff2）');
+    return;
+  }
+
+  // 检查文件大小（限制 15MB）
+  if (file.size > 15 * 1024 * 1024) {
+    alert('字体文件过大（超过15MB），请选择更小的文件');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const dataUrl = e.target.result;
+    const fontId = 'custom_' + Date.now();
+
+    const fontObj = {
+      id: fontId,
+      name: name,
+      dataUrl: dataUrl,
+      addedTime: new Date().toISOString()
+    };
+
+    // 注册字体
+    registerFontFace(fontId, dataUrl);
+
+    // 保存
+    customFonts.push(fontObj);
+    saveCustomFonts();
+
+    // 清空输入
+    if (nameInput) nameInput.value = '';
+    if (fileInput) fileInput.value = '';
+
+    // 自动切换到新字体
+    applyFont(fontId);
+
+    // 刷新列表
+    renderFontList();
+
+    alert(`字体"${name}"导入成功！`);
+  };
+
+  reader.onerror = function() {
+    alert('读取字体文件失败，请重试');
+  };
+
+  reader.readAsDataURL(file);
+}
+
+// 删除自定义字体
+function deleteCustomFont(fontId) {
+  if (!confirm('确定删除此字体？')) return;
+
+  // 移除 style 标签
+  const style = document.getElementById(`font-style-${fontId}`);
+  if (style) style.remove();
+
+  // 从列表移除
+  customFonts = customFonts.filter(f => f.id !== fontId);
+  saveCustomFonts();
+
+  // 如果正在使用这个字体，切回默认
+  if (currentFontId === fontId) {
+    applyFont('default');
+  }
+
+  renderFontList();
+}
+
+// 保存自定义字体到 localStorage
+function saveCustomFonts() {
+  try {
+    localStorage.setItem('vv_custom_fonts', JSON.stringify(customFonts));
+  } catch (e) {
+    // localStorage 可能满了（字体文件比较大）
+    console.warn('保存字体失败，可能存储空间不足:', e);
+    alert('存储空间不足，无法保存字体。建议删除部分已导入的字体。');
+  }
+}
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
@@ -7825,6 +8304,7 @@ window.onload = async function () {
   cleanupUnusedIDBAssets();
 
   migrateFeedPostsAuthorId();
+  initFontSystem();  
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();
@@ -7848,7 +8328,4 @@ window.onload = async function () {
       notifyVVHostReady();
     }
   }, 80);
-
-  // 暂时关闭随机来电，后续改为剧情触发式来电
-  // maybeSimulateIncomingCall();
 };

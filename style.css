@@ -1314,23 +1314,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
    电话功能 - 通话界面样式
    ============================================================ */
 
-.call-line {
-  padding: 6px 12px;
-  margin: 4px 0;
-  border-radius: 10px;
-  max-width: 85%;
-  word-break: break-word;
-  line-height: 1.5;
-}
-
-.call-line.me {
-  background: #5B86FF;
-  color: #fff;
-  margin-left: auto;
-  text-align: right;
-  border-bottom-right-radius: 4px;
-}
-
 .call-line.them {
   background: #f0f0f0;
   color: #333;
@@ -1438,4 +1421,60 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .transcript-me b,
 .transcript-them b {
   font-weight: 600;
+}
+
+/* 字体选择项 */
+.font-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: #f8f8f8;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.font-option:hover {
+  background: #f0f0f0;
+}
+.font-option.active {
+  background: #ffffffec;
+  border: 1px solid #000000;
+}
+.font-option .font-info {
+  flex: 1;
+  min-width: 0;
+}
+.font-option .font-name {
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 2px;
+}
+.font-option .font-preview {
+  font-size: 13px;
+  color: #666;
+}
+.font-option .font-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.font-option .font-check {
+  color: #000;
+  font-size: 16px;
+  font-weight: bold;
+}
+.font-option .font-delete {
+  color: #e74c3c;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid #e74c3c;
+  border-radius: 4px;
+  background: #000000;
+  cursor: pointer;
+}
+.font-option .font-delete:hover {
+  background: #fde8e8;
 }
