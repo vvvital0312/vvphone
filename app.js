@@ -167,28 +167,42 @@ const VV_BRIDGE_CONFIG = {
     return cmd;
   },
 
-  // 在 VV_BRIDGE_CONFIG 对象内部，buildFeedCommentCommand 的逗号后面加上：
+  buildCallEventCommand: function (opts) {
+    const bridgeName = opts.bridgeName || '';
+    const chatId = opts.chatId || '';
+    const callPhase = opts.callPhase || 'calling';
+    const promptText = opts.promptText || '';
+    const userText = opts.userText || '';
 
-  buildCallEventCommand: function (params) {
-    const bridgeName = params.bridgeName;
-    const chatId = params.chatId;
-    const callPhase = params.callPhase;
-    const promptText = params.promptText;
+    // 构建注入的电话上下文内容
+    var callContext = '[电话模式]\n' +
+      '通话阶段:' + callPhase + '\n' +
+      '聊天ID:' + chatId + '\n' +
+      promptText;
 
-    const cmd =
-      '/send ' + bridgeName +
-      '\n[电话模式]' +
-      '\n通话阶段:' + callPhase +
-      '\n聊天ID:' + chatId +
-      '\n' + promptText +
-      '\n|/trigger';
+    // /inject：注入到对话中，不创建可见楼层
+    // role=system：作为系统消息注入
+    // depth=0：放在最靠近AI回复的位置
+    // scan=true：让AI能看到这条注入
+    var cmd = '/inject id=vv_call role=system depth=0 scan=true [' + callContext + '] |\n/trigger';
 
-    console.log('[VV_BRIDGE_CONFIG][buildCallEventCommand]', {
-      bridgeName,
-      chatId,
-      callPhase,
-      promptLength: String(promptText || '').length
-    });
+    return cmd;
+  },
+
+  // 通话中用户说话时用的命令构建（也要改）
+  buildCallReplyCommand: function (opts) {
+    const bridgeName = opts.bridgeName || '';
+    const chatId = opts.chatId || '';
+    const callPhase = opts.callPhase || 'reply';
+    const promptText = opts.promptText || '';
+    const userText = opts.userText || '';
+
+    var callContext = '[电话模式]\n' +
+      '通话阶段:' + callPhase + '\n' +
+      '聊天ID:' + chatId + '\n' +
+      promptText;
+
+    var cmd = '/inject id=vv_call role=system depth=0 scan=true [' + callContext + '] |\n/trigger';
 
     return cmd;
   }
@@ -5846,6 +5860,16 @@ async function simulateOutgoingCall(contactId) {
 
   let slashOk = false;
 
+  // 在拨打电话函数的开头（接通前），通知host启动拦截器
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({
+      type: 'VV_CALL_START',
+      targetName: contact.name || contact.bridgeName || '',
+      chatId: contactId,
+      storyTime: typeof getNowTime === 'function' ? getNowTime() : ''
+    }, '*');
+  }
+
   if (VV_BRIDGE_CONFIG.enabled &&
       (VV_BRIDGE_CONFIG.callMode === 'slash' || VV_BRIDGE_CONFIG.callMode === 'local+slash')) {
 
@@ -6137,6 +6161,14 @@ async function sendCallMessage() {
     }, 1000 + Math.random() * 1000);
   }
 
+  // 用户发送通话消息后
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({
+      type: 'VV_CALL_USER_SPEAK',
+      lines: lines
+    }, '*');
+  }
+
   setTimeout(() => {
     if (isWaitingCallAIReply && currentCallId === contactId) {
       removeCallTypingIndicator();
@@ -6200,6 +6232,11 @@ function jumpCallToChat() {
 }
 
 function endCall() {
+  // 在 endCall 函数开头
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: 'VV_CALL_END' }, '*');
+  }
+
   if (!currentCallId) {
     closeCallPage();
     return;
@@ -7525,6 +7562,36 @@ function initVVHostNavigationBridge() {
           } catch (err) {
             console.error('[VV][NAV] parse incoming call block error:', err);
           }
+        }
+        return;
+      }
+
+      // ========== 新增：处理拦截器转发的通话AI回复 ==========
+      if (type === 'VV_CALL_AI_REPLY') {
+        console.log('[VV][NAV] VV_CALL_AI_REPLY received:', data);
+        try {
+          // 构建兼容 handleVVCallSyncRaw 的 raw 格式
+          if (data.raw) {
+            await handleVVCallSyncRaw({ raw: data.raw, chatId: data.chatId || '' });
+          } else if (data.messages && data.messages.length > 0) {
+            // 如果没有raw但有解析好的messages，手动构建
+            const targetName = data.target || '对方';
+            const chatId = data.chatId || currentCallId || '';
+            let fakeRaw = '[VV_CALL_SYNC]\n';
+            fakeRaw += 'chatId=' + chatId + '\n';
+            fakeRaw += 'target=' + targetName + '\n';
+            fakeRaw += 'callPhase=' + (data.callPhase || 'reply') + '\n';
+            fakeRaw += 'time=' + getNowTime() + '\n';
+            data.messages.forEach(function(m) {
+              fakeRaw += '[通话]\n';
+              fakeRaw += 'speaker=' + (m.speaker || targetName) + '\n';
+              fakeRaw += 'content=' + (m.content || '') + '\n';
+            });
+            fakeRaw += '[/VV_CALL_SYNC]';
+            await handleVVCallSyncRaw({ raw: fakeRaw, chatId: chatId });
+          }
+        } catch (err) {
+          console.error('[VV][NAV] VV_CALL_AI_REPLY handling error:', err);
         }
         return;
       }
