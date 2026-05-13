@@ -5846,12 +5846,15 @@ async function simulateOutgoingCall(contactId) {
 
   // 在拨打电话函数的开头（接通前），通知host启动拦截器
   if (window.parent && window.parent !== window) {
+    console.log('[VV_APP] 发送 VV_CALL_START to parent, parent===top:', window.parent === window.top);
     window.parent.postMessage({
       type: 'VV_CALL_START',
       targetName: contact.name || contact.bridgeName || '',
       chatId: contactId,
       storyTime: typeof getNowTime === 'function' ? getNowTime() : ''
     }, '*');
+  } else {
+    console.warn('[VV_APP] 无法发送 VV_CALL_START: 不在 iframe 中');
   }
 
   if (VV_BRIDGE_CONFIG.enabled &&

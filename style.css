@@ -545,7 +545,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   border-radius:18px;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px
 }
 .call-line{font-size:14px;line-height:1.5;color:#222;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.9)}
-.call-line.me{align-self:flex-end;background:#dff7c9}
+.call-line.me{align-self:flex-end;background:#d3efff}
 .call-input-area{width:100%;display:flex;gap:8px;margin-top:12px}
 .call-input-area textarea{
   flex:1;min-height:42px;max-height:80px;resize:none;border:1px solid #ddd;border-radius:14px;padding:10px 12px;font-size:14px
