@@ -172,7 +172,6 @@ const VV_BRIDGE_CONFIG = {
     const chatId = opts.chatId || '';
     const callPhase = opts.callPhase || 'calling';
     const promptText = opts.promptText || '';
-    const userText = opts.userText || '';
 
     // 构建注入的电话上下文内容
     var callContext = '[电话模式]\n' +
@@ -180,29 +179,24 @@ const VV_BRIDGE_CONFIG = {
       '聊天ID:' + chatId + '\n' +
       promptText;
 
-    // /inject：注入到对话中，不创建可见楼层
-    // role=system：作为系统消息注入
-    // depth=0：放在最靠近AI回复的位置
-    // scan=true：让AI能看到这条注入
-    var cmd = '/inject id=vv_call role=system depth=0 scan=true [' + callContext + '] |\n/trigger';
+    // 用换行隔开，避免内容中的 ] 和外层 ]] 粘连
+    var cmd = '/inject id=vv_call role=system depth=0 scan=true [[\n' + callContext + '\n]] |\n/trigger';
 
     return cmd;
   },
 
-  // 通话中用户说话时用的命令构建（也要改）
   buildCallReplyCommand: function (opts) {
     const bridgeName = opts.bridgeName || '';
     const chatId = opts.chatId || '';
     const callPhase = opts.callPhase || 'reply';
     const promptText = opts.promptText || '';
-    const userText = opts.userText || '';
 
     var callContext = '[电话模式]\n' +
       '通话阶段:' + callPhase + '\n' +
       '聊天ID:' + chatId + '\n' +
       promptText;
 
-    var cmd = '/inject id=vv_call role=system depth=0 scan=true [' + callContext + '] |\n/trigger';
+    var cmd = '/inject id=vv_call role=system depth=0 scan=true [[\n' + callContext + '\n]] |\n/trigger';
 
     return cmd;
   }
@@ -4421,40 +4415,45 @@ function buildVVCallEventPayload(contactId, callPhase, userMessage) {
   const chatSetting = getChatSetting(contactId) || {};
 
   const lines = [
-    '以下是一次手机电话通话事件。',
-    '你正在和用户打电话，请像真实打电话一样自然对话。',
-    '不要复述事件字段，不要解释字段内容。',
-    '',
-    '你必须只输出一个完整的 [VV_CALL_SYNC] ... [/VV_CALL_SYNC] 块。',
-    '不要输出其他任何内容。',
+    '你现在正在和用户打电话。像真人打电话一样自然对话。',
+    '严格按照下面的格式输出，不要输出任何多余内容（不要解释、不要旁白、不要OOC）。',
     ''
   ];
 
   if (callPhase === 'calling') {
     lines.push(
-      '用户正在拨打电话给你。',
-      '请根据当前剧情和你与用户的关系决定：接听、拒接或不接（无人接听）。',
-      '如果接听，callPhase=accept，并说一句接电话的话。',
-      '如果拒接，callPhase=reject。',
-      '如果无人接听，callPhase=miss。',
+      '用户正在拨打电话给你（' + targetName + '）。',
+      '根据当前剧情和你与用户的关系决定：接听、拒接或不接（无人接听）。',
+      '接听→callPhase=accept，并说一句接电话的话。',
+      '拒接→callPhase=reject。',
+      '无人接听→callPhase=miss。',
       ''
     );
   } else if (callPhase === 'talking') {
     lines.push(
-      '你们正在通话中，用户刚刚说了以下内容：',
-      userMessage || '',
+      '你们正在通话中，用户刚刚说了以下内容：'
+    );
+
+    if (userMessage) {
+      const userLines = userMessage.split('\n').filter(l => l.trim());
+      userLines.forEach(function(line) {
+        lines.push('「' + line.trim() + '」');
+      });
+    }
+
+    lines.push(
       '',
       '请自然地回复，就像真的在打电话一样。',
-      '可以输出1到3个 [通话] 块（代表你说的1到3句话）。',
+      '可以输出1到3个 [通话] 块（代表你说的1到3句话）。callPhase=reply',
       ''
     );
 
     // 附上最近的通话记录作为上下文
     const recentLogs = (callLogs[contactId] || []).slice(-10);
     if (recentLogs.length > 0) {
-      lines.push('以下是之前的通话记录（供你参考上下文）：');
+      lines.push('之前的通话记录（供你参考上下文）：');
       recentLogs.forEach(log => {
-        lines.push(`${log.isMe ? '用户' : log.speaker}：${log.text}`);
+        lines.push((log.isMe ? '用户' : log.speaker) + '：' + log.text);
       });
       lines.push('');
     }
@@ -4476,21 +4475,23 @@ function buildVVCallEventPayload(contactId, callPhase, userMessage) {
     'time=' + time,
     'myAvatarKey=current_my_avatar',
     'targetAvatarId=' + (chatSetting.theirAvatar || 'contact_unknown_avatar'),
-    '[/VV_EVENT]'
+    '[/VV_EVENT]',
+    ''
   );
 
+  // 格式模板 — 给AI一个填空式的明确示例
   lines.push(
+    '严格按此格式输出（不要加任何其他文字）：',
     '',
-    '输出格式要求：',
     '[VV_CALL_SYNC]',
     'chatId=' + contactId,
     'target=' + targetName,
-    'callPhase=accept 或 reject 或 miss 或 reply',
-    'time=当前时间',
+    'callPhase=（填写accept/reject/miss/reply其中一个）',
+    'time=' + time,
     '',
     '[通话]',
     'speaker=' + targetName,
-    'content=你要说的话',
+    'content=（你说的话）',
     '',
     '[/VV_CALL_SYNC]'
   );
@@ -5888,6 +5889,14 @@ async function simulateOutgoingCall(contactId) {
       }
     }, 800 + Math.random() * 700);
   }
+
+  // 呼叫超时安全网（30秒无回应当作无人接听）
+  setTimeout(() => {
+    if (currentCallId === contactId && currentCallPhase === 'calling') {
+      console.warn('[VV_CALL] calling timeout, no response from AI');
+      handleCallMissed(contactId);
+    }
+  }, 30000);
 }
 
 // ============================================================
@@ -6106,6 +6115,14 @@ async function sendCallMessage() {
   renderCallTranscript();
   saveAll();
 
+  // 通知 host 拦截器记录用户发言
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({
+      type: 'VV_CALL_USER_SPEAK',
+      lines: lines
+    }, '*');
+  }
+
   isWaitingCallAIReply = true;
   appendCallTypingIndicator();
 
@@ -6155,21 +6172,28 @@ async function sendCallMessage() {
     }, 1000 + Math.random() * 1000);
   }
 
-  // 用户发送通话消息后
-  if (window.parent && window.parent !== window) {
-    window.parent.postMessage({
-      type: 'VV_CALL_USER_SPEAK',
-      lines: lines
-    }, '*');
-  }
-
+  // 超时安全网
   setTimeout(() => {
     if (isWaitingCallAIReply && currentCallId === contactId) {
+      console.warn('[VV_CALL] AI reply timeout');
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
-      console.warn('[VV_CALL] AI reply timeout');
+
+      if (currentCallPhase === 'talking') {
+        // 通话中超时，不挂断，允许用户继续说话
+        console.log('[VV_CALL] talking timeout, keeping call alive');
+        if (!callLogs[contactId]) callLogs[contactId] = [];
+        callLogs[contactId].push({
+          speaker: '系统',
+          isMe: false,
+          text: '（对方暂时没有回应…）',
+          time: getNowTime()
+        });
+        renderCallTranscript();
+        setCallInputVisible(true);
+      }
     }
-  }, 15000);
+  }, 20000);
 }
 
 function jumpCallToChat() {
