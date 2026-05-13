@@ -1558,6 +1558,14 @@ async function handleVVChatSyncRaw(payload) {
   const payloadChatId = typeof payload === 'object' ? (payload?.chatId || '') : '';
   const payloadViewId = typeof payload === 'object' ? (payload?.viewId || '') : '';
 
+  // ========== 新增：如果只有电话同步没有聊天同步，直接转给电话处理 ==========
+  if (/\[VV_CALL_SYNC\]/i.test(raw) && !/\[VV_CHAT_SYNC\]/i.test(raw)) {
+    console.log('[VV] handleVVChatSyncRaw: only VV_CALL_SYNC found, redirecting to handleVVCallSyncRaw');
+    await handleVVCallSyncRaw({ raw, chatId: payloadChatId });
+    return true;
+  }
+  // ========== 新增结束 ==========
+
   console.log('[VV][HANDLE_SYNC][INPUT]', {
     payload,
     rawType: typeof raw,
@@ -7468,6 +7476,150 @@ function initVVHostNavigationBridge() {
     console.log('[VV][NAV] message type =', type, 'data =', data);
 
     try {
+      // ========== 处理电话同步（从桥接脚本转发过来的） ==========
+      if (type === 'VVPHONE_CALL_SYNC') {
+        const raw = String(data.raw || '');
+        const chatId = String(data.chatId || '').trim();
+        const viewId = String(data.viewId || '').trim();
+
+        console.log('[VV][NAV] VVPHONE_CALL_SYNC received, raw length =', raw.length, 'chatId =', chatId);
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VVPHONE_CALL_SYNC ignored: empty raw');
+          return;
+        }
+
+        try {
+          await handleVVCallSyncRaw({ raw, chatId });
+        } catch (err) {
+          console.error('[VV][NAV] handleVVCallSyncRaw error:', err);
+        }
+        return;
+      }
+
+      // ========== 处理来电触发 ==========
+      if (type === 'VVPHONE_INCOMING_CALL') {
+        const raw = String(data.raw || '');
+        const viewId = String(data.viewId || '').trim();
+
+        console.log('[VV][NAV] VVPHONE_INCOMING_CALL received');
+
+        if (raw.trim()) {
+          try {
+            checkForIncomingCallTrigger(raw);
+          } catch (err) {
+            console.error('[VV][NAV] checkForIncomingCallTrigger error:', err);
+          }
+
+          // 也尝试解析 [VV_INCOMING_CALL] 块中的 caller 信息
+          try {
+            const callerMatch = raw.match(/^\s*caller\s*=\s*(.+)/im);
+            const chatIdMatch = raw.match(/^\s*chatId\s*=\s*(.+)/im);
+            if (callerMatch) {
+              const callerName = callerMatch[1].trim();
+              const callChatId = chatIdMatch ? chatIdMatch[1].trim() : '';
+              if (callerName) {
+                triggerIncomingCallByName(callerName, callChatId);
+              }
+            }
+          } catch (err) {
+            console.error('[VV][NAV] parse incoming call block error:', err);
+          }
+        }
+        return;
+      }
+
+      // ========== 处理聊天同步（从桥接脚本转发过来的） ==========
+      if (type === 'VVPHONE_CHAT_SYNC') {
+        const raw = String(data.raw || '');
+        const chatId = String(data.chatId || '').trim();
+        const viewId = String(data.viewId || '').trim();
+
+        console.log('[VV][NAV] VVPHONE_CHAT_SYNC received, raw length =', raw.length, 'chatId =', chatId);
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VVPHONE_CHAT_SYNC ignored: empty raw');
+          return;
+        }
+
+        // 如果聊天同步块里也包含电话同步，先处理电话
+        if (/\[VV_CALL_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] VVPHONE_CHAT_SYNC also contains VV_CALL_SYNC, handling call first');
+          try {
+            await handleVVCallSyncRaw({ raw, chatId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVCallSyncRaw from chat sync error:', err);
+          }
+        }
+
+        // 处理聊天部分
+        if (/\[VV_CHAT_SYNC\]/i.test(raw)) {
+          try {
+            await handleVVChatSyncRaw({ raw, chatId, viewId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
+          }
+        }
+        return;
+      }
+
+      // ========== 处理原始 AI 回复（兼容直接转发的情况） ==========
+      if (type === 'VV_RAW_LLM_REPLY') {
+        const raw = String(data.raw || '');
+        const chatId = String(data.chatId || '').trim();
+        const viewId = String(data.viewId || '').trim();
+
+        console.log('[VV][NAV] VV_RAW_LLM_REPLY received, raw length =', raw.length);
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VV_RAW_LLM_REPLY ignored: empty raw');
+          return;
+        }
+
+        // 来电触发
+        if (/\[VV_INCOMING_CALL\]/i.test(raw)) {
+          console.log('[VV][NAV] detected VV_INCOMING_CALL in raw');
+          try {
+            checkForIncomingCallTrigger(raw);
+          } catch (err) {
+            console.error('[VV][NAV] checkForIncomingCallTrigger error:', err);
+          }
+        }
+
+        // 电话同步
+        if (/\[VV_CALL_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] detected VV_CALL_SYNC, routing to handleVVCallSyncRaw');
+          try {
+            await handleVVCallSyncRaw({ raw, chatId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVCallSyncRaw error:', err);
+          }
+          // 如果同时有聊天同步，继续处理
+          if (!/\[VV_CHAT_SYNC\]/i.test(raw)) return;
+        }
+
+        // 聊天同步
+        if (/\[VV_CHAT_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] detected VV_CHAT_SYNC, routing to handleVVChatSyncRaw');
+          try {
+            await handleVVChatSyncRaw({ raw, chatId, viewId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
+          }
+          return;
+        }
+
+        // 都不匹配，尝试聊天兜底
+        console.log('[VV][NAV] no known sync block in VV_RAW_LLM_REPLY, trying chat fallback');
+        try {
+          await handleVVChatSyncRaw({ raw, chatId, viewId });
+        } catch (err) {
+          console.error('[VV][NAV] handleVVChatSyncRaw fallback error:', err);
+        }
+        return;
+      }
+
+      // ========== 原有的导航处理 ==========
       if (type === 'VVPHONE_SET_VIEW') {
         if (String(data.view || '') !== 'chat') return;
 

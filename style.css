@@ -457,7 +457,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 
 .emoji-panel-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   align-content: start;
   overflow-y: auto;
