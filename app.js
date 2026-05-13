@@ -5892,6 +5892,13 @@ async function simulateOutgoingCall(contactId) {
 // ============================================================
 
 function handleCallAccepted(contactId, speakerName, firstLine) {
+  console.log('[VV_CALL] handleCallAccepted called:', {
+    contactId,
+    currentCallId,
+    speakerName,
+    firstLine,
+    match: currentCallId === contactId
+  });
   if (currentCallId !== contactId) return;
 
   currentCallPhase = 'talking';
@@ -6496,6 +6503,14 @@ async function handleVVCallSyncRaw(payload) {
     case 'accepted':
     case 'connected': {
       const firstLine = parsed.messages.length > 0 ? parsed.messages[0].text : '喂，你好。';
+      console.log('[VV_CALL] ACCEPT case:', {
+        contactId,
+        currentCallId,
+        currentCallPhase,
+        firstLine,
+        target: parsed.target,
+        messagesCount: parsed.messages.length
+      });
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
       handleCallAccepted(contactId, parsed.target || parsed.messages[0]?.speaker || '对方', firstLine);
