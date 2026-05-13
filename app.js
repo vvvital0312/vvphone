@@ -448,37 +448,21 @@ function initSTBridgeListener() {
         return;
       }
 
+      // ===== 通话同步 → 交给 NAV bridge 统一处理 =====
       if (data.type === 'VVPHONE_CALL_SYNC') {
-        console.log('[VV][listener] HIT VVPHONE_CALL_SYNC');
-        console.log('[VV][CALL_SYNC][RECV]', data);
-
-        try {
-          await handleVVCallSyncRaw(data);
-        } catch (err) {
-          console.error('[VV][listener] handleVVCallSyncRaw error:', err);
-        }
+        console.log('[VV][listener] VVPHONE_CALL_SYNC → skip, handled by NAV bridge');
         return;
       }
 
-      // ★★★ 新增：通话同步 ★★★
-      if (data.type === 'VVPHONE_CALL_SYNC') {
-        console.log('[VV][listener] HIT VVPHONE_CALL_SYNC');
-        try {
-          await handleVVCallSyncRaw(data);
-        } catch (err) {
-          console.error('[VV][listener] handleVVCallSyncRaw error:', err);
-        }
-        return;
-      }
-
-      // ★★★ 新增：AI主动来电 ★★★
+      // ===== AI来电 → 交给 NAV bridge 统一处理 =====
       if (data.type === 'VVPHONE_INCOMING_CALL') {
-        console.log('[VV][listener] HIT VVPHONE_INCOMING_CALL');
-        try {
-          checkForIncomingCallTrigger(data.raw || '');
-        } catch (err) {
-          console.error('[VV][listener] incoming call trigger error:', err);
-        }
+        console.log('[VV][listener] VVPHONE_INCOMING_CALL → skip, handled by NAV bridge');
+        return;
+      }
+
+      // ===== 拦截器回复 → 交给 NAV bridge 统一处理 =====
+      if (data.type === 'VV_CALL_AI_REPLY') {
+        console.log('[VV][listener] VV_CALL_AI_REPLY → skip, handled by NAV bridge');
         return;
       }
 
@@ -6509,13 +6493,13 @@ async function handleVVCallSyncRaw(payload) {
 
   switch (parsed.callPhase.toLowerCase()) {
     case 'accept':
-    case 'accepted': {
+    case 'accepted':
+    case 'connected': {
       const firstLine = parsed.messages.length > 0 ? parsed.messages[0].text : '喂，你好。';
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
       handleCallAccepted(contactId, parsed.target || parsed.messages[0]?.speaker || '对方', firstLine);
 
-      // 如果有多句话，把第2句开始的也加进去
       if (parsed.messages.length > 1) {
         for (let i = 1; i < parsed.messages.length; i++) {
           const msg = parsed.messages[i];
@@ -6557,6 +6541,15 @@ async function handleVVCallSyncRaw(payload) {
       removeCallTypingIndicator();
       isWaitingCallAIReply = false;
 
+      // 如果还在呼叫阶段，AI跳过了accept直接reply，当作接听
+      if (currentCallPhase === 'calling') {
+        console.log('[VV_CALL] callPhase=reply but still calling, treating as accept');
+        var firstMsg = parsed.messages.length > 0 ? parsed.messages[0].text : '喂？';
+        var contact = contactList.find(i => i.id === contactId);
+        handleCallAccepted(contactId, parsed.target || contact?.name || '对方', firstMsg);
+        parsed.messages = parsed.messages.slice(1);
+      }
+
       parsed.messages.forEach(msg => {
         callLogs[contactId].push({
           speaker: msg.speaker,
@@ -6570,8 +6563,10 @@ async function handleVVCallSyncRaw(payload) {
         });
       });
 
-      renderCallTranscript();
-      saveAll();
+      if (parsed.messages.length > 0) {
+        renderCallTranscript();
+        saveAll();
+      }
       break;
     }
 
@@ -7513,11 +7508,10 @@ function initVVHostNavigationBridge() {
     console.log('[VV][NAV] message type =', type, 'data =', data);
 
     try {
-      // ========== 处理电话同步（从桥接脚本转发过来的） ==========
+      // ========== 处理电话同步 ==========
       if (type === 'VVPHONE_CALL_SYNC') {
         const raw = String(data.raw || '');
         const chatId = String(data.chatId || '').trim();
-        const viewId = String(data.viewId || '').trim();
 
         console.log('[VV][NAV] VVPHONE_CALL_SYNC received, raw length =', raw.length, 'chatId =', chatId);
 
@@ -7525,6 +7519,15 @@ function initVVHostNavigationBridge() {
           console.warn('[VV][NAV] VVPHONE_CALL_SYNC ignored: empty raw');
           return;
         }
+
+        // 防重复
+        var dedupKey = 'callsync_' + raw.length + '_' + chatId;
+        if (window._lastCallSyncKey === dedupKey && Date.now() - (window._lastCallSyncTime || 0) < 3000) {
+          console.log('[VV][NAV] VVPHONE_CALL_SYNC deduplicated, skip');
+          return;
+        }
+        window._lastCallSyncKey = dedupKey;
+        window._lastCallSyncTime = Date.now();
 
         try {
           await handleVVCallSyncRaw({ raw, chatId });
