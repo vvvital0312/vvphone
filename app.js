@@ -2499,13 +2499,21 @@ function applyTextColor(color) {
   if (box) box.style.setProperty('--text-color', color);
 }
 
+function applyDialogBgColor(color) {
+  document.querySelectorAll('.dialog-content').forEach(function(el) {
+    el.style.background = color;
+  });
+}
+
 function initColorPickers() {
   const borderPicker = document.getElementById('borderColorPicker');
   const textPicker = document.getElementById('textColorPicker');
+  const dialogBgPicker = document.getElementById('dialogBgColorPicker');
   if (!borderPicker || !textPicker) return;
 
   const savedBorder = localStorage.getItem('st_phone_border_color');
   const savedText = localStorage.getItem('st_phone_text_color');
+  const savedDialogBg = localStorage.getItem('st_phone_dialog_bg_color');
 
   if (savedBorder) {
     borderPicker.value = savedBorder;
@@ -2519,6 +2527,20 @@ function initColorPickers() {
     applyTextColor(savedText);
   } else {
     applyTextColor('#ffffff');
+  }
+
+  if (dialogBgPicker) {
+    if (savedDialogBg) {
+      dialogBgPicker.value = savedDialogBg;
+      applyDialogBgColor(savedDialogBg);
+    } else {
+      applyDialogBgColor('#fde5ec');
+    }
+
+    dialogBgPicker.addEventListener('input', e => {
+      applyDialogBgColor(e.target.value);
+      localStorage.setItem('st_phone_dialog_bg_color', e.target.value);
+    });
   }
 
   borderPicker.addEventListener('input', e => {
@@ -5890,13 +5912,13 @@ async function simulateOutgoingCall(contactId) {
     }, 800 + Math.random() * 700);
   }
 
-  // 呼叫超时安全网（30秒无回应当作无人接听）
+  // 呼叫超时安全网（60秒无回应当作无人接听）
   setTimeout(() => {
     if (currentCallId === contactId && currentCallPhase === 'calling') {
       console.warn('[VV_CALL] calling timeout, no response from AI');
       handleCallMissed(contactId);
     }
-  }, 30000);
+  }, 60000);
 }
 
 // ============================================================
@@ -6193,7 +6215,7 @@ async function sendCallMessage() {
         setCallInputVisible(true);
       }
     }
-  }, 20000);
+  }, 60000);
 }
 
 function jumpCallToChat() {
@@ -7731,6 +7753,31 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      // ========== RP指令：自动发消息 ==========
+      if (type === 'VV_RP_SEND_MESSAGE') {
+        console.log('[VV][NAV] VV_RP_SEND_MESSAGE received:', data);
+        try {
+          await handleRPSendMessage(
+            String(data.targetName || ''),
+            Array.isArray(data.messages) ? data.messages : []
+          );
+        } catch (err) {
+          console.error('[VV][NAV] handleRPSendMessage error:', err);
+        }
+        return;
+      }
+
+      // ========== RP指令：自动打电话 ==========
+      if (type === 'VV_RP_MAKE_CALL') {
+        console.log('[VV][NAV] VV_RP_MAKE_CALL received:', data);
+        try {
+          handleRPMakeCall(String(data.targetName || ''));
+        } catch (err) {
+          console.error('[VV][NAV] handleRPMakeCall error:', err);
+        }
+        return;
+      }
+
       // ========== 原有的导航处理 ==========
       if (type === 'VVPHONE_SET_VIEW') {
         if (String(data.view || '') !== 'chat') return;
@@ -8528,6 +8575,162 @@ function saveCustomFonts() {
     console.warn('保存字体失败，可能存储空间不足:', e);
     alert('存储空间不足，无法保存字体。建议删除部分已导入的字体。');
   }
+}
+
+// ===================== RP指令辅助函数 =====================
+
+// 通过备注名或角色名查找联系人
+function findContactByName(targetName) {
+  if (!targetName || !Array.isArray(contactList)) return null;
+  targetName = targetName.trim();
+
+  // 1. 精确匹配备注名
+  var found = contactList.find(function (c) {
+    return (c.displayName || '') === targetName || (c.name || '') === targetName;
+  });
+  if (found) return found;
+
+  // 2. 精确匹配角色名
+  found = contactList.find(function (c) {
+    return (c.bridgeName || '') === targetName;
+  });
+  if (found) return found;
+
+  // 3. 模糊匹配备注名
+  found = contactList.find(function (c) {
+    var dn = c.displayName || c.name || '';
+    return dn && (dn.includes(targetName) || targetName.includes(dn));
+  });
+  if (found) return found;
+
+  // 4. 模糊匹配角色名
+  found = contactList.find(function (c) {
+    var bn = c.bridgeName || '';
+    return bn && (bn.includes(targetName) || targetName.includes(bn));
+  });
+  if (found) return found;
+
+  return null;
+}
+
+// 处理RP发消息指令
+async function handleRPSendMessage(targetName, messageTexts) {
+  if (!targetName || !Array.isArray(messageTexts) || messageTexts.length === 0) {
+    console.warn('[VV][RP_CMD] handleRPSendMessage: 参数无效', targetName, messageTexts);
+    return;
+  }
+
+  var contact = findContactByName(targetName);
+
+  // 找不到就自动创建
+  if (!contact) {
+    console.warn('[VV][RP_CMD] 找不到联系人:', targetName, '，自动创建');
+    createNewContact(targetName, targetName);
+    // createNewContact 是 unshift 到 contactList 头部的，所以取第一个
+    contact = contactList[0];
+    if (!contact || (contact.displayName !== targetName && contact.name !== targetName && contact.bridgeName !== targetName)) {
+      console.error('[VV][RP_CMD] 自动创建联系人失败');
+      return;
+    }
+  }
+
+  console.log('[VV][RP_CMD] 匹配到联系人:', contact.id, contact.displayName || contact.name);
+
+  // 打开聊天界面
+  await openChat(contact.id, contact.threadType || 'direct');
+
+  // 确保消息数组存在
+  if (!messages[contact.id]) messages[contact.id] = [];
+
+  var time = getNowTime();
+  var timeLabel = getNowFullLabel();
+
+  // 逐条添加用户消息气泡
+  messageTexts.forEach(function (text, index) {
+    if (!text || !text.trim()) return;
+    messages[contact.id].push({
+      id: 'm' + Date.now() + '_rp_' + index,
+      sender: 'me',
+      senderName: '我',
+      isMe: true,
+      type: 'text',
+      chunks: [text.trim()],
+      replyTo: null,
+      recalled: false,
+      time: time,
+      timeLabel: timeLabel,
+      pendingForReply: true
+    });
+  });
+
+  // 更新最后一条消息预览
+  var lastText = messageTexts[messageTexts.length - 1];
+  if (typeof updateLastMsg === 'function') {
+    updateLastMsg(contact.id, lastText, time, contact.threadType || 'direct');
+  }
+
+  // 标记等待回复
+  if (typeof pendingReplyTargets !== 'undefined') {
+    pendingReplyTargets[contact.id] = true;
+  }
+
+  // 渲染
+  renderMessages();
+  if (typeof applyBubbleToChat === 'function') applyBubbleToChat(contact.id);
+  saveAll();
+  if (typeof renderChatList === 'function') renderChatList();
+
+  console.log('[VV][RP_CMD] 消息已渲染:', messageTexts.length, '条, chatId:', contact.id);
+}
+
+// 处理RP打电话指令
+function handleRPMakeCall(targetName) {
+  if (!targetName) {
+    console.warn('[VV][RP_CMD] handleRPMakeCall: targetName为空');
+    return;
+  }
+
+  var contact = findContactByName(targetName);
+
+  // 找不到就自动创建
+  if (!contact) {
+    console.warn('[VV][RP_CMD] 找不到联系人:', targetName, '，自动创建');
+    var id = 'c' + Date.now();
+    var time = getNowTime();
+    contact = {
+      id: id,
+      name: targetName,
+      displayName: targetName,
+      bridgeName: targetName,
+      avatar: DEFAULT_AVATAR,
+      isSticky: false,
+      lastTime: time,
+      threadType: 'direct'
+    };
+    contactList.unshift(contact);
+
+    if (!messages[id]) {
+      messages[id] = [{
+        id: 'm' + Date.now(),
+        sender: 'system',
+        senderName: '系统',
+        isMe: false,
+        type: 'system',
+        chunks: ['已通过电话建立联系'],
+        time: time,
+        timeLabel: getNowFullLabel()
+      }];
+    }
+
+    getChatSetting(id);
+    getRelSetting(id);
+    saveAll();
+  }
+
+  console.log('[VV][RP_CMD] 开始拨打电话:', contact.id, contact.displayName || contact.name);
+
+  // 调用现有的拨打电话函数
+  simulateOutgoingCall(contact.id);
 }
 
 window.addEventListener('beforeunload', () => {
