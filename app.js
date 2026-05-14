@@ -5306,9 +5306,7 @@ function toggleEmojiPanel() {
   const panel = document.getElementById('emojiPanel');
   const toolbar = document.querySelector('.input-toolbar');
   if (!panel || !toolbar) return;
-
   const isOpen = panel.classList.contains('show');
-
   if (isOpen) {
     closeEmojiPanel();
   } else {
@@ -5426,10 +5424,8 @@ function closeEmojiPanel() {
   const toolbar = document.querySelector('.input-toolbar');
   const messageArea = document.getElementById('messageArea');
   if (!panel || !messageArea) return;
-
   panel.classList.remove('show');
   messageArea.style.bottom = '104px';
-
   setTimeout(() => {
     if (!panel.classList.contains('show')) {
       panel.style.display = 'none';
@@ -5437,7 +5433,6 @@ function closeEmojiPanel() {
     // 动画结束后移除animating类
     if (toolbar) toolbar.classList.remove('animating');
   }, 250);
-
   if (stickerManageMode) {
     stickerManageMode = false;
     stickerRenameId = null;
