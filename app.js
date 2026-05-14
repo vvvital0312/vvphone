@@ -1584,12 +1584,28 @@ async function handleVVChatSyncRaw(payload) {
     return false;
   }
 
-  const incomingChatId = String(parsed.chatId || '').trim();
-    // 记录剧情时间
-    if (parsed.time) {
-      updateStoryTime(incomingChatId, parsed.time);
-    }
+  let incomingChatId = String(parsed.chatId || '').trim();
   const incomingName = String(parsed.target || '').trim();
+
+  // ★ 修复：RP场景下，AI可能生成随机chatId，尝试映射到已有联系人
+  if (incomingName && Array.isArray(contactList)) {
+    var existingById = contactList.find(function(c) {
+      return String(c.id || '') === incomingChatId;
+    });
+
+    if (!existingById) {
+      var existingByName = findContactByName(incomingName);
+      if (existingByName) {
+        console.log('[VV][SYNC_FLOW] RP chatId remap:', incomingChatId, '->', existingByName.id, '(matched by name:', incomingName, ')');
+        incomingChatId = existingByName.id;
+      }
+    }
+  }
+
+  // 记录剧情时间
+  if (parsed.time) {
+    updateStoryTime(incomingChatId, parsed.time);
+  }
   parsed.chatId = incomingChatId;
 
   const area = document.getElementById('messageArea');
@@ -8606,16 +8622,19 @@ async function handleRPSendMessage(targetName, messageTexts) {
 
   var contact = findContactByName(targetName);
 
-  // 找不到就自动创建
   if (!contact) {
-    console.warn('[VV][RP_CMD] 找不到联系人:', targetName, '，自动创建');
-    createNewContact(targetName, targetName);
-    // createNewContact 是 unshift 到 contactList 头部的，所以取第一个
-    contact = contactList[0];
-    if (!contact || (contact.displayName !== targetName && contact.name !== targetName && contact.bridgeName !== targetName)) {
-      console.error('[VV][RP_CMD] 自动创建联系人失败');
-      return;
-    }
+    console.warn('[VV][RP_CMD] 找不到联系人:', targetName, '，等待AI回复后由同步块创建');
+    // ★ 修复：不再自动创建联系人
+    // 先临时存储消息，等 handleVVChatSyncRaw 收到同步块后会创建联系人并追加消息
+    if (!window._pendingRPMessages) window._pendingRPMessages = {};
+    if (!window._pendingRPMessages[targetName]) window._pendingRPMessages[targetName] = [];
+    messageTexts.forEach(function (text) {
+      if (text && text.trim()) {
+        window._pendingRPMessages[targetName].push(text.trim());
+      }
+    });
+    console.log('[VV][RP_CMD] 暂存消息到 _pendingRPMessages:', targetName, window._pendingRPMessages[targetName]);
+    return;
   }
 
   console.log('[VV][RP_CMD] 匹配到联系人:', contact.id, contact.displayName || contact.name);
@@ -8657,6 +8676,10 @@ async function handleRPSendMessage(targetName, messageTexts) {
   if (typeof pendingReplyTargets !== 'undefined') {
     pendingReplyTargets[contact.id] = true;
   }
+
+  // ★ 新增：记录RP消息的chatId，帮助后续同步块匹配
+  if (!window._rpChatIdMap) window._rpChatIdMap = {};
+  window._rpChatIdMap[targetName] = contact.id;
 
   // 渲染
   renderMessages();
