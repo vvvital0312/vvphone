@@ -1193,47 +1193,37 @@ function parseVVChatBlocks(raw, fallback = {}) {
     chatBgKey: chat.chatBgKey
   });
 
-    // ===== 修复：支持无闭合标签的 [消息] 块 =====
-    const msgBlocks = [];
-    const msgSplitRegex = /\[消息\]/gi;
-    let splitMatch;
-    const splitPositions = [];
+  // ===== 消息块提取（支持有/无闭合标签 [/消息]） =====
+  const msgSplitRegex = /\[消息\]/gi;
+  let splitMatch;
+  const splitPositions = [];
 
-    while ((splitMatch = msgSplitRegex.exec(full))) {
-      splitPositions.push(splitMatch.index + splitMatch[0].length);
-    }
+  while ((splitMatch = msgSplitRegex.exec(full))) {
+    splitPositions.push(splitMatch.index + splitMatch[0].length);
+  }
 
-    for (let si = 0; si < splitPositions.length; si++) {
-      const start = splitPositions[si];
-      let end;
-      if (si + 1 < splitPositions.length) {
-        // 到下一个 [消息] 标签之前
-        const nextTagStart = full.lastIndexOf('[消息]', splitPositions[si + 1]);
-        end = nextTagStart > start ? nextTagStart : splitPositions[si + 1];
-      } else {
-        // 最后一个：到 [/VV_CHAT_SYNC] 或 [/消息] 或末尾
-        const closeSyncIdx = full.indexOf('[/VV_CHAT_SYNC]', start);
-        const closeMsgIdx = full.indexOf('[/消息]', start);
-        if (closeMsgIdx !== -1 && (closeSyncIdx === -1 || closeMsgIdx < closeSyncIdx)) {
-          end = closeMsgIdx;
-        } else if (closeSyncIdx !== -1) {
-          end = closeSyncIdx;
-        } else {
-          end = full.length;
-        }
-      }
-      const block = full.substring(start, end).replace(/\[\/消息\]\s*$/i, '').trim();
-      if (block) msgBlocks.push(block);
-    }
-
-  console.log('[VV][parseVVChatBlocks] msgBlocks found:', msgBlocks.length);
+  console.log('[VV][parseVVChatBlocks] msgBlocks found:', splitPositions.length);
 
   let msgIndex = 0;
-  for (const block of msgBlocks) {
 
-    console.log('[VV] found [消息] block >>>');
+  for (let si = 0; si < splitPositions.length; si++) {
+    const start = splitPositions[si];
+    let end;
+
+    if (si + 1 < splitPositions.length) {
+      const nextTagSearch = full.substring(start).indexOf('[消息]');
+      end = nextTagSearch !== -1 ? start + nextTagSearch : splitPositions[si + 1];
+    } else {
+      const closeMsgIdx = full.indexOf('[/消息]', start);
+      end = closeMsgIdx !== -1 ? closeMsgIdx : full.length;
+    }
+
+    const block = full.substring(start, end).replace(/\[\/消息\]\s*$/i, '').trim();
+    if (!block) continue;
+
+    console.log('[VV] found msg block >>>');
     console.log(block);
-    console.log('<<< [VV] found [消息] block');
+    console.log('<<< [VV] found msg block');
 
     function readMsgField(name) {
       const mm = block.match(new RegExp('^\\s*' + escapeRegExp(name) + '\\s*[=:]\\s*(.*)$', 'mi'));
@@ -1263,7 +1253,7 @@ function parseVVChatBlocks(raw, fallback = {}) {
     chat.messages.push(msg);
     msgIndex++;
   }
-  // ===== 修复结束 =====
+  // ===== 消息块提取结束 =====
 
   chat.messages = chat.messages.filter(Boolean);
 
@@ -5313,21 +5303,18 @@ function initDefaultStickers() {
 }
 
 function toggleEmojiPanel() {
-  console.log('toggleEmojiPanel fired');
-
   const panel = document.getElementById('emojiPanel');
-  console.log('emojiPanel =', panel);
-
-  if (!panel) return;
+  const toolbar = document.querySelector('.input-toolbar');
+  if (!panel || !toolbar) return;
 
   const isOpen = panel.classList.contains('show');
-  console.log('isOpen =', isOpen);
 
   if (isOpen) {
     closeEmojiPanel();
   } else {
     renderEmojiPanel();
     panel.style.display = 'block';
+    toolbar.classList.add('animating');
     requestAnimationFrame(() => {
       panel.classList.add('show');
     });
@@ -5432,11 +5419,11 @@ function sendStickerDirect(stickerId) {
   renderMessages();
   saveAll();
   closeEmojiPanel();
-  triggerAIReplySoon(80);
 }
 
 function closeEmojiPanel() {
   const panel = document.getElementById('emojiPanel');
+  const toolbar = document.querySelector('.input-toolbar');
   const messageArea = document.getElementById('messageArea');
   if (!panel || !messageArea) return;
 
@@ -5447,7 +5434,9 @@ function closeEmojiPanel() {
     if (!panel.classList.contains('show')) {
       panel.style.display = 'none';
     }
-  }, 180);
+    // 动画结束后移除animating类
+    if (toolbar) toolbar.classList.remove('animating');
+  }, 250);
 
   if (stickerManageMode) {
     stickerManageMode = false;
