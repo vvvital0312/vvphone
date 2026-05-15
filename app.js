@@ -1441,7 +1441,7 @@ function appendVVChatReplyToLocal(chatData) {
         const newMsg = {
           id: 'm' + Date.now() + '_' + Math.random().toString(36).slice(2),
           sender: 'them',
-          senderName: msg.sender || chatData.target || '对方',
+          senderName: (contact && contact.name) ? contact.name : (msg.sender || chatData.target || '对方'),
           isMe: false,
           type: normalizedType || 'text',
           chunks: [normalizedContent],
