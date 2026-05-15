@@ -4439,6 +4439,7 @@ function buildVVEventPayload(chatId) {
     '如果角色继续回复线上消息，你必须只输出一个完整的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 块。',
     '不要输出 [聊天界面]。',
     '[VV_CHAT_SYNC] 只用于前端同步，只包含本轮新增消息，不要重复历史消息。',
+    '[VV_CHAT_SYNC] 中的 chatId 和 target 必须与 [VV_EVENT] 中的完全一致，不得自行替换为其他名称或ID。',
     '如果事件中存在 messageCount 和 message1、message2、message3... 字段，你必须按编号顺序逐条展开成 side=right 的 [消息] 块，不可合并，不可省略。',
     '如果事件中只有单个 message 字段，则只展开这一条用户消息。',
     '然后再输出角色自己的 side=left 的 [消息] 回复块。',
