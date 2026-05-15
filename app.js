@@ -1342,6 +1342,50 @@ function appendVVChatReplyToLocal(chatData) {
         (!!content || hasTransferSignal);
     });
 
+    // ===== 处理 side=right（用户消息）=====
+    const rightMsgs = allMsgs.filter(function(msg) {
+      var side = String(msg.side || '').trim().toLowerCase();
+      var content = String(msg.content || '').trim();
+      return (side === 'right' || side === 'user' || side === 'me') && !!content;
+    });
+
+    for (var ri = 0; ri < rightMsgs.length; ri++) {
+      var rMsg = rightMsgs[ri];
+      var rContent = String(rMsg.content || '').trim();
+      var rTimeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
+
+      // 去重：检查线程里是否已有相同的用户消息
+      var rDuplicated = thread.some(function(item) {
+        if (!item.isMe || item.recalled) return false;
+        var oldText = Array.isArray(item.chunks)
+          ? item.chunks.join('\n').trim()
+          : String(item.text || '').trim();
+        return oldText === rContent && String(item.timeLabel || '') === String(rTimeLabel || '');
+      });
+
+      if (!rDuplicated) {
+        var rNewMsg = {
+          id: 'm' + Date.now() + '_r' + Math.random().toString(36).slice(2),
+          sender: 'me',
+          senderName: rMsg.sender || '我',
+          isMe: true,
+          type: String(rMsg.type || 'text').trim().toLowerCase() || 'text',
+          chunks: [rContent],
+          text: rContent,
+          replyTo: null,
+          recalled: false,
+          time: typeof getNowTime === 'function' ? getNowTime() : Date.now(),
+          timeLabel: rTimeLabel,
+          state: rMsg.state || 'sent'
+        };
+        thread.push(rNewMsg);
+        console.log('[VV][APPEND] pushed right msg =', rNewMsg);
+      } else {
+        console.log('[VV][APPEND] skipped duplicate right msg =', rContent);
+      }
+    }
+    // ===== 处理 side=right 结束 =====
+
     console.log('[VV][APPEND] chatId =', chatId);
     console.log('[VV][APPEND] currentChatId =', currentChatId);
     console.log('[VV][APPEND] allMsgs =', allMsgs);
@@ -1587,8 +1631,14 @@ async function handleVVChatSyncRaw(payload) {
   let incomingChatId = String(parsed.chatId || '').trim();
   const incomingName = String(parsed.target || '').trim();
 
-  // ★ 修复：RP场景下，AI可能生成随机chatId，尝试映射到已有联系人
-  if (incomingName && Array.isArray(contactList)) {
+  // ★ 优先信任 host 传来的 chatId
+  if (payloadChatId && payloadChatId !== incomingChatId) {
+    console.log('[VV][SYNC_FLOW] override AI chatId with host payload:', incomingChatId, '->', payloadChatId);
+    incomingChatId = payloadChatId;
+  }
+
+  // ★ 兜底：如果 host 没传 chatId，且 AI 的 chatId 在本地找不到，按名字 remap
+  if (!payloadChatId && incomingName && Array.isArray(contactList)) {
     var existingById = contactList.find(function(c) {
       return String(c.id || '') === incomingChatId;
     });
