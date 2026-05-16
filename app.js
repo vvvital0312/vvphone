@@ -8739,6 +8739,18 @@ async function handleRPSendMessage(targetName, messageTexts) {
   saveAll();
   if (typeof renderChatList === 'function') renderChatList();
 
+  // 回传正确的 chatId 和 targetName 给 host，用于 inject
+  try {
+    window.parent.postMessage({
+      type: 'VV_RP_CONTEXT',
+      chatId: contact.id,
+      targetName: contact.displayName || contact.name
+    }, '*');
+    console.log('[VV][RP_CMD] sent VV_RP_CONTEXT to host:', contact.id, contact.displayName || contact.name);
+  } catch (e) {
+    console.warn('[VV][RP_CMD] failed to send VV_RP_CONTEXT:', e);
+  }
+
   console.log('[VV][RP_CMD] 消息已渲染:', messageTexts.length, '条, chatId:', contact.id);
 }
 
