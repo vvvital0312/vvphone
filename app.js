@@ -4409,7 +4409,8 @@ function buildVVEventPayload(chatId) {
   const chatSetting = getChatSetting(chatId) || {};
   const rel = getRelSetting(chatId) || {};
   const time = typeof getNowFullLabel === 'function' ? getNowFullLabel() : getNowTime();
-  const targetName = rel.name || chatSetting.name || getBridgeNameByChatId(chatId, currentChatType) || '未知联系人';
+  const contact = contactList.find(c => c.id === chatId) || {};
+  const targetName = contact.displayName || contact.name || rel.name || chatSetting.name || getBridgeNameByChatId(chatId, currentChatType) || '未知联系人';
 
   function toMessageText(m) {
     if (!m) return '[消息]';
