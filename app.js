@@ -1637,12 +1637,25 @@ async function handleVVChatSyncRaw(payload) {
     incomingChatId = payloadChatId;
   }
 
-  // ★ 兜底：如果 host 没传 chatId，且 AI 的 chatId 在本地找不到，按名字 remap
-  if (!payloadChatId && incomingName && Array.isArray(contactList)) {
+  // ★ 用 _rpChatIdMap 精确覆盖：AI 输出的 target 可能是 bridgeName 而非备注名
+  if (window._rpChatIdMap && incomingName) {
+    var rpCorrectChatId = null;
+    Object.keys(window._rpChatIdMap).forEach(function(name) {
+      if (name === incomingName || name.includes(incomingName) || incomingName.includes(name)) {
+        rpCorrectChatId = window._rpChatIdMap[name];
+      }
+    });
+    if (rpCorrectChatId && rpCorrectChatId !== incomingChatId) {
+      console.log('[VV][SYNC_FLOW] _rpChatIdMap remap:', incomingChatId, '->', rpCorrectChatId, '(target:', incomingName, ')');
+      incomingChatId = rpCorrectChatId;
+    }
+  }
+
+  // ★ 兜底：按名字 remap
+  if (incomingName && Array.isArray(contactList)) {
     var existingById = contactList.find(function(c) {
       return String(c.id || '') === incomingChatId;
     });
-
     if (!existingById) {
       var existingByName = findContactByName(incomingName);
       if (existingByName) {
