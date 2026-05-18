@@ -1352,18 +1352,19 @@ function appendVVChatReplyToLocal(chatData) {
     for (var ri = 0; ri < rightMsgs.length; ri++) {
       var rMsg = rightMsgs[ri];
       var rContent = String(rMsg.content || '').trim();
-      var rTimeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
 
-      // 去重：检查线程里是否已有相同的用户消息
+      // ★ 去重改进：只比较内容，不比较 timeLabel
+      // 因为 handleRPSendMessage 用的是 getNowFullLabel()，AI 输出的是 chatData.time，两者不一致
       var rDuplicated = thread.some(function(item) {
         if (!item.isMe || item.recalled) return false;
         var oldText = Array.isArray(item.chunks)
           ? item.chunks.join('\n').trim()
           : String(item.text || '').trim();
-        return oldText === rContent && String(item.timeLabel || '') === String(rTimeLabel || '');
+        return oldText === rContent;
       });
 
       if (!rDuplicated) {
+        var rTimeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
         var rNewMsg = {
           id: 'm' + Date.now() + '_r' + Math.random().toString(36).slice(2),
           sender: 'me',
@@ -1384,7 +1385,6 @@ function appendVVChatReplyToLocal(chatData) {
         console.log('[VV][APPEND] skipped duplicate right msg =', rContent);
       }
     }
-    // ===== 处理 side=right 结束 =====
 
     console.log('[VV][APPEND] chatId =', chatId);
     console.log('[VV][APPEND] currentChatId =', currentChatId);
