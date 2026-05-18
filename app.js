@@ -1274,7 +1274,7 @@ function parseVVChatBlocks(raw, fallback = {}) {
   return chat;
 }
 
-function appendVVChatReplyToLocal(chatData) {
+function appendVVChatReplyToLocal(chatData, msgIndex) {
   try {
     if (!chatData || !chatData.chatId) {
       console.warn('[VV][APPEND] invalid chatData');
@@ -1329,6 +1329,16 @@ function appendVVChatReplyToLocal(chatData) {
     const timeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
     const allMsgs = Array.isArray(chatData.messages) ? chatData.messages : [];
 
+    const syncKey = (msgIndex >= 0) ? ('sync_' + chatId + '_' + msgIndex) : null;
+
+    if (syncKey) {
+      const existingBatchMsgs = thread.filter(m => m._syncKey === syncKey);
+      if (existingBatchMsgs.length > 0) {
+        console.log('[VV][APPEND] edit mode detected, syncKey=', syncKey, 'existing=', existingBatchMsgs.length);
+        return handleSyncOverwrite(chatData, chatId, thread, syncKey, allMsgs, contact, time, timeLabel);
+      }
+    }
+
     const leftMsgs = allMsgs.filter(msg => {
       const side = String(msg.side || '').trim().toLowerCase();
       const hasTransferSignal =
@@ -1379,6 +1389,7 @@ function appendVVChatReplyToLocal(chatData) {
           timeLabel: rTimeLabel,
           state: rMsg.state || 'sent'
         };
+        if (syncKey) rNewMsg._syncKey = syncKey;
         thread.push(rNewMsg);
         console.log('[VV][APPEND] pushed right msg =', rNewMsg);
       } else {
@@ -1452,6 +1463,8 @@ function appendVVChatReplyToLocal(chatData) {
           timeLabel,
           state: msg.state || 'reply'
         };
+
+        if (syncKey) newMsg._syncKey = syncKey;
 
         console.log('[VV][APPEND] before push newMsg =', newMsg);
         thread.push(newMsg);
@@ -1577,8 +1590,68 @@ function appendVVChatReplyToLocal(chatData) {
   }
 }
 
+function handleSyncOverwrite(chatData, chatId, thread, syncKey, allMsgs, contact, time, timeLabel) {
+  // 找到这个批次的所有消息在 thread 里的起始位置
+  var batchStartIdx = -1;
+  for (var i = 0; i < thread.length; i++) {
+    if (thread[i]._syncKey === syncKey) {
+      batchStartIdx = i;
+      break;
+    }
+  }
+
+  if (batchStartIdx < 0) return 0;
+
+  // 移除旧批次消息
+  var oldBatchCount = 0;
+  while (batchStartIdx + oldBatchCount < thread.length && thread[batchStartIdx + oldBatchCount]._syncKey === syncKey) {
+    oldBatchCount++;
+  }
+
+  thread.splice(batchStartIdx, oldBatchCount);
+  console.log('[VV][OVERWRITE] removed', oldBatchCount, 'old msgs at index', batchStartIdx);
+
+  // 按新 allMsgs 顺序插入
+  var insertCount = 0;
+  for (var j = 0; j < allMsgs.length; j++) {
+    var msg = allMsgs[j];
+    var side = String(msg.side || '').trim().toLowerCase();
+    var content = String(msg.content || '').trim();
+    var transferAction = String(msg.transferAction || '').trim().toLowerCase();
+
+    if (!content && !transferAction) continue;
+
+    var isMe = (side === 'right' || side === 'user' || side === 'me');
+
+    var newMsg = {
+      id: 'm' + Date.now() + '_ow_' + j,
+      sender: isMe ? 'me' : 'them',
+      senderName: isMe ? (msg.sender || '我') : ((contact && contact.name) ? contact.name : (msg.sender || chatData.target || '对方')),
+      isMe: isMe,
+      type: String(msg.type || 'text').trim().toLowerCase() || 'text',
+      chunks: [content],
+      text: content,
+      replyTo: null,
+      recalled: false,
+      time: time,
+      timeLabel: timeLabel,
+      state: msg.state || (isMe ? 'sent' : 'reply'),
+      _syncKey: syncKey
+    };
+
+    thread.splice(batchStartIdx + insertCount, 0, newMsg);
+    insertCount++;
+  }
+
+  console.log('[VV][OVERWRITE] inserted', insertCount, 'new msgs at index', batchStartIdx);
+
+  if (typeof saveAll === 'function') saveAll();
+  return insertCount;
+}
+
 async function handleVVChatSyncRaw(payload) {
   console.log('[VV] handleVVChatSyncRaw called:', payload);
+  const payloadMsgIndex = typeof payload === 'object' ? (payload?.msgIndex ?? -1) : -1;
 
   const raw = typeof payload === 'string' ? payload : (payload?.raw || '');
   const payloadChatId = typeof payload === 'object' ? (payload?.chatId || '') : '';
@@ -1737,7 +1810,7 @@ async function handleVVChatSyncRaw(payload) {
   console.log('[VV][SYNC_FLOW] beforeLeftCount =', beforeLeftCount);
   console.log('[VV][SYNC_FLOW] currentChatId before append =', currentChatId);
 
-  const appended = appendVVChatReplyToLocal(parsed);
+  const appended = appendVVChatReplyToLocal(parsed, payloadMsgIndex);
 
   const afterThread = Array.isArray(messages[incomingChatId])
     ? messages[incomingChatId].slice()
