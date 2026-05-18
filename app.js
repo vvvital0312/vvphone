@@ -1352,50 +1352,7 @@ function appendVVChatReplyToLocal(chatData, msgIndex) {
         (!!content || hasTransferSignal);
     });
 
-    // ===== 处理 side=right（用户消息）=====
-    const rightMsgs = allMsgs.filter(function(msg) {
-      var side = String(msg.side || '').trim().toLowerCase();
-      var content = String(msg.content || '').trim();
-      return (side === 'right' || side === 'user' || side === 'me') && !!content;
-    });
-
-    for (var ri = 0; ri < rightMsgs.length; ri++) {
-      var rMsg = rightMsgs[ri];
-      var rContent = String(rMsg.content || '').trim();
-
-      // ★ 去重改进：只比较内容，不比较 timeLabel
-      // 因为 handleRPSendMessage 用的是 getNowFullLabel()，AI 输出的是 chatData.time，两者不一致
-      var rDuplicated = thread.some(function(item) {
-        if (!item.isMe || item.recalled) return false;
-        var oldText = Array.isArray(item.chunks)
-          ? item.chunks.join('\n').trim()
-          : String(item.text || '').trim();
-        return oldText === rContent;
-      });
-
-      if (!rDuplicated) {
-        var rTimeLabel = chatData.time || (typeof getNowFullLabel === 'function' ? getNowFullLabel() : '');
-        var rNewMsg = {
-          id: 'm' + Date.now() + '_r' + Math.random().toString(36).slice(2),
-          sender: 'me',
-          senderName: rMsg.sender || '我',
-          isMe: true,
-          type: String(rMsg.type || 'text').trim().toLowerCase() || 'text',
-          chunks: [rContent],
-          text: rContent,
-          replyTo: null,
-          recalled: false,
-          time: typeof getNowTime === 'function' ? getNowTime() : Date.now(),
-          timeLabel: rTimeLabel,
-          state: rMsg.state || 'sent'
-        };
-        if (syncKey) rNewMsg._syncKey = syncKey;
-        thread.push(rNewMsg);
-        console.log('[VV][APPEND] pushed right msg =', rNewMsg);
-      } else {
-        console.log('[VV][APPEND] skipped duplicate right msg =', rContent);
-      }
-    }
+    console.log('[VV][APPEND] rightMsgs skipped in append mode');
 
     console.log('[VV][APPEND] chatId =', chatId);
     console.log('[VV][APPEND] currentChatId =', currentChatId);
@@ -4182,6 +4139,11 @@ async function renderMessages() {
     applyBubbleToChat(currentChatId);
   }
 
+  const toolbar = document.querySelector('.input-toolbar');
+  if (toolbar) {
+    area.style.bottom = toolbar.offsetHeight + 'px';
+  }
+
   area.scrollTop = area.scrollHeight;
 }
 
@@ -4372,7 +4334,7 @@ function removeRefsPossiblyUnused(refs) {
   }, 0);
 }
 
-function sendMessage() {
+async function sendMessage() {
   if (!currentChatId) return;
   console.log('[sendMessage] currentChatId =', currentChatId);
   console.log('[sendMessage] before push thread =', messages[currentChatId]);
@@ -4454,7 +4416,18 @@ function sendMessage() {
 
   input.value = '';
   clearComposerDraft();
-  renderMessages();
+  await renderMessages();
+  requestAnimationFrame(() => {
+    const toolbarEl = document.querySelector('.input-toolbar');
+    const areaEl = document.getElementById('messageArea');
+    if (toolbarEl && areaEl) {
+      areaEl.style.bottom = toolbarEl.offsetHeight + 'px';
+    }
+  });
+  const areaEl = document.getElementById('messageArea');
+  if (toolbarEl && areaEl) {
+    areaEl.style.bottom = toolbarEl.offsetHeight + 'px';
+  }
   applyBubbleToChat(currentChatId);
   saveAll();
   closeEmojiPanel();
@@ -5579,12 +5552,16 @@ function closeEmojiPanel() {
   const messageArea = document.getElementById('messageArea');
   if (!panel || !messageArea) return;
   panel.classList.remove('show');
-  messageArea.style.bottom = '104px';
+  // ★ 动态计算而非硬编码
+  if (toolbar) {
+    messageArea.style.bottom = toolbar.offsetHeight + 'px';
+  } else {
+    messageArea.style.bottom = '104px';
+  }
   setTimeout(() => {
     if (!panel.classList.contains('show')) {
       panel.style.display = 'none';
     }
-    // 动画结束后移除animating类
     if (toolbar) toolbar.classList.remove('animating');
   }, 250);
   if (stickerManageMode) {
