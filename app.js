@@ -501,11 +501,12 @@ const VV_BRIDGE_CONFIG = {
 
     const feedContext =
       '[朋友圈动态发布]\n' +
+      '这不是电话，这不是聊天，这是朋友圈动态事件。\n' +
       'postId=' + postId + '\n' +
       '发布者:' + author + '\n' +
-      '内容:' + content +
+      '动态内容:' + content +
       imageNote + '\n' +
-      '请根据角色卡和世界书中的人物设定，模拟各角色对这条动态的自然反应，输出 [VV_FEED_SYNC] 块。';
+      '请根据角色卡和世界书中的人物设定，模拟各角色对这条动态的自然反应，只输出 [VV_FEED_SYNC] 块，不要输出 [VV_CALL_SYNC]，不要输出 [VV_CHAT_SYNC]。';
 
     const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + feedContext + '\n]] |\n/trigger';
     return cmd;
