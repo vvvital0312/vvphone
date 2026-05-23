@@ -497,18 +497,8 @@ const VV_BRIDGE_CONFIG = {
     const images = opts.images || [];
     const author = opts.author || '我';
 
-    const imageNote = images.length ? `\n附图数量:${images.length}张` : '';
-
-    const feedContext =
-      '[朋友圈动态发布]\n' +
-      '这不是电话，这不是聊天，这是朋友圈动态事件。\n' +
-      'postId=' + postId + '\n' +
-      '发布者:' + author + '\n' +
-      '动态内容:' + content +
-      imageNote + '\n' +
-      '请根据角色卡和世界书中的人物设定，模拟各角色对这条动态的自然反应，只输出 [VV_FEED_SYNC] 块，不要输出 [VV_CALL_SYNC]，不要输出 [VV_CHAT_SYNC]。';
-
-    const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + feedContext + '\n]] |\n/trigger';
+    const promptText = buildVVFeedEventPayload(postId, content, images, author);
+    const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + promptText + '\n]] |\n/trigger';
     return cmd;
   },
 
@@ -5079,6 +5069,55 @@ function buildVVCallEventPayload(contactId, callPhase, userMessage) {
     '',
     '[/VV_CALL_SYNC]'
   );
+
+  return lines.join('\n');
+}
+
+function buildVVFeedEventPayload(postId, content, images, author) {
+  const time = typeof getNowFullLabel === 'function' ? getNowFullLabel() : getNowTime();
+  const imageNote = images && images.length ? '\n附图数量:' + images.length + '张' : '';
+
+  const lines = [
+    '用户刚刚在朋友圈发布了一条动态。这不是电话，这不是私聊。',
+    '不要输出 [VV_CALL_SYNC]，不要输出 [VV_CHAT_SYNC]，不要引用之前的聊天内容，不要输出旁白。',
+    '',
+    '请根据角色卡和世界书中的人物设定，模拟各角色对这条动态的自然反应。',
+    '可以点赞（action=like），也可以评论（action=comment），也可以同时点赞和评论。',
+    '根据角色性格和与用户的关系自然决定是否互动，不要强行让每个角色都互动。',
+    '同一角色不要重复出现。from 必须是角色卡或世界书中存在的角色名，不能是"我"或"用户"。',
+    '',
+    '用户动态信息：',
+    'postId=' + postId,
+    '发布者:' + author,
+    '时间:' + time,
+    '内容:' + content + imageNote,
+    '',
+    '[VV_EVENT]',
+    'type=feed',
+    'postId=' + postId,
+    'author=' + author,
+    'time=' + time,
+    '[/VV_EVENT]',
+    '',
+    '严格按此格式输出，不要加任何其他文字：',
+    '',
+    '[VV_FEED_SYNC]',
+    'postId=' + postId,
+    'time=' + time,
+    '',
+    '[互动]',
+    'from=（角色名）',
+    'action=like',
+    '[/互动]',
+    '',
+    '[互动]',
+    'from=（角色名）',
+    'action=comment',
+    'content=（评论内容）',
+    '[/互动]',
+    '',
+    '[/VV_FEED_SYNC]'
+  ];
 
   return lines.join('\n');
 }
