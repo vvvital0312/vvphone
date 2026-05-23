@@ -1,3 +1,327 @@
+var phoneThemes = {
+  default: {
+    name: '默认主题',
+    html: `
+        <div id="homePage" class="page">
+          <div class="phone-notch">
+            <div class="notch-sensor"></div>
+            <div class="notch-forum"></div>
+            <div class="notch-speaker"></div>
+            <div class="notch-sensor"></div>
+          </div>
+
+          <div class="status-bar">
+            <div class="status-bar-right">
+              <svg class="status-icon-svg" viewBox="0 -1.5 13 13" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+          
+                  <title>wifi [#1029]</title>
+                  <desc>Created with Sketch.</desc>
+                  <defs>
+
+              </defs>
+                  <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+                      <g id="Dribbble-Light-Preview" transform="translate(-423.000000, -3604.000000)" fill="#000000">
+                          <g id="icons" transform="translate(56.000000, 160.000000)">
+                              <path d="M372.109921,3452.95655 L372.804851,3453.69409 C373.189176,3454.10197 373.811369,3454.10197 374.194711,3453.69409 L374.889641,3452.95655 C374.121974,3452.14182 372.877588,3452.14182 372.109921,3452.95655 M369.330202,3450.00642 L370.720061,3451.48148 C372.252446,3449.85411 374.747116,3449.85411 376.280483,3451.48148 L377.670343,3450.00642 C375.367344,3447.56118 371.633201,3447.56118 369.330202,3450.00642 M379.711884,3447.83867 L379.060203,3448.5303 C375.989537,3445.27139 371.011008,3445.27139 367.939359,3448.5303 L367.287678,3447.83867 C366.870917,3447.39636 366.913183,3446.66404 367.374176,3446.27285 C370.948101,3443.24238 376.052444,3443.24238 379.626369,3446.27285 C380.087362,3446.66404 380.128645,3447.39636 379.711884,3447.83867" id="wifi-[#1029]">
+
+              </path>
+                          </g>
+                      </g>
+                  </g>
+              </svg>
+              <svg class="status-icon-svg" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="16272" width="200" height="200"><path d="M144.700101 684.994006l535.580045 0L680.280146 359.237781 144.700101 359.237781 144.700101 684.994006 144.700101 684.994006zM918.373823 440.680675l0-81.442894c0-44.791136-36.649711-81.437777-81.437777-81.437777l-692.235944 0c-44.791136 0-81.437777 36.646642-81.437777 81.437777L63.262324 684.994006c0 44.791136 36.646642 81.442894 81.437777 81.442894l692.235944 0c44.788066 0 81.437777-36.650735 81.437777-81.442894l0-81.437777c22.396079 0 40.7194-18.322297 40.7194-40.7194l0-81.436754C959.093223 459.003995 940.769902 440.680675 918.373823 440.680675L918.373823 440.680675zM877.655446 481.400075l0 81.436754L877.655446 684.994006c0 22.395056-18.323321 40.718377-40.7194 40.718377l-692.235944 0c-22.396079 0-40.7194-18.323321-40.7194-40.718377L103.980701 359.237781c0-22.396079 18.323321-40.7194 40.7194-40.7194l692.235944 0c22.396079 0 40.7194 18.323321 40.7194 40.7194L877.655446 481.400075 877.655446 481.400075zM877.655446 481.400075" fill="#2c2c2c" p-id="16273"></path></svg>
+            </div>
+          </div>
+
+          <div class="widget-container">
+            <div class="widget">
+              <div class="time" id="mainTime">12:00</div>
+              <div class="date" id="mainDate">4月15日 周一</div>
+              <div class="weather" id="mainWeather">晴朗 25°C</div>
+            </div>
+          </div>
+
+          <div class="app-grid">
+            <div class="app-block" onclick="playClickSound(); triggerSlash('/send 查看论坛|/trigger')">
+              <img id="icon-forum" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_230401ac0e003ae5dbdd48.jpg" alt="论坛">
+              <span>论坛</span>
+            </div>
+            <div class="app-block" onclick="playClickSound(); triggerSlash('/send 写日记|/trigger')">
+              <img id="icon-diary" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214158c86ca004be758e29.jpg" alt="日记">
+              <span>日记</span>
+            </div>
+            <div class="app-block" onclick="playClickSound(); triggerSlash('/send 逛商城|/trigger')">
+              <img id="icon-vvshop" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214210c427fd5878af47f3.jpg" alt="VV商城">
+              <span>VV商城</span>
+            </div>
+            <div class="app-block" onclick="playClickSound(); triggerSlash('/send 看直播|/trigger')">
+              <img id="icon-vvplatform" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214221696afed7b7486be8.jpg" alt="VV热播">
+              <span>VV热播</span>
+            </div>
+          </div>
+
+          <div class="bottom-bar">
+            <div class="app" onclick="playClickSound(); showDialog('addCallDialog')">
+              <img id="icon-contact" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214204016ae99443901678.jpg" alt="电话">
+              <span>电话</span>
+            </div>
+            <div class="app" onclick="playClickSound(); openContactPage()">
+              <img id="icon-text" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_2142073e7ab738f74ed308.jpg" alt="消息">
+              <span>消息</span>
+            </div>
+            <div class="app" onclick="playClickSound(); triggerSlash('/send 播放音乐|/trigger')">
+              <img id="icon-music" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_2301265271c70deb5e9cc0.jpg" alt="音乐">
+              <span>音乐</span>
+            </div>
+            <div class="app" onclick="playClickSound(); showDialog('settingDialog')">
+              <img id="icon-setting" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_230347988f62db5134cb2a.jpg" alt="设置">
+              <span>设置</span>
+            </div>
+          </div>
+        </div>
+    `,
+    css: ``
+  },
+  theme1: {
+    name: '主题一',
+    html: `
+      <div id="homePage" class="page">
+        <div class="phone-notch">
+          <div class="notch-sensor"></div>
+          <div class="notch-forum"></div>
+          <div class="notch-speaker"></div>
+          <div class="notch-sensor"></div>
+        </div>
+
+        <div class="status-bar">
+          <div class="status-bar-right">
+            <svg class="status-icon-svg" viewBox="0 -1.5 13 13" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        
+                <title>wifi [#1029]</title>
+                <desc>Created with Sketch.</desc>
+                <defs>
+
+            </defs>
+                <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+                    <g id="Dribbble-Light-Preview" transform="translate(-423.000000, -3604.000000)" fill="#000000">
+                        <g id="icons" transform="translate(56.000000, 160.000000)">
+                            <path d="M372.109921,3452.95655 L372.804851,3453.69409 C373.189176,3454.10197 373.811369,3454.10197 374.194711,3453.69409 L374.889641,3452.95655 C374.121974,3452.14182 372.877588,3452.14182 372.109921,3452.95655 M369.330202,3450.00642 L370.720061,3451.48148 C372.252446,3449.85411 374.747116,3449.85411 376.280483,3451.48148 L377.670343,3450.00642 C375.367344,3447.56118 371.633201,3447.56118 369.330202,3450.00642 M379.711884,3447.83867 L379.060203,3448.5303 C375.989537,3445.27139 371.011008,3445.27139 367.939359,3448.5303 L367.287678,3447.83867 C366.870917,3447.39636 366.913183,3446.66404 367.374176,3446.27285 C370.948101,3443.24238 376.052444,3443.24238 379.626369,3446.27285 C380.087362,3446.66404 380.128645,3447.39636 379.711884,3447.83867" id="wifi-[#1029]">
+
+            </path>
+                        </g>
+                    </g>
+                </g>
+            </svg>
+            <svg class="status-icon-svg" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="16272" width="200" height="200"><path d="M144.700101 684.994006l535.580045 0L680.280146 359.237781 144.700101 359.237781 144.700101 684.994006 144.700101 684.994006zM918.373823 440.680675l0-81.442894c0-44.791136-36.649711-81.437777-81.437777-81.437777l-692.235944 0c-44.791136 0-81.437777 36.646642-81.437777 81.437777L63.262324 684.994006c0 44.791136 36.646642 81.442894 81.437777 81.442894l692.235944 0c44.788066 0 81.437777-36.650735 81.437777-81.442894l0-81.437777c22.396079 0 40.7194-18.322297 40.7194-40.7194l0-81.436754C959.093223 459.003995 940.769902 440.680675 918.373823 440.680675L918.373823 440.680675zM877.655446 481.400075l0 81.436754L877.655446 684.994006c0 22.395056-18.323321 40.718377-40.7194 40.718377l-692.235944 0c-22.396079 0-40.7194-18.323321-40.7194-40.718377L103.980701 359.237781c0-22.396079 18.323321-40.7194 40.7194-40.7194l692.235944 0c22.396079 0 40.7194 18.323321 40.7194 40.7194L877.655446 481.400075 877.655446 481.400075zM877.655446 481.400075" fill="#2c2c2c" p-id="16273"></path></svg>
+          </div>
+        </div>
+
+        <div class="widget-container">
+          <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzE3IiBoZWlnaHQ9IjYwIiB2aWV3Qm94PSIwIDAgMzE3IDYwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8Zm9yZWlnbk9iamVjdCB4PSItNCIgeT0iLTQiIHdpZHRoPSIzMjUiIGhlaWdodD0iNjgiPjxkaXYgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGh0bWwiIHN0eWxlPSJiYWNrZHJvcC1maWx0ZXI6Ymx1cigycHgpO2NsaXAtcGF0aDp1cmwoI2JnYmx1cl8wXzM1N18yMzZfY2xpcF9wYXRoKTtoZWlnaHQ6MTAwJTt3aWR0aDoxMDAlIj48L2Rpdj48L2ZvcmVpZ25PYmplY3Q+PGcgaWQ9IlJlY3RhbmdsZSAxIiBkYXRhLWZpZ21hLWJnLWJsdXItcmFkaXVzPSI0Ij4KPHBhdGggZD0iTTMxNi41IDI3LjVDMzE2LjUgMTIuNTg4MyAzMDQuNDEyIDAuNSAyODkuNSAwLjVIMjcuNUMxMi41ODgzIDAuNSAwLjUgMTIuNTg4MyAwLjUgMjcuNVYzMi41QzAuNSA0Ny40MTE3IDEyLjU4ODMgNTkuNSAyNy41IDU5LjVIMjg5LjVDMzA0LjQxMiA1OS41IDMxNi41IDQ3LjQxMTcgMzE2LjUgMzIuNVYyNy41WiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzM1N18yMzYpIiBzdHlsZT0ibWl4LWJsZW5kLW1vZGU6aGFyZC1saWdodCIvPgo8cGF0aCBkPSJNMzE2LjUgMjcuNUMzMTYuNSAxMi41ODgzIDMwNC40MTIgMC41IDI4OS41IDAuNUgyNy41QzEyLjU4ODMgMC41IDAuNSAxMi41ODgzIDAuNSAyNy41VjMyLjVDMC41IDQ3LjQxMTcgMTIuNTg4MyA1OS41IDI3LjUgNTkuNUgyODkuNUMzMDQuNDEyIDU5LjUgMzE2LjUgNDcuNDExNyAzMTYuNSAzMi41VjI3LjVaIiBzdHJva2U9IiMwRjBGMEYiIHN0cm9rZS1vcGFjaXR5PSIwLjU1IiBzdHlsZT0ibWl4LWJsZW5kLW1vZGU6aGFyZC1saWdodCIvPgo8L2c+CjxkZWZzPgo8Y2xpcFBhdGggaWQ9ImJnYmx1cl8wXzM1N18yMzZfY2xpcF9wYXRoIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0IDQpIj48cGF0aCBkPSJNMzE2LjUgMjcuNUMzMTYuNSAxMi41ODgzIDMwNC40MTIgMC41IDI4OS41IDAuNUgyNy41QzEyLjU4ODMgMC41IDAuNSAxMi41ODgzIDAuNSAyNy41VjMyLjVDMC41IDQ3LjQxMTcgMTIuNTg4MyA1OS41IDI3LjUgNTkuNUgyODkuNUMzMDQuNDEyIDU5LjUgMzE2LjUgNDcuNDExNyAzMTYuNSAzMi41VjI3LjVaIi8+CjwvY2xpcFBhdGg+PGxpbmVhckdyYWRpZW50IGlkPSJwYWludDBfbGluZWFyXzM1N18yMzYiIHgxPSIxNTguNSIgeTE9IjAuNSIgeDI9IjE1OC41IiB5Mj0iNTkuNSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcC8+CjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQyNDI0MiIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+Cjwvc3ZnPgo=">        
+          <div class="time" style="position: absolute;left: 25px;top: 8px;width: 112px;text-align: left;vertical-align: top;display: flex;flex-direction: row;justify-content: flex-start;color:var(--text-color);font-size: 24px;" id="mainTime">12:00</div>
+          <div class="date" style="position: absolute;left: 25px;top: 37px;width: 112px;text-align: left;vertical-align: top;display: flex;flex-direction: row;justify-content: flex-start;color:var(--text-color);font-size: 12px;" id="mainDate">5月22日 周五</div>
+          <div class="weather" style="position: absolute;left: 176px;top: 18px;width: 120px;text-align: left;vertical-align: top;display: flex;flex-direction: row;justify-content: flex-start;color:var(--text-color);font-size: 24px;" id="mainWeather">晴朗 25°C</div>
+        </div>
+
+        <div class="app-1">
+          <div class="app-block" onclick="playClickSound(); triggerSlash('/send 写日记|/trigger')">
+            <img id="icon-diary" src="https://origin.picgo.net/2026/05/23/-182_202605220003_0152825964f03819ddf4a.jpg" alt="日记">
+            <span>日记</span>
+          </div>
+          <div class="app-block" onclick="playClickSound(); triggerSlash('/send 查看论坛|/trigger')">
+            <img id="icon-forum" src="https://origin.picgo.net/2026/05/23/-182_202605230608_1351277e363086bf6e5d9.jpg" alt="论坛">
+            <span>论坛</span>
+          </div>
+        </div>
+        <div class="app-2">
+          <div class="app-block" onclick="playClickSound(); triggerSlash('/send 逛商城|/trigger')">
+            <img id="icon-vvshop" src="https://origin.picgo.net/2026/05/23/-182_202605220003_150879f4f6e19e04fcb1d.jpg" alt="VV商城">
+            <span>VV商城</span>
+          </div>
+          <div class="app-block" onclick="playClickSound(); triggerSlash('/send 看直播|/trigger')">
+            <img id="icon-vvplatform" src="https://origin.picgo.net/2026/05/23/-182_202605230609_201976bd17625577cd137.jpg" alt="VV热播">
+            <span>VV热播</span>
+          </div>
+        </div>
+        <div class="app-3">
+          <div class="app" onclick="playClickSound(); showDialog('addCallDialog')">
+            <img id="icon-contact" src="https://origin.picgo.net/2026/05/23/-182_202605211810_174279b442dd1aaba3f4c.jpg" alt="电话">
+            <span>电话</span>
+          </div>
+          <div class="app" onclick="playClickSound(); openContactPage()">
+            <img id="icon-text" src="https://origin.picgo.net/2026/05/23/-182_202605230609_1039165e22fc87be1f916.jpg" alt="消息">
+            <span>消息</span>
+          </div>
+          <div class="app" onclick="playClickSound(); showDialog('settingDialog')">
+            <img id="icon-setting" src="https://origin.picgo.net/2026/05/23/-182_202605230608_34739dea03df9b0e6afd4.jpg" alt="设置">
+            <span>设置</span>
+          </div>
+        </div>
+        <div class="app-4">
+          <div class="app" onclick="playClickSound(); triggerSlash('/send 播放音乐|/trigger')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgxIiBoZWlnaHQ9IjE4MSIgdmlld0JveD0iMCAwIDE4MSAxODEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMSIgY3g9IjkwLjUiIGN5PSI5MC41IiByPSI5MC41IiBmaWxsPSJibGFjayIvPgo8L3N2Zz4K" width="140" height="140" style="width: 140px; left: 29px; top: 134px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTc3IiBoZWlnaHQ9IjE3NyIgdmlld0JveD0iMCAwIDE3NyAxNzciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMiIgY3g9Ijg4LjUiIGN5PSI4OC41IiByPSI4OC41IiBmaWxsPSIjMjAyMDIwIi8+Cjwvc3ZnPgo=" width="138" height="138" style="width: 138px; left: 30px; top: 135px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTc1IiBoZWlnaHQ9IjE3NSIgdmlld0JveD0iMCAwIDE3NSAxNzUiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMyIgY3g9Ijg3LjUiIGN5PSI4Ny41IiByPSI4Ny41IiBmaWxsPSJibGFjayIvPgo8L3N2Zz4K" width="136" height="136" style="width: 136px; left: 31px; top: 136px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTczIiBoZWlnaHQ9IjE3MyIgdmlld0JveD0iMCAwIDE3MyAxNzMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgNSIgY3g9Ijg2LjUiIGN5PSI4Ni41IiByPSI4Ni41IiBmaWxsPSIjMjAyMDIwIi8+Cjwvc3ZnPgo=" width="134" height="134" style="width: 134px; left: 32px; top: 137px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTcxIiBoZWlnaHQ9IjE3MSIgdmlld0JveD0iMCAwIDE3MSAxNzEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGlkPSJFbGxpcHNlIDkiIGQ9Ik0xNzEgODUuNUMxNzEgMTMyLjcyIDEzMi43MiAxNzEgODUuNSAxNzFDMzguMjc5NyAxNzEgMCAxMzIuNzIgMCA4NS41QzAgMzguMjc5NyAzOC4yNzk3IDAgODUuNSAwQzEzMi43MiAwIDE3MSAzOC4yNzk3IDE3MSA4NS41WiIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="132" height="132" style="width: 132px; left: 33px; top: 138px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTY5IiBoZWlnaHQ9IjE2OSIgdmlld0JveD0iMCAwIDE2OSAxNjkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgNyIgY3g9Ijg0LjUiIGN5PSI4NC41IiByPSI4NC41IiBmaWxsPSIjMjAyMDIwIi8+Cjwvc3ZnPgo=" width="130" height="130" style="width: 130px; left: 34px; top: 139px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTY3IiBoZWlnaHQ9IjE2NyIgdmlld0JveD0iMCAwIDE2NyAxNjciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgOCIgY3g9IjgzLjUiIGN5PSI4My41IiByPSI4My41IiBmaWxsPSJibGFjayIvPgo8L3N2Zz4K" width="128" height="128" style="width: 128px; left: 35px; top: 140px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTY1IiBoZWlnaHQ9IjE2NSIgdmlld0JveD0iMCAwIDE2NSAxNjUiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgNiIgY3g9IjgyLjUiIGN5PSI4Mi41IiByPSI4Mi41IiBmaWxsPSIjMjAyMDIwIi8+Cjwvc3ZnPgo=" width="126" height="126" style="width: 126px; left: 36px; top: 141px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYzIiBoZWlnaHQ9IjE2MyIgdmlld0JveD0iMCAwIDE2MyAxNjMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTYiIGN4PSI4MS41IiBjeT0iODEuNSIgcj0iODEuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="124" height="124" style="width: 124px; left: 37px; top: 142px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYxIiBoZWlnaHQ9IjE2MSIgdmlld0JveD0iMCAwIDE2MSAxNjEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTMiIGN4PSI4MC41IiBjeT0iODAuNSIgcj0iODAuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="122" height="122" style="width: 122px; left: 38px; top: 143px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTU5IiBoZWlnaHQ9IjE1OSIgdmlld0JveD0iMCAwIDE1OSAxNTkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTQiIGN4PSI3OS41IiBjeT0iNzkuNSIgcj0iNzkuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="120" height="120" style="width: 120px; left: 39px; top: 144px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTU3IiBoZWlnaHQ9IjE1NyIgdmlld0JveD0iMCAwIDE1NyAxNTciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTIiIGN4PSI3OC41IiBjeT0iNzguNSIgcj0iNzguNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="118" height="118" style="width: 118px; left: 40px; top: 145px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTU1IiBoZWlnaHQ9IjE1NSIgdmlld0JveD0iMCAwIDE1NSAxNTUiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTUiIGN4PSI3Ny41IiBjeT0iNzcuNSIgcj0iNzcuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="116" height="116" style="width: 116px; left: 41px; top: 146px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUzIiBoZWlnaHQ9IjE1MyIgdmlld0JveD0iMCAwIDE1MyAxNTMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTEiIGN4PSI3Ni41IiBjeT0iNzYuNSIgcj0iNzYuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="114" height="114" style="width: 114px; left: 42px; top: 147px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUxIiBoZWlnaHQ9IjE1MSIgdmlld0JveD0iMCAwIDE1MSAxNTEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTciIGN4PSI3NS41IiBjeT0iNzUuNSIgcj0iNzUuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="112" height="112" style="width: 112px; left: 43px; top: 148px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQ5IiBoZWlnaHQ9IjE0OSIgdmlld0JveD0iMCAwIDE0OSAxNDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTgiIGN4PSI3NC41IiBjeT0iNzQuNSIgcj0iNzQuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="110" height="110" style="width: 110px; left: 44px; top: 149px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQ3IiBoZWlnaHQ9IjE0NyIgdmlld0JveD0iMCAwIDE0NyAxNDciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMTkiIGN4PSI3My41IiBjeT0iNzMuNSIgcj0iNzMuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="108" height="108" style="width: 108px; left: 45px; top: 150px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQ1IiBoZWlnaHQ9IjE0NSIgdmlld0JveD0iMCAwIDE0NSAxNDUiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjAiIGN4PSI3Mi41IiBjeT0iNzIuNSIgcj0iNzIuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="106" height="106" style="width: 106px; left: 46px; top: 151px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQzIiBoZWlnaHQ9IjE0MyIgdmlld0JveD0iMCAwIDE0MyAxNDMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjEiIGN4PSI3MS41IiBjeT0iNzEuNSIgcj0iNzEuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="104" height="104" style="width: 104px; left: 47px; top: 152px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQxIiBoZWlnaHQ9IjE0MSIgdmlld0JveD0iMCAwIDE0MSAxNDEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjIiIGN4PSI3MC41IiBjeT0iNzAuNSIgcj0iNzAuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="102" height="102" style="width: 102px; left: 48px; top: 153px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTM5IiBoZWlnaHQ9IjEzOSIgdmlld0JveD0iMCAwIDEzOSAxMzkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjMiIGN4PSI2OS41IiBjeT0iNjkuNSIgcj0iNjkuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="100" height="100" style="width: 100px; left: 49px; top: 154px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTM3IiBoZWlnaHQ9IjEzNyIgdmlld0JveD0iMCAwIDEzNyAxMzciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjQiIGN4PSI2OC41IiBjeT0iNjguNSIgcj0iNjguNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="98" height="98" style="width: 98px; left: 50px; top: 155px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTM1IiBoZWlnaHQ9IjEzNSIgdmlld0JveD0iMCAwIDEzNSAxMzUiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjUiIGN4PSI2Ny41IiBjeT0iNjcuNSIgcj0iNjcuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="96" height="96" style="width: 96px; left: 51px; top: 156px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTMzIiBoZWlnaHQ9IjEzMyIgdmlld0JveD0iMCAwIDEzMyAxMzMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjYiIGN4PSI2Ni41IiBjeT0iNjYuNSIgcj0iNjYuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="94" height="94" style="width: 94px; left: 52px; top: 157px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTMxIiBoZWlnaHQ9IjEzMSIgdmlld0JveD0iMCAwIDEzMSAxMzEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjciIGN4PSI2NS41IiBjeT0iNjUuNSIgcj0iNjUuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="92" height="92" style="width: 92px; left: 53px; top: 158px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI5IiBoZWlnaHQ9IjEyOSIgdmlld0JveD0iMCAwIDEyOSAxMjkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMjgiIGN4PSI2NC41IiBjeT0iNjQuNSIgcj0iNjQuNSIgZmlsbD0iIzIwMjAyMCIvPgo8L3N2Zz4K" width="90" height="90" style="width: 90px; left: 54px; top: 159px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI3IiBoZWlnaHQ9IjEyNyIgdmlld0JveD0iMCAwIDEyNyAxMjciIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMzAiIGN4PSI2My41IiBjeT0iNjMuNSIgcj0iNjMuNSIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" width="88" height="88" style="width: 88px; left: 55px; top: 160px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODUiIGhlaWdodD0iODciIHZpZXdCb3g9IjAgMCA4NSA4NyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgaWQ9IlZlY3RvciA1IiBmaWx0ZXI9InVybCgjZmlsdGVyMF9mXzM1N18yNjYpIj4KPHBhdGggZD0iTTIgNTFMNjUuMzE0NyA4NC40ODU1TDgyLjg3MjEgNjkuODg4NEw2NSAyQzY1IDIgNDQuMzcxIDUuMTQyMTggMjYuNSAyMEM4LjYyOTAzIDM0Ljg1NzggMiA1MSAyIDUxWiIgZmlsbD0iYmxhY2siLz4KPC9nPgo8ZGVmcz4KPGZpbHRlciBpZD0iZmlsdGVyMF9mXzM1N18yNjYiIHg9IjAiIHk9IjAiIHdpZHRoPSI4NC44NzIxIiBoZWlnaHQ9Ijg2LjQ4NTUiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIj4KPGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz4KPGZlQmxlbmQgbW9kZT0ibm9ybWFsIiBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz4KPGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMSIgcmVzdWx0PSJlZmZlY3QxX2ZvcmVncm91bmRCbHVyXzM1N18yNjYiLz4KPC9maWx0ZXI+CjwvZGVmcz4KPC9zdmc+Cg==" width="84" height="86" style="width: 84.8721px;left: 30px;top: 130px;position: absolute;filter: blur(2px);" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODUiIGhlaWdodD0iODciIHZpZXdCb3g9IjAgMCA4NSA4NyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgaWQ9IlZlY3RvciA2IiBmaWx0ZXI9InVybCgjZmlsdGVyMF9mXzM1N18yNjcpIj4KPHBhdGggZD0iTTgyLjk2MTUgMzYuMDA5MkwxOS41NDcxIDJMMiAxNi42MDk1TDE5LjQ2MTUgODQuNTA5MkMxOS40NjE1IDg0LjUwOTIgNDAuNTQ2OCA4MS4zMjg2IDU4LjQwNzMgNjYuNDU4MkM3Ni4yNjc4IDUxLjU4NzcgODIuOTYxNSAzNi4wMDkyIDgyLjk2MTUgMzYuMDA5MloiIGZpbGw9ImJsYWNrIi8+CjwvZz4KPGRlZnM+CjxmaWx0ZXIgaWQ9ImZpbHRlcjBfZl8zNTdfMjY3IiB4PSIwIiB5PSIwIiB3aWR0aD0iODQuOTYxNSIgaGVpZ2h0PSI4Ni41MDkyIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+CjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ii8+CjxmZUJsZW5kIG1vZGU9Im5vcm1hbCIgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIi8+CjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249IjEiIHJlc3VsdD0iZWZmZWN0MV9mb3JlZ3JvdW5kQmx1cl8zNTdfMjY3Ii8+CjwvZmlsdGVyPgo8L2RlZnM+Cjwvc3ZnPgo=" width="84" height="86" style="width: 84.9615px;left: 82px;top: 188.5px;position: absolute;filter: blur(1px);" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODUiIGhlaWdodD0iODciIHZpZXdCb3g9IjAgMCA4NSA4NyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgaWQ9IlZlY3RvciAzIiBmaWx0ZXI9InVybCgjZmlsdGVyMF9mXzM1N18yNjgpIj4KPHBhdGggZD0iTTIgNTFMNjUuMzE0NyA4NC40ODU1TDgyLjg3MjEgNjkuODg4NEw2NSAyQzY1IDIgNDQuMzcxIDUuMTQyMTggMjYuNSAyMEM4LjYyOTAzIDM0Ljg1NzggMiA1MSAyIDUxWiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzM1N18yNjgpIiBmaWxsLW9wYWNpdHk9IjAuNiIvPgo8L2c+CjxkZWZzPgo8ZmlsdGVyIGlkPSJmaWx0ZXIwX2ZfMzU3XzI2OCIgeD0iMCIgeT0iMCIgd2lkdGg9Ijg0Ljg3MjEiIGhlaWdodD0iODYuNDg1NSIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiPgo8ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCIvPgo8ZmVCbGVuZCBtb2RlPSJub3JtYWwiIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSIvPgo8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIxIiByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfMzU3XzI2OCIvPgo8L2ZpbHRlcj4KPGxpbmVhckdyYWRpZW50IGlkPSJwYWludDBfbGluZWFyXzM1N18yNjgiIHgxPSIzNS4xODA2IiB5MT0iNzIuNDc1NiIgeDI9Ijc2Ljc3MSIgeTI9IjM3LjAzMjciIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iI0Q2RDVENSIvPgo8c3RvcCBvZmZzZXQ9IjAuNDkwMzg1IiBzdG9wLWNvbG9yPSIjQTFBMUExIi8+CjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI0Q2RDVENSIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+Cjwvc3ZnPgo=" width="84" height="86" style=" width: 84.8721px;left: 26px;top: 127px;position: absolute;filter: blur(2px);" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODUiIGhlaWdodD0iODciIHZpZXdCb3g9IjAgMCA4NSA4NyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgaWQ9IlZlY3RvciA0IiBmaWx0ZXI9InVybCgjZmlsdGVyMF9mXzM1N18yNjkpIj4KPHBhdGggZD0iTTgyLjk2MTUgMzYuMDA5MkwxOS41NDcxIDJMMiAxNi42MDk1TDE5LjQ2MTUgODQuNTA5MkMxOS40NjE1IDg0LjUwOTIgNDAuNTQ2OCA4MS4zMjg2IDU4LjQwNzMgNjYuNDU4MkM3Ni4yNjc4IDUxLjU4NzcgODIuOTYxNSAzNi4wMDkyIDgyLjk2MTUgMzYuMDA5MloiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl8zNTdfMjY5KSIgZmlsbC1vcGFjaXR5PSIwLjYiLz4KPC9nPgo8ZGVmcz4KPGZpbHRlciBpZD0iZmlsdGVyMF9mXzM1N18yNjkiIHg9IjAiIHk9IjAiIHdpZHRoPSI4NC45NjE1IiBoZWlnaHQ9Ijg2LjUwOTIiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIj4KPGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz4KPGZlQmxlbmQgbW9kZT0ibm9ybWFsIiBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz4KPGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMSIgcmVzdWx0PSJlZmZlY3QxX2ZvcmVncm91bmRCbHVyXzM1N18yNjkiLz4KPC9maWx0ZXI+CjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8zNTdfMjY5IiB4MT0iNDkuNjg5NyIgeTE9IjEzLjk4ODciIHgyPSI4LjEyNDI5IiB5Mj0iNDkuNDYwOSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSIjRDZENUQ1Ii8+CjxzdG9wIG9mZnNldD0iMC40OTAzODUiIHN0b3AtY29sb3I9IiNBMUExQTEiLz4KPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjRDZENUQ1Ii8+CjwvbGluZWFyR3JhZGllbnQ+CjwvZGVmcz4KPC9zdmc+Cg==" width="84" height="86" style="width: 84.9615px;left: 85px;top: 192px;position: absolute;filter: blur(2px);" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHZpZXdCb3g9IjAgMCA1MCA1MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBpZD0iRWxsaXBzZSAxMCIgY3g9IjI1IiBjeT0iMjUiIHI9IjI1IiB0cmFuc2Zvcm09Im1hdHJpeCgxIDAgMCAtMSAwIDUwKSIgZmlsbD0iI0Q2RDVENSIvPgo8L3N2Zz4K" width="50" height="50" style="width: 50px;left: 73px;top: 176px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBpZD0iRWxsaXBzZSAzNiIgY3g9IjEyIiBjeT0iMTIiIHI9IjEyIiBmaWxsPSIjRDREMkQyIi8+Cjwvc3ZnPgo=" width="24" height="24" style="width: 24px;left: 101px;top: 178px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBpZD0iRWxsaXBzZSAzNyIgY3g9IjEyIiBjeT0iMTIiIHI9IjEyIiBmaWxsPSIjRDREMkQyIi8+Cjwvc3ZnPgo=" width="24" height="24" style="width: 24px;left: 70px;top: 178px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBpZD0iRWxsaXBzZSA0IiBjeD0iMjQiIGN5PSIyNCIgcj0iMjQiIHRyYW5zZm9ybT0ibWF0cml4KDEgMCAwIC0xIDAgNDgpIiBmaWxsPSIjRDNEMUQxIiBmaWxsLW9wYWNpdHk9IjAuNzkiLz4KPC9zdmc+Cg==" width="48" height="48" style="width: 48px;left: 74px;top: 177px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEiIGhlaWdodD0iMTEiIHZpZXdCb3g9IjAgMCAxMSAxMSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggaWQ9IlZlY3RvciAxMiIgZD0iTTAuNjI3OTMgMC41NTE3NThDMS4wMzMyNyAwLjYwMzkwNCAxLjYxMDI3IDAuNzA4NTM0IDIuMjkxOTkgMC45MTYwMTZDMy42Njc2MyAxLjMzNDcxIDUuNDY1NzUgMi4xNzI3OCA3LjE0NjQ4IDMuODUzNTJDOC44MjcyMiA1LjUzNDI1IDkuNjY1MjkgNy4zMzIzNyAxMC4wODQgOC43MDgwMUMxMC4yOTM0IDkuMzk2MTEgMTAuMzk3NiA5Ljk3NzkgMTAuNDQ5MiAxMC4zODM4QzEwLjQ1MDIgMTAuMzkxNiAxMC40NTAyIDEwLjM5OTUgMTAuNDUxMiAxMC40MDcyQzkuMTgwMDkgMTAuMTgyMiA3LjgzMTQgOS43OTQ0NyA3LjE4NTU1IDkuNTM2MTNDNi4yNjA4NyA5LjE2NjI2IDQuNjQxMzYgOC45MzQzMyAzLjM1MzUyIDcuNjQ2NDhDMi4wNzUgNi4zNjc5NyAxLjk5NjgyIDUuNDA4NDIgMS40NzQ2MSAzLjg0MThDMS4yMzI1NyAzLjExNTY3IDAuOTg2NzM5IDIuMTM1MjMgMC43OTk4MDUgMS4zMjUyQzAuNzMzMzM2IDEuMDM3MTcgMC42NzU3MzIgMC43NzI0NzcgMC42Mjc5MyAwLjU1MTc1OFoiIGZpbGw9IiM5OTk5OTkiIHN0cm9rZT0iIzk5OTk5OSIvPgo8L3N2Zz4K" width="11" height="11" style="width: 11px;left: 114px;top: 178px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMiIgaGVpZ2h0PSI0IiB2aWV3Qm94PSIwIDAgMiA0IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDEzIiBkPSJNMCAxQzAuNTkwMDcgMC44NDYwMzMgMC44MjQ5MzQgMC42NDYxNjcgMSAwQzEuMjE1NTMgMC42NDA5MTIgMS40MjkwMiAwLjg2ODM3MSAyIDFDMS4xNjA4NyAxLjQ4MDgzIDEuMDc1MTcgMi4xNzUzNCAxIDMuNUMwLjk5NzEzOCAyLjA0Mjk4IDAuODMzOTU2IDEuNDI2NjIgMCAxWiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cg==" width="2" height="3" style="width: 2px;left: 122px;top: 186px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIyIiB2aWV3Qm94PSIwIDAgMSAyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDE0IiBkPSJNMCAwLjU3MTQyOUMwLjI5NTAzNSAwLjQ4MzQ0NyAwLjQxMjQ2NyAwLjM2OTIzOCAwLjUgMEMwLjYwNzc2NCAwLjM2NjIzNSAwLjcxNDUxMiAwLjQ5NjIxMiAxIDAuNTcxNDI5QzAuNTgwNDM3IDAuODQ2MTkxIDAuNTM3NTg0IDEuMjQzMDUgMC41IDJDMC40OTg1NjkgMS4xNjc0MiAwLjQxNjk3OCAwLjgxNTIxMiAwIDAuNTcxNDI5WiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cg==" width="1" height="2" style="width: 1px;left: 121px;top: 184px;position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjYiIGhlaWdodD0iMTA1IiB2aWV3Qm94PSIwIDAgMjYgMTA1IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVW5pb24iIGQ9Ik02IDY0LjVDNiA2NC41IDcgNzYgOSA4MC41QzExIDg1IDE2LjUgOTEuNSAxOCA5M0MxOS41IDk0LjUgMjYgMTAwLjUgMjYgMTAwLjVMMjIuNSAxMDQuNUMyMi41IDEwNC41IDE0LjUgOTggMTMgOTZDMTEuNSA5NCA2LjUgODkgNCA4My41QzEuNSA3OCAwIDY4IDAgNjQuNVYwSDZWNjQuNVoiIGZpbGw9IiNEOUQ5RDkiLz4KPC9zdmc+Cg==" width="26" height="104" style="width: 16px; left: 24px; top: 129px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDggMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGlkPSJVbmlvbiIgZD0iTTQgMEM2LjIwOTE0IDAgOCAwLjIyMzg1OCA4IDAuNVYxMy41QzggMTMuNzc2MSA2LjIwOTE0IDE0IDQgMTRDMS43OTA4NiAxNCAwIDEzLjc3NjEgMCAxMy41VjAuNUMwIDAuMjIzODU4IDEuNzkwODYgMCA0IDBaIiBmaWxsPSIjNDk0OTQ5Ii8+Cjwvc3ZnPgo=" width="8" height="14" style="width: 6px; left: 23px; top: 137px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMTkiIHZpZXdCb3g9IjAgMCAyMCAxOSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNNi4xNDM3NCAwLjM0NDgxMUM2LjUwNTYxIC0wLjA3MjE2MDUgNy4xMzY3OCAtMC4xMTczNjkgNy41NTM5IDAuMjQ0MjI1TDE4LjEyODEgOS40MjA5OEMxOC4xODU1IDkuNDcwODQgMTguMjM1MyA5LjUyNjIzIDE4LjI3ODUgOS41ODUwNUMxOC40MjY2IDkuNjcxNTQgMTguNTY4OSA5Ljc2OTk1IDE4LjcwMjMgOS44ODI5QzIwLjM4ODYgMTEuMzEgMjAuMTc4NCAxNC4zMjk5IDE4LjIzMzYgMTYuNjI4QzE2LjI4ODggMTguOTI2MSAxMy4zNDU3IDE5LjYzMjIgMTEuNjU5NCAxOC4yMDUyQzExLjU2NzEgMTguMTI3MSAxMS40ODE1IDE4LjA0MzQgMTEuNDAwNiAxNy45NTYxQzExLjIyNzggMTcuOTI1OSAxMS4wNjAzIDE3Ljg1MTkgMTAuOTE4MiAxNy43Mjg2TDAuMzQ0OTEyIDguNTUxODRDLTAuMDcyMTI3NiA4LjE4OTkyIC0wLjExNzQ2IDcuNTU4OCAwLjI0NDMyNiA3LjE0MTY5TDYuMTQzNzQgMC4zNDQ4MTFaIiBmaWxsPSIjNDk0OTQ5Ii8+Cjwvc3ZnPgo=" width="19" height="18" style="width: 14.8415px; left: 36.411px; top: 206.411px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgaWQ9IkVsbGlwc2UgMzgiPgo8cGF0aCBkPSJNMTIgNkMxMiA5LjMxMzcxIDkuMzEzNzEgMTIgNiAxMkMyLjY4NjI5IDEyIDAgOS4zMTM3MSAwIDZDMCAyLjY4NjI5IDIuNjg2MjkgLTcuMjI0NDllLTA3IDYgLTcuMjI0NDllLTA3QzkuMzEzNzEgLTcuMjI0NDllLTA3IDEyIDIuNjg2MjkgMTIgNloiIGZpbGw9IiM2NjY2NjYiLz4KPHBhdGggZD0iTTEyIDZDMTIgOS4zMTM3MSA5LjMxMzcxIDEyIDYgMTJDMi42ODYyOSAxMiAwIDkuMzEzNzEgMCA2QzAgMi42ODYyOSAyLjY4NjI5IC03LjIyNDQ5ZS0wNyA2IC03LjIyNDQ5ZS0wN0M5LjMxMzcxIC03LjIyNDQ5ZS0wNyAxMiAyLjY4NjI5IDEyIDZaIiBmaWxsPSIjNjY2NjY2Ii8+CjxwYXRoIGQ9Ik0xMiA2QzEyIDkuMzEzNzEgOS4zMTM3MSAxMiA2IDEyQzIuNjg2MjkgMTIgMCA5LjMxMzcxIDAgNkMwIDIuNjg2MjkgMi42ODYyOSAtNy4yMjQ0OWUtMDcgNiAtNy4yMjQ0OWUtMDdDOS4zMTM3MSAtNy4yMjQ0OWUtMDcgMTIgMi42ODYyOSAxMiA2WiIgZmlsbD0iIzY2NjY2NiIvPgo8L2c+Cjwvc3ZnPgo=" width="12" height="12" style="width: 12px; left: 104px; top: 197px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBpZD0iRWxsaXBzZSAzOSIgY3g9IjYiIGN5PSI2IiByPSI2IiBmaWxsPSIjNjY2NjY2Ii8+Cjwvc3ZnPgo=" width="12" height="12" style="width: 12px; left: 80px; top: 197px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNiIgaGVpZ2h0PSI2IiB2aWV3Qm94PSIwIDAgNiA2IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iRWxsaXBzZSA0MCIgZD0iTTYgM0M2IDQuNjU2ODUgNC42NTY4NSA2IDMgNkMxLjM0MzE1IDYgMCA0LjY1Njg1IDAgM0MwIDEuMzQzMTUgMS4zNDMxNSAwIDMgMEM0LjY1Njg1IDAgNiAxLjM0MzE1IDYgM1oiIGZpbGw9IiNFMkUyRTIiLz4KPC9zdmc+Cg==" width="6" height="6" style="width: 6px; left: 83px; top: 200px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNiIgaGVpZ2h0PSI2IiB2aWV3Qm94PSIwIDAgNiA2IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iRWxsaXBzZSA0MSIgZD0iTTYgM0M2IDQuNjU2ODUgNC42NTY4NSA2IDMgNkMxLjM0MzE1IDYgMCA0LjY1Njg1IDAgM0MwIDEuMzQzMTUgMS4zNDMxNSAwIDMgMEM0LjY1Njg1IDAgNiAxLjM0MzE1IDYgM1oiIGZpbGw9IiNFMkUyRTIiLz4KPC9zdmc+Cg==" width="6" height="6" style="width: 6px; left: 107px; top: 200px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNiIgaGVpZ2h0PSI0IiB2aWV3Qm94PSIwIDAgNiA0IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iUG9seWdvbiAxIiBkPSJNMi41OTk0IDMuMzc1QzMuNTk5NCAzLjM3NSA1LjA5OTQgMC44NzUgNS4xOTc0NyAwLjM3NUM1LjI5NTU1IC0wLjEyNSAtMC4wOTY3NTQgLTAuMTI1IDAuMDAxMzIxODkgMC4zNzVDMC4wOTkzOTc4IDAuODc1IDEuNTk5NCAzLjM3NSAyLjU5OTQgMy4zNzVaIiBmaWxsPSIjNjY2NjY2Ii8+Cjwvc3ZnPgo=" width="5" height="3" style="width: 5.1988px; left: 96px; top: 209.625px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMiIgaGVpZ2h0PSIyIiB2aWV3Qm94PSIwIDAgMiAyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8ZyBpZD0iUG9seWdvbiAyIj4KPHBhdGggZD0iTTAuMTM2MjcxIDJDLTAuMzYzNzMgMiAwLjYzNjI3MSA3LjY0NjhlLTA3IDEuMTM2MjcgNi43ODcyZS0wN0MxLjYzNjI3IDUuOTI3NmUtMDcgMS42MzYyNyA1LjE5MDU5ZS0wNyAxLjYzNjI3IDAuNTAwMDAxQzEuNjM2MjcgMSAwLjYzNjI3MSAyIDAuMTM2MjcxIDJaIiBmaWxsPSIjRDlEOUQ5Ii8+CjxwYXRoIGQ9Ik0wLjEzNjI3MSAyQy0wLjM2MzczIDIgMC42MzYyNzEgNy42NDY4ZS0wNyAxLjEzNjI3IDYuNzg3MmUtMDdDMS42MzYyNyA1LjkyNzZlLTA3IDEuNjM2MjcgNS4xOTA1OWUtMDcgMS42MzYyNyAwLjUwMDAwMUMxLjYzNjI3IDEgMC42MzYyNzEgMiAwLjEzNjI3MSAyWiIgZmlsbD0iI0Q5RDlEOSIvPgo8L2c+Cjwvc3ZnPgo=" width="1" height="2" style="width: 1.63627px; left: 111.364px; top: 198px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMiIgaGVpZ2h0PSIxIiB2aWV3Qm94PSIwIDAgMiAxIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8ZyBpZD0iUG9seWdvbiAzIj4KPHBhdGggZD0iTTAuMDM2NTExNCAwLjY4OTA1Qy0wLjE4MTQzOCAwLjU5MzA0NCAwLjYzODQ4MiAtMC4wODY3NDI3IDAuODU2NDMxIDAuMDA5MjYyNTRDMS4wNzQzOCAwLjEwNTI2OCAxLjA3NDM4IDAuMTA1MjY4IDAuOTc4Mzc1IDAuMzIzMjE3QzAuODgyMzcgMC41NDExNjcgMC4yNTQ0NjEgMC43ODUwNTUgMC4wMzY1MTE0IDAuNjg5MDVaIiBmaWxsPSIjRDlEOUQ5Ii8+CjxwYXRoIGQ9Ik0wLjAzNjUxMTQgMC42ODkwNUMtMC4xODE0MzggMC41OTMwNDQgMC42Mzg0ODIgLTAuMDg2NzQyNyAwLjg1NjQzMSAwLjAwOTI2MjU0QzEuMDc0MzggMC4xMDUyNjggMS4wNzQzOCAwLjEwNTI2OCAwLjk3ODM3NSAwLjMyMzIxN0MwLjg4MjM3IDAuNTQxMTY3IDAuMjU0NDYxIDAuNzg1MDU1IDAuMDM2NTExNCAwLjY4OTA1WiIgZmlsbD0iI0Q5RDlEOSIvPgo8L2c+Cjwvc3ZnPgo=" width="1" height="0" style="width: 1.0397px; left: 123.289px; top: 198.833px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMiIgaGVpZ2h0PSIyIiB2aWV3Qm94PSIwIDAgMiAyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8ZyBpZD0iUG9seWdvbiA0Ij4KPHBhdGggZD0iTTAuMTM2MjcxIDJDLTAuMzYzNzMgMiAwLjYzNjI3MSA3LjY0NjhlLTA3IDEuMTM2MjcgNi43ODcyZS0wN0MxLjYzNjI3IDUuOTI3NmUtMDcgMS42MzYyNyA1LjE5MDU5ZS0wNyAxLjYzNjI3IDAuNTAwMDAxQzEuNjM2MjcgMSAwLjYzNjI3MSAyIDAuMTM2MjcxIDJaIiBmaWxsPSIjRDlEOUQ5Ii8+CjxwYXRoIGQ9Ik0wLjEzNjI3MSAyQy0wLjM2MzczIDIgMC42MzYyNzEgNy42NDY4ZS0wNyAxLjEzNjI3IDYuNzg3MmUtMDdDMS42MzYyNyA1LjkyNzZlLTA3IDEuNjM2MjcgNS4xOTA1OWUtMDcgMS42MzYyNyAwLjUwMDAwMUMxLjYzNjI3IDEgMC42MzYyNzEgMiAwLjEzNjI3MSAyWiIgZmlsbD0iI0Q5RDlEOSIvPgo8L2c+Cjwvc3ZnPgo=" width="1" height="2" style="width: 1.63627px; left: 87.744px; top: 198px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMiIgaGVpZ2h0PSIxIiB2aWV3Qm94PSIwIDAgMiAxIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8ZyBpZD0iUG9seWdvbiA1Ij4KPHBhdGggZD0iTTAuMDM2NTExNCAwLjY4OTA1Qy0wLjE4MTQzOCAwLjU5MzA0NCAwLjYzODQ4MiAtMC4wODY3NDI2IDAuODU2NDMxIDAuMDA5MjYyNTZDMS4wNzQzOCAwLjEwNTI2OCAxLjA3NDM4IDAuMTA1MjY4IDAuOTc4Mzc1IDAuMzIzMjE3QzAuODgyMzcgMC41NDExNjcgMC4yNTQ0NjEgMC43ODUwNTUgMC4wMzY1MTE0IDAuNjg5MDVaIiBmaWxsPSIjRDlEOUQ5Ii8+CjxwYXRoIGQ9Ik0wLjAzNjUxMTQgMC42ODkwNUMtMC4xODE0MzggMC41OTMwNDQgMC42Mzg0ODIgLTAuMDg2NzQyNiAwLjg1NjQzMSAwLjAwOTI2MjU2QzEuMDc0MzggMC4xMDUyNjggMS4wNzQzOCAwLjEwNTI2OCAwLjk3ODM3NSAwLjMyMzIxN0MwLjg4MjM3IDAuNTQxMTY3IDAuMjU0NDYxIDAuNzg1MDU1IDAuMDM2NTExNCAwLjY4OTA1WiIgZmlsbD0iI0Q5RDlEOSIvPgo8L2c+Cjwvc3ZnPgo=" width="1" height="0" style="width: 1.0397px; left: 89.669px; top: 198.11px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDYgMTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGlkPSJQb2x5Z29uIDYiIGQ9Ik0yLjU5ODUgMTEuMjAwMkMyLjMwNzEzIDExLjIwMDIgMi4wNDQyMiAxMS4wMzY0IDEuODA3NDggMTAuNzM1NEMxLjU3MDcxIDEwLjQzNDEgMS4zNjM5NCAxMC4wMDA0IDEuMTg0NDMgOS40NzU1OUMwLjgyNTUwNyA4LjQyNjA1IDAuNTc5MzY1IDcuMDI0MiAwLjQxMDk5NSA1LjYxOTE0QzAuMjQyNzAxIDQuMjE0NjkgMC4xNTI1ODQgMi44MDk4MiAwLjEwNDM1NSAxLjc1NTg2QzAuMDgwMjUxNiAxLjIyOTA3IDAuMDY2OTkxNSAwLjc4OTczIDAuMDU5NDMzIDAuNDgyNDIyQzAuMDU1NjYxMSAwLjMyOTAzNyAwLjA1Mjk0OCAwLjIwODIzMyAwLjA1MTYyMDUgMC4xMjU5NzdDMC4wNTExMjU2IDAuMDk1Mjg3OSAwLjA1MDkwNSAwLjA2OTUwODQgMC4wNTA2NDM5IDAuMDQ5ODA0N0g1LjE0NTM3QzUuMTQ1MTEgMC4wNjk1MDgyIDUuMTQ0ODkgMC4wOTUyODg5IDUuMTQ0MzkgMC4xMjU5NzdDNS4xNDMwNyAwLjIwODIzMyA1LjE0MTMzIDAuMzI5MDM4IDUuMTM3NTYgMC40ODI0MjJDNS4xMyAwLjc4OTczMSA1LjExNTc2IDEuMjI5MDYgNS4wOTE2NiAxLjc1NTg2QzUuMDQzNDMgMi44MDk4MiA0Ljk1MzMxIDQuMjE0NjkgNC43ODUwMiA1LjYxOTE0QzQuNjE2NjUgNy4wMjQyMiA0LjM3MDUxIDguNDI2MDUgNC4wMTE1OCA5LjQ3NTU5QzMuODMyMDYgMTAuMDAwNCAzLjYyNTMyIDEwLjQzNDEgMy4zODg1MyAxMC43MzU0QzMuMTUxOTEgMTEuMDM2MiAyLjg4OTY5IDExLjIgMi41OTg1IDExLjIwMDJaIiBmaWxsPSJ3aGl0ZSIgc3Ryb2tlPSIjNjY2NjY2IiBzdHJva2Utd2lkdGg9IjAuMSIvPgo8L3N2Zz4K" width="5" height="11" style="width: 5.19615px; left: 96px; top: 213px; position: absolute;" alt="音乐">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNSIgaGVpZ2h0PSI5IiB2aWV3Qm94PSIwIDAgNSA5IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDE2IiBkPSJNMi4zNTEwNiA4LjA1QzQuMzUxMDcgOC4wNSA0LjY1MTA2IDEuMDUgNC42NTEwNiAxLjA1QzQuNjUxMDYgMS4wNSAzLjM1MTA3IDAuMDUgMi4zNTEwNyAwLjA1QzEuMzUxMDcgMC4wNSAwLjA1MTA2MzUgMS4wNSAwLjA1MTA2MzUgMS4wNUMwLjA1MTA2MzUgMS4wNSAwLjM1MTA2IDguMDUgMi4zNTEwNiA4LjA1WiIgZmlsbD0iI0ZGMDAwMCIgZmlsbC1vcGFjaXR5PSIwLjY1IiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMC4xIi8+Cjwvc3ZnPgo=" width="4" height="8" style="width: 4.70213px; left: 96px; top: 215px; position: absolute;" alt="音乐">
+          </div>
+        </div>
+      </div>
+    `,
+    css: `
+      .phone-container{
+        --phone-border:#261503;
+        --text-color:#ffffff;
+        width:min(95vw,360px);
+        height:min(85vh,640px);
+        border:8px solid var(--phone-border);
+        border-radius:36px;
+        background-image:url('https://origin.picgo.net/2026/05/24/screenshot_20260524_025956a38280e38b924ef2.jpg');
+        background-size:cover;background-position:center;
+        position:relative;overflow:hidden;
+      }
+      .widget-container {
+        position: absolute;
+        top: 50px;
+        left: 12px;
+        right: 12px;
+        z-index: 1;
+      }
+      .widget .time { font-size: 34px; font-weight: bold; line-height: 1.1; }
+      .widget .date { font-size: 13px; opacity: 0.9; }
+      .widget .weather { font-size: 15px; opacity: 0.95; margin-top: 4px; }
+      .app-1 {
+        position: absolute;
+        top: 115px;
+        left: 190px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .app-2 {
+        position: absolute;
+        top: 210px;
+        left: 190px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .app-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: transparent;
+        border-radius: 12px;
+        padding: 8px 4px;
+        transition: transform 0.2s;
+        cursor: pointer;
+        min-height: 70px;
+      }
+      .app-block:hover { transform: scale(1.05); }
+      .app-block img {
+        width: 60px;
+        height: 60px;
+        background-color: rgba(255, 255, 255, 0.9);
+        border-radius: 14px;
+        object-fit: cover;
+      }
+      .app-block span {
+        font-size: 18px;
+        color: var(--text-color);
+        text-align: center;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+      .app-3 {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 10px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        background: transparent;
+        border-top: none;
+      }
+      .app-3 .app {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        cursor: pointer;
+      }
+      .app-3 .app:hover { transform: scale(1.05); }
+      .app-3 .app img {
+        width: 60px;
+        height: 60px;
+        background-color: rgba(255,255,255,0.9);
+        border-radius: 14px;
+        object-fit: cover;
+      }
+      .app-3 .app span {
+        font-size: 18px;
+        color: var(--text-color);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+      .app-4 {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none; /* 防止遮挡其他点击 */
+      }
+      .app-4 > div {
+        pointer-events: auto;
+      }
+    `
+  }
+};
 let currentUploadImage = '';
 let currentActiveContactId = '';
 let currentChatId = '';
@@ -2575,7 +2899,7 @@ function updateRealTime() {
   const wd = weekdays[now.getDay()];
   const month = now.getMonth() + 1;
   const day = now.getDate();
-  const dateStr = `${wd} ${month}月${day}日`;
+  const dateStr = `${month}月${day}日 ${wd}`;
 
   ['topBarTime', 'topBarTime2', 'topBarTime3', 'topBarTime4', 'topBarTime5', 'topBarTime6'].forEach(id => {
     const el = document.getElementById(id);
@@ -8871,10 +9195,118 @@ function handleRPMakeCall(targetName) {
   simulateOutgoingCall(contact.id);
 }
 
+// ===== 主题切换系统 =====
+
+async function switchTheme(themeName) {
+  var theme = phoneThemes[themeName];
+  if (!theme) return;
+
+  // 替换 homePage 元素
+  var oldHome = document.getElementById('homePage');
+  if (oldHome) {
+    var temp = document.createElement('div');
+    temp.innerHTML = theme.html.trim();
+    var newHome = temp.firstElementChild;
+    oldHome.parentNode.replaceChild(newHome, oldHome);
+  }
+
+  // 注入主题 CSS（覆盖 style.css 的默认值）
+  var styleEl = document.getElementById('theme-dynamic-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'theme-dynamic-style';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = theme.css || '';
+
+  // 恢复用户自定义图标
+  await restoreUserIcons();
+
+  // 重新应用颜色设置
+  var savedBorder = localStorage.getItem('st_phone_border_color');
+  var savedText = localStorage.getItem('st_phone_text_color');
+  if (savedBorder) applyBorderColor(savedBorder);
+  if (savedText) applyTextColor(savedText);
+
+  // 重新触发时间/天气显示
+  if (typeof updateTime === 'function') updateTime();
+  if (typeof updateWeather === 'function') updateWeather();
+
+  // 保存选择
+  localStorage.setItem('st_phone_theme', themeName);
+
+  // 刷新主题选择器的选中状态（如果对话框开着）
+  var container = document.getElementById('themeListContainer');
+  if (container) renderThemeList();
+}
+
+async function restoreUserIcons() {
+  var saved = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+  var iconKeys = ['icon-forum', 'icon-diary', 'icon-vvshop', 'icon-vvplatform',
+                  'icon-contact', 'icon-text', 'icon-music', 'icon-setting'];
+
+  for (var i = 0; i < iconKeys.length; i++) {
+    var key = iconKeys[i];
+    var storedRef = saved[key];
+    if (!storedRef) continue;
+    try {
+      var url = await resolveImageRefToUrl(storedRef);
+      if (url) {
+        var el = document.getElementById(key);
+        if (el) el.src = url;
+      }
+    } catch (e) {
+      console.warn('[restoreUserIcons] 恢复图标失败:', key, e);
+    }
+  }
+}
+
+async function initTheme() {
+  var saved = localStorage.getItem('st_phone_theme') || 'default';
+  if (saved !== 'default') {
+    await switchTheme(saved);
+  } else {
+    await restoreUserIcons();
+  }
+}
+
+function showThemeDialog() {
+  renderThemeList();
+  showDialog('themeDialog');
+}
+
+function renderThemeList() {
+  var container = document.getElementById('themeListContainer');
+  if (!container) return;
+  var currentTheme = localStorage.getItem('st_phone_theme') || 'default';
+
+  container.innerHTML = '';
+  Object.keys(phoneThemes).forEach(function(key) {
+    var theme = phoneThemes[key];
+    var isActive = key === currentTheme;
+    var item = document.createElement('div');
+    item.className = 'font-option' + (isActive ? ' active' : '');
+    item.innerHTML =
+      '<div class="font-info">' +
+        '<div class="font-name">' + theme.name + '</div>' +
+      '</div>' +
+      (isActive ? '<span class="font-check">✓</span>' : '');
+    item.onclick = (function(k) {
+      return function() {
+        playClickSound();
+        switchTheme(k);
+        closeDialog('themeDialog');
+      };
+    })(key);
+    container.appendChild(item);
+  });
+}
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
 
+//初始化入口函数
 window.onload = async function () {
   loadAll();
   initDefaultStickers();
@@ -8909,7 +9341,8 @@ window.onload = async function () {
   cleanupUnusedIDBAssets();
 
   migrateFeedPostsAuthorId();
-  initFontSystem();  
+  initFontSystem();
+  await initTheme(); 
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();

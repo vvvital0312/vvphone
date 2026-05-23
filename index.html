@@ -45,7 +45,7 @@
       <div class="widget-container">
         <div class="widget">
           <div class="time" id="mainTime">12:00</div>
-          <div class="date" id="mainDate">周一 4月15日</div>
+          <div class="date" id="mainDate">4月15日 周一</div>
           <div class="weather" id="mainWeather">晴朗 25°C</div>
         </div>
       </div>
@@ -516,9 +516,25 @@
             <span style="color:#999; font-size:12px;">点击切换 ▸</span>
           </div>     
         </div>       
+        <div style="margin-bottom:12px;">
+          <div onclick="playClickSound();showThemeDialog();" style="width:100%; padding:8px 12px; font-size:14px; border:1px solid #000; border-radius:10px; background:#fff; cursor:pointer; display:flex; align-items:center; justify-content:space-between; box-sizing:border-box;">
+            <label style="font-size:16px; display:block; cursor:pointer;">手机主题</label>
+            <span style="color:#999; font-size:12px;">点击切换 ▸</span>
+          </div>
+        </div>
         <div class="dialog-buttons">
           <button onclick="playClickSound();closeDialog('settingDialog')">关闭</button>
-        </div>         
+        </div>        
+      </div>
+    </div>
+
+    <div class="dialog" id="themeDialog">
+      <div class="dialog-content">
+        <h3>选择主题</h3>
+        <div id="themeListContainer"></div>
+        <div class="dialog-buttons" style="margin-top:12px;">
+          <button onclick="playClickSound();closeDialog('themeDialog')">关闭</button>
+        </div>
       </div>
     </div>
 
