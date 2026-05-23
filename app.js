@@ -491,6 +491,26 @@ const VV_BRIDGE_CONFIG = {
     return cmd;
   },
 
+  buildFeedEventCommand: function (opts) {
+    const postId = opts.postId || '';
+    const content = opts.content || '';
+    const images = opts.images || [];
+    const author = opts.author || '我';
+
+    const imageNote = images.length ? `\n附图数量:${images.length}张` : '';
+
+    const feedContext =
+      '[朋友圈动态发布]\n' +
+      'postId=' + postId + '\n' +
+      '发布者:' + author + '\n' +
+      '内容:' + content +
+      imageNote + '\n' +
+      '请根据角色卡和世界书中的人物设定，模拟各角色对这条动态的自然反应，输出 [VV_FEED_SYNC] 块。';
+
+    const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + feedContext + '\n]] |\n/trigger';
+    return cmd;
+  },
+
   buildCallEventCommand: function (opts) {
     const bridgeName = opts.bridgeName || '';
     const chatId = opts.chatId || '';
@@ -1596,6 +1616,100 @@ function parseVVChatBlocks(raw, fallback = {}) {
   });
 
   return chat;
+}
+
+function parseFeedSyncRaw(raw) {
+  const result = { postId: '', time: '', interactions: [] };
+  if (!raw) return result;
+
+  const syncMatch = raw.match(/\[VV_FEED_SYNC\]([\s\S]*?)\[\/VV_FEED_SYNC\]/i);
+  if (!syncMatch) return result;
+
+  const block = syncMatch[1];
+
+  const postIdMatch = block.match(/postId\s*=\s*(.+)/i);
+  const timeMatch = block.match(/time\s*=\s*(.+)/i);
+  result.postId = postIdMatch ? postIdMatch[1].trim() : '';
+  result.time = timeMatch ? timeMatch[1].trim() : '';
+
+  const interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi);
+  if (interactionBlocks) {
+    interactionBlocks.forEach(function (ib) {
+      const fromMatch = ib.match(/from\s*=\s*(.+)/i);
+      const actionMatch = ib.match(/action\s*=\s*(.+)/i);
+      const contentMatch = ib.match(/content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i);
+      const replyToMatch = ib.match(/replyTo\s*=\s*(.+)/i);
+
+      const from = fromMatch ? fromMatch[1].trim() : '';
+      const action = actionMatch ? actionMatch[1].trim().toLowerCase() : '';
+      if (!from || !action) return;
+
+      const item = { from, action };
+      if (action === 'comment' && contentMatch) {
+        item.content = contentMatch[1].trim();
+      }
+      if (replyToMatch) {
+        item.replyTo = replyToMatch[1].trim();
+      }
+      result.interactions.push(item);
+    });
+  }
+
+  return result;
+}
+
+async function handleVVFeedSyncRaw(data) {
+  const raw = String(data.raw || '');
+  if (!raw.trim()) return;
+
+  if (!/\[VV_FEED_SYNC\]/i.test(raw)) return;
+
+  const parsed = parseFeedSyncRaw(raw);
+  if (!parsed.postId) {
+    console.warn('[VV][FEED] handleVVFeedSyncRaw: missing postId');
+    return;
+  }
+
+  const post = feedPosts.find(p => p.id === parsed.postId);
+  if (!post) {
+    console.warn('[VV][FEED] handleVVFeedSyncRaw: post not found, postId =', parsed.postId);
+    return;
+  }
+
+  let changed = false;
+  const myNames = new Set([
+    '我',
+    myProfile.nickname || '',
+    appProfile.myName || ''
+  ].filter(Boolean));
+
+  parsed.interactions.forEach(function (item) {
+    // 不允许自己给自己点赞/评论
+    if (myNames.has(item.from)) return;
+
+    if (item.action === 'like') {
+      post.likes = post.likes || [];
+      const already = post.likes.find(l => l.from === item.from);
+      if (!already) {
+        post.likes.push({ from: item.from });
+        changed = true;
+      }
+    } else if (item.action === 'comment' && item.content) {
+      post.comments = post.comments || [];
+      post.comments.push({
+        from: item.from,
+        text: item.content,
+        ...(item.replyTo ? { replyTo: item.replyTo } : {})
+      });
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveAll();
+    renderFeedList();
+    console.log('[VV][FEED] feed sync applied, postId =', parsed.postId, 'interactions =', parsed.interactions.length);
+  }
 }
 
 function appendVVChatReplyToLocal(chatData, msgIndex) {
@@ -4026,27 +4140,44 @@ async function addFeedPost() {
 
   const storedImages = [];
   for (const img of [...currentFeedImages].slice(0, 9)) {
-    storedImages.push(await persistImageToIDB(img, {
-      area: 'feed.post.image'
-    }));
+    storedImages.push(await persistImageToIDB(img, { area: 'feed.post.image' }));
   }
 
+  const postId = 'f' + Date.now();
+  const author = myProfile.nickname || appProfile.myName || '我';
+
   feedPosts.unshift({
-    id: 'f' + Date.now(),
+    id: postId,
     authorId: 'me',
-    author: myProfile.nickname || appProfile.myName || '我',
+    author: author,
     authorAvatar: getMyProfileAvatar() || DEFAULT_AVATAR,
-    bridgeName: myProfile.nickname || appProfile.myName || '我',
+    bridgeName: author,
     content,
     time: getNowTime(),
     images: storedImages,
     likes: [],
-    comments: [{ from: '系统', text: '动态已发布' }]
+    comments: []   // 不再预置"系统：动态已发布"
   });
 
   saveAll();
   renderFeedList();
   closeDialog('postFeedDialog');
+
+  // 触发同层 AI 互动
+  if (VV_BRIDGE_CONFIG.enabled) {
+    const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
+      postId,
+      content,
+      images: storedImages,
+      author
+    });
+    console.log('[VV][FEED] triggering feed sync, postId =', postId);
+    try {
+      await triggerSlash(cmd);
+    } catch (err) {
+      console.error('[VV][FEED] triggerSlash error:', err);
+    }
+  }
 }
 
 async function openChat(id, type = 'direct') {
@@ -8125,6 +8256,25 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      // ========== 处理动态同步 ==========
+      if (type === 'VVPHONE_FEED_SYNC') {
+        const raw = String(data.raw || '');
+
+        console.log('[VV][NAV] VVPHONE_FEED_SYNC received, raw length =', raw.length);
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VVPHONE_FEED_SYNC ignored: empty raw');
+          return;
+        }
+
+        try {
+          await handleVVFeedSyncRaw({ raw });
+        } catch (err) {
+          console.error('[VV][NAV] handleVVFeedSyncRaw error:', err);
+        }
+        return;
+      }
+
       // ========== 处理原始 AI 回复（兼容直接转发的情况） ==========
       if (type === 'VV_RAW_LLM_REPLY') {
         const raw = String(data.raw || '');
@@ -8169,6 +8319,16 @@ function initVVHostNavigationBridge() {
             console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
           }
           return;
+        }
+
+        // 动态同步
+        if (/\[VV_FEED_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] detected VV_FEED_SYNC, routing to handleVVFeedSyncRaw');
+          try {
+            await handleVVFeedSyncRaw({ raw });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVFeedSyncRaw error:', err);
+          }
         }
 
         // 都不匹配，尝试聊天兜底

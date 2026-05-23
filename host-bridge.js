@@ -402,9 +402,11 @@
       }
 
       if (parsed.type === 'feed') {
+        const feedRaw = this.buildMockFeedReply(command, parsed);
         return {
           kind: 'feed',
-          text: this.buildMockFeedReply(command, parsed)
+          raw: feedRaw,
+          text: feedRaw
         };
       }
 
@@ -475,16 +477,26 @@
       if (result.kind === 'feed') {
         console.log('[VV_BRIDGE][handleMockResult] enter feed branch');
 
-        this.emitToPhone({
-          type: 'VVPHONE_FEED_REPLY',
-          postId: parsed.postId || '',
-          senderName: parsed.senderName || this.getDefaultSender(),
-          text: result.text || '……',
-          replyTo: '',
-          viewId
-        });
+        const raw = result.raw || result.text || '';
 
-        this.log('已回传 VVPHONE_FEED_REPLY', 'ok', result);
+        console.log('[VV_BRIDGE][handleMockResult][feed] raw =', raw);
+        console.log('[VV_BRIDGE][handleMockResult][feed] includes [VV_FEED_SYNC] =', !!(raw && raw.includes('[VV_FEED_SYNC]')));
+
+        if (raw && raw.includes('[VV_FEED_SYNC]')) {
+          this.emitToPhone({
+            type: 'VVPHONE_FEED_SYNC',
+            raw,
+            viewId
+          });
+
+          this.log('已回传 VVPHONE_FEED_SYNC', 'ok', {
+            raw: raw.slice(0, 500)
+          });
+          return;
+        }
+
+        // 兜底：没有结构化块，忽略（不再写死评论）
+        console.log('[VV_BRIDGE][handleMockResult][feed] no [VV_FEED_SYNC] block, skipping');
         return;
       }
 
@@ -502,6 +514,25 @@
 
         console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncChatId =', this.lastChatSyncChatId);
         console.log('[VV_BRIDGE][handleMockResult][chat] cached lastChatSyncRaw preview =', String(this.lastChatSyncRaw || '').slice(0, 500));
+
+        // 检测动态同步块
+        if (raw && raw.includes('[VV_FEED_SYNC]')) {
+          console.log('[VV_BRIDGE][handleMockResult][chat] detected VV_FEED_SYNC');
+
+          this.emitToPhone({
+            type: 'VVPHONE_FEED_SYNC',
+            raw,
+            viewId
+          });
+
+          this.log('已回传 VVPHONE_FEED_SYNC (from chat)', 'ok', {
+            raw: raw.slice(0, 500)
+          });
+
+          if (!raw.includes('[VV_CHAT_SYNC]')) {
+            return;
+          }
+        }
 
         // 检测通话同步块（AI可能在聊天回复中夹带通话数据）
         if (raw && raw.includes('[VV_CALL_SYNC]')) {
@@ -694,10 +725,32 @@
     },
 
     buildMockFeedReply(command, parsed) {
-      const sender = parsed.senderName || this.getDefaultSender();
       const prompt = this.extractPrompt(command);
-      const lastLine = this.getLastMeaningfulLine(prompt);
-      return `${sender}：关于“${lastLine || '这条动态'}”，我也想补一句。`;
+      const postIdMatch = String(prompt).match(/postId\s*=\s*(.+)/i);
+      const postId = postIdMatch ? postIdMatch[1].trim() : (parsed.postId || '');
+      const time = this.formatNowLabel();
+
+      // mock 模式下模拟两个角色互动
+      const sender = parsed.senderName || this.getDefaultSender();
+
+      return [
+        '[VV_FEED_SYNC]',
+        `postId=${postId}`,
+        `time=${time}`,
+        '',
+        '[互动]',
+        `from=${this.normalizeSyncFieldText(sender)}`,
+        'action=like',
+        '[/互动]',
+        '',
+        '[互动]',
+        `from=${this.normalizeSyncFieldText(sender)}`,
+        'action=comment',
+        `content=看到了，感觉不错呢。`,
+        '[/互动]',
+        '',
+        '[/VV_FEED_SYNC]'
+      ].join('\n');
     },
 
     extractPrompt(command) {
@@ -738,19 +791,33 @@
       }
 
       if (manualType === 'feed') {
+        const postId = this.lastContext.postId || '';
+        const time = this.formatNowLabel();
+
+        const raw = [
+          '[VV_FEED_SYNC]',
+          `postId=${this.normalizeSyncFieldText(postId)}`,
+          `time=${this.normalizeSyncFieldText(time)}`,
+          '',
+          '[互动]',
+          `from=${this.normalizeSyncFieldText(senderName)}`,
+          'action=comment',
+          `content=${this.normalizeSyncFieldText(text)}`,
+          '[/互动]',
+          '',
+          '[/VV_FEED_SYNC]'
+        ].join('\n');
+
         this.emitToPhone({
-          type: 'VVPHONE_FEED_REPLY',
-          postId: this.lastContext.postId || '',
-          senderName,
-          text,
-          replyTo: '',
+          type: 'VVPHONE_FEED_SYNC',
+          raw,
           viewId
         });
 
-        this.log('手动回传 VVPHONE_FEED_REPLY', 'ok', {
-          postId: this.lastContext.postId || '',
+        this.log('手动回传 VVPHONE_FEED_SYNC', 'ok', {
+          postId,
           senderName,
-          text
+          raw: raw.slice(0, 500)
         });
         return;
       }
