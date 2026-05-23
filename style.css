@@ -273,7 +273,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   flex-direction: column;
   gap: 8px;
   box-sizing: border-box;
-  transition: bottom .25s ease;
 }
 .time-divider{
   align-self:center;

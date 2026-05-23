@@ -4417,17 +4417,6 @@ async function sendMessage() {
   input.value = '';
   clearComposerDraft();
   await renderMessages();
-  requestAnimationFrame(() => {
-    const toolbarEl = document.querySelector('.input-toolbar');
-    const areaEl = document.getElementById('messageArea');
-    if (toolbarEl && areaEl) {
-      areaEl.style.bottom = toolbarEl.offsetHeight + 'px';
-    }
-  });
-  const areaEl = document.getElementById('messageArea');
-  if (toolbarEl && areaEl) {
-    areaEl.style.bottom = toolbarEl.offsetHeight + 'px';
-  }
   applyBubbleToChat(currentChatId);
   saveAll();
   closeEmojiPanel();
@@ -8766,13 +8755,28 @@ async function handleRPSendMessage(targetName, messageTexts) {
   // 逐条添加用户消息气泡
   messageTexts.forEach(function (text, index) {
     if (!text || !text.trim()) return;
+    var trimmed = text.trim();
+
+    // ★ 去重：sendMessage() 已经推过这条气泡，跳过
+    var exists = messages[contact.id].some(function(m) {
+      if (!m.isMe || m.recalled) return false;
+      var oldText = Array.isArray(m.chunks)
+        ? m.chunks.join('\n').trim()
+        : String(m.text || '').trim();
+      return oldText === trimmed;
+    });
+    if (exists) {
+      console.log('[VV][RP_CMD] skipped duplicate:', trimmed);
+      return;
+    }
+
     messages[contact.id].push({
       id: 'm' + Date.now() + '_rp_' + index,
       sender: 'me',
       senderName: '我',
       isMe: true,
       type: 'text',
-      chunks: [text.trim()],
+      chunks: [trimmed],
       replyTo: null,
       recalled: false,
       time: time,
