@@ -467,27 +467,41 @@ const VV_BRIDGE_CONFIG = {
     return cmd;
   },
 
-  buildFeedCommentCommand: function (params) {
-    const bridgeName = params.bridgeName;
-    const postId = params.postId;
-    const promptText = params.promptText;
+  buildFeedCommentCommand: function (opts) {
+    const postId = opts.postId || '';
+    const promptText = opts.promptText || '';
 
-    const cmd =
-      '/send ' + bridgeName +
-      '\n[朋友圈互动]' +
-      '\n动态ID:' + postId +
-      '\n' + promptText +
-      '\n|/trigger';
+    const lines = [
+      '【系统指令·朋友圈评论回复·严格遵守】',
+      '',
+      '⚠️ 这是朋友圈评论互动，不是电话，不是私聊。',
+      '⚠️ 禁止输出 [VV_CALL_SYNC]。',
+      '⚠️ 禁止输出 [VV_CHAT_SYNC]。',
+      '⚠️ 禁止输出 [VV_INCOMING_CALL]。',
+      '⚠️ 禁止输出 callPhase 或 [通话] 块。',
+      '⚠️ 禁止模拟用户（维夏/"我"）的回复，from 不能是维夏或我。',
+      '⚠️ 禁止输出任何解释、旁白、正文叙事。',
+      '',
+      promptText,
+      '',
+      '严格按以下格式输出，只输出一个 [VV_FEED_SYNC] 块：',
+      '',
+      '[VV_FEED_SYNC]',
+      'postId=' + postId,
+      'time=当前时间',
+      '',
+      '[互动]',
+      'from=角色名',
+      'action=comment',
+      'content=回复内容',
+      'replyTo=用户名',
+      '[/互动]',
+      '',
+      '[/VV_FEED_SYNC]'
+    ];
 
-    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand]', {
-      bridgeName,
-      postId,
-      promptLength: String(promptText || '').length
-    });
-    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_BEGIN]');
-    console.log(cmd);
-    console.log('[VV_BRIDGE_CONFIG][buildFeedCommentCommand][CMD_END]');
-
+    const payload = lines.join('\n');
+    const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + payload + '\n]] |\n/trigger';
     return cmd;
   },
 
@@ -3745,10 +3759,11 @@ async function feedQuickComment(postId) {
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.feedMode === 'slash' || VV_BRIDGE_CONFIG.feedMode === 'local+slash')) {
+      VV_FEED_INTERCEPTOR.start(); // ← 加这一行
       const cmd = VV_BRIDGE_CONFIG.buildFeedCommentCommand({
         bridgeName,
         postId,
-        promptText: `用户评论了你的动态：${text}\n请以动态作者身份进行一条自然回复。`
+        promptText: `用户评论了你的动态：${text}\n请以动态作者身份进行一条自然回复，不要模拟用户。`
       });
       slashOk = await triggerSlash(cmd);
     }
@@ -3785,10 +3800,13 @@ async function replyFeedComment(postId, commentIndex) {
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.feedMode === 'slash' || VV_BRIDGE_CONFIG.feedMode === 'local+slash')) {
+      // 启动拦截器
+      VV_FEED_INTERCEPTOR.start();
+
       const cmd = VV_BRIDGE_CONFIG.buildFeedCommentCommand({
         bridgeName,
         postId,
-        promptText: `用户回复了评论。\n原评论人:${target.from}\n用户回复内容:${text}\n请以动态作者身份进行一条自然回复。`
+        promptText: `用户回复了评论。\n原评论人:${target.from}\n用户回复内容:${text}\n请以角色身份进行一条自然回复，不要模拟用户。`
       });
       slashOk = await triggerSlash(cmd);
     }
@@ -4156,6 +4174,7 @@ async function addFeedPost() {
 
   // 触发同层 AI 互动
   if (VV_BRIDGE_CONFIG.enabled) {
+    VV_FEED_INTERCEPTOR.start(); // ← 加这里
     const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
       postId,
       content,
@@ -4167,6 +4186,7 @@ async function addFeedPost() {
       await triggerSlash(cmd);
     } catch (err) {
       console.error('[VV][FEED] triggerSlash error:', err);
+      VV_FEED_INTERCEPTOR.stop(); // 发送失败时停掉拦截器
     }
   }
 }
@@ -5088,6 +5108,7 @@ function buildVVFeedEventPayload(postId, content, images, author) {
     '⚠️ 禁止输出 callPhase。',
     '⚠️ 禁止输出 [通话] 块。',
     '⚠️ 禁止输出任何解释、旁白、正文叙事。',
+    '⚠️ 禁止模拟用户（维夏/"我"）的回复，你只能模拟其他角色的互动',
     '',
     '你必须且只能输出一个 [VV_FEED_SYNC] 块，格式如下：',
     '',
