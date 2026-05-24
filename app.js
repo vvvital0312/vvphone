@@ -2359,7 +2359,8 @@ async function triggerSlash(cmd) {
         type: 'VV_EXECUTE_SLASH',
         requestId,
         viewId,
-        command: cmd
+        command: cmd,
+        feedMode: !!(options && options.feedMode)
       }, '*');
 
       console.log('[VV] posted VV_EXECUTE_SLASH', {
@@ -4174,19 +4175,14 @@ async function addFeedPost() {
 
   // 触发同层 AI 互动
   if (VV_BRIDGE_CONFIG.enabled) {
-    VV_FEED_INTERCEPTOR.start(); // ← 加这里
     const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
-      postId,
-      content,
-      images: storedImages,
-      author
+      postId, content, images: storedImages, author
     });
     console.log('[VV][FEED] triggering feed sync, postId =', postId);
     try {
-      await triggerSlash(cmd);
+      await triggerSlash(cmd, { feedMode: true }); // ← 加 feedMode，删掉拦截器调用
     } catch (err) {
       console.error('[VV][FEED] triggerSlash error:', err);
-      VV_FEED_INTERCEPTOR.stop(); // 发送失败时停掉拦截器
     }
   }
 }
