@@ -512,7 +512,7 @@ const VV_BRIDGE_CONFIG = {
     const author = opts.author || '我';
 
     const promptText = buildVVFeedEventPayload(postId, content, images, author);
-    const cmd = '/inject id=vv_feed role=system depth=0 scan=true [[\n' + promptText + '\n]] |\n/trigger';
+    const cmd = '/send ' + promptText + '\n|\n/trigger';
     return cmd;
   },
 
