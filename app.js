@@ -3760,13 +3760,12 @@ async function feedQuickComment(postId) {
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.feedMode === 'slash' || VV_BRIDGE_CONFIG.feedMode === 'local+slash')) {
-      VV_FEED_INTERCEPTOR.start(); // ← 加这一行
       const cmd = VV_BRIDGE_CONFIG.buildFeedCommentCommand({
         bridgeName,
         postId,
         promptText: `用户评论了你的动态：${text}\n请以动态作者身份进行一条自然回复，不要模拟用户。`
       });
-      slashOk = await triggerSlash(cmd);
+      slashOk = await triggerSlash(cmd, { feedMode: true });
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
@@ -3801,15 +3800,12 @@ async function replyFeedComment(postId, commentIndex) {
     let slashOk = false;
 
     if (VV_BRIDGE_CONFIG.enabled && (VV_BRIDGE_CONFIG.feedMode === 'slash' || VV_BRIDGE_CONFIG.feedMode === 'local+slash')) {
-      // 启动拦截器
-      VV_FEED_INTERCEPTOR.start();
-
       const cmd = VV_BRIDGE_CONFIG.buildFeedCommentCommand({
         bridgeName,
         postId,
         promptText: `用户回复了评论。\n原评论人:${target.from}\n用户回复内容:${text}\n请以角色身份进行一条自然回复，不要模拟用户。`
       });
-      slashOk = await triggerSlash(cmd);
+      slashOk = await triggerSlash(cmd, { feedMode: true });
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
