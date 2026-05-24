@@ -3765,7 +3765,21 @@ async function feedQuickComment(postId) {
         postId,
         promptText: `用户评论了你的动态：${text}\n请以动态作者身份进行一条自然回复，不要模拟用户。`
       });
-      slashOk = await triggerSlash(cmd, { feedMode: true });
+
+      const now = new Date();
+      const timeStr = (now.getMonth() + 1) + '月' + now.getDate() + '日 ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+      slashOk = await triggerSlash(cmd, {
+        feedMode: true,
+        userInteraction: {
+          postId: postId,
+          from: appProfile.myName || '我',
+          time: timeStr,
+          action: 'comment',
+          content: text,
+          replyTo: ''
+        }
+      });
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
@@ -3805,7 +3819,21 @@ async function replyFeedComment(postId, commentIndex) {
         postId,
         promptText: `用户回复了评论。\n原评论人:${target.from}\n用户回复内容:${text}\n请以角色身份进行一条自然回复，不要模拟用户。`
       });
-      slashOk = await triggerSlash(cmd, { feedMode: true });
+
+      const now = new Date();
+      const timeStr = (now.getMonth() + 1) + '月' + now.getDate() + '日 ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+      slashOk = await triggerSlash(cmd, {
+        feedMode: true,
+        userInteraction: {
+          postId: postId,
+          from: appProfile.myName || '我',
+          time: timeStr,
+          action: 'comment',
+          content: text,
+          replyTo: target.from
+        }
+      });
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
@@ -4151,6 +4179,7 @@ async function addFeedPost() {
 
   const postId = 'f' + Date.now();
   const author = myProfile.nickname || appProfile.myName || '我';
+  const timeStr = getNowTime();
 
   feedPosts.unshift({
     id: postId,
@@ -4159,10 +4188,10 @@ async function addFeedPost() {
     authorAvatar: getMyProfileAvatar() || DEFAULT_AVATAR,
     bridgeName: author,
     content,
-    time: getNowTime(),
+    time: timeStr,
     images: storedImages,
     likes: [],
-    comments: []   // 不再预置"系统：动态已发布"
+    comments: []
   });
 
   saveAll();
@@ -4171,12 +4200,29 @@ async function addFeedPost() {
 
   // 触发同层 AI 互动
   if (VV_BRIDGE_CONFIG.enabled) {
+    // 构建图片描述（给 AI 看的文字）
+    const photoDesc = storedImages.map((img, idx) => {
+      const desc = img.desc || '图片';
+      return '[图' + (idx + 1) + ':' + desc + ']';
+    }).join('');
+
     const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
       postId, content, images: storedImages, author
     });
     console.log('[VV][FEED] triggering feed sync, postId =', postId);
     try {
-      await triggerSlash(cmd, { feedMode: true }); // ← 加 feedMode，删掉拦截器调用
+      await triggerSlash(cmd, {
+        feedMode: true,
+        feedMeta: {
+          postId: postId,
+          author: author,
+          time: timeStr,
+          content: content,
+          images: storedImages.map(i => i.id || i.src || ''),
+          photoDesc: photoDesc || '',
+          location: ''
+        }
+      });
     } catch (err) {
       console.error('[VV][FEED] triggerSlash error:', err);
     }
