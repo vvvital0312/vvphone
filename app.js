@@ -2314,7 +2314,7 @@ async function flushPendingVVChatSyncQueue() {
   saveAll();
 }
 
-async function triggerSlash(cmd) {
+async function triggerSlash(cmd, options) {
   if (!cmd) return false;
 
   if (VV_BRIDGE_CONFIG.debug) {
