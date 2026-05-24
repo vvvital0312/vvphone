@@ -4947,7 +4947,8 @@ function buildVVEventPayload(chatId) {
   const lines = [
     '以下是一次手机聊天事件。',
     '不要复述事件字段，不要解释字段内容，不要引用字段名。',
-    '如果角色继续回复线上消息，你必须只输出一个完整的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 块。',
+    '⚠️ 例外：如果系统注入了 id=vv_feed 的指令，说明这是朋友圈动态事件，此时禁止输出 [VV_CHAT_SYNC]，必须且只能输出 [VV_FEED_SYNC] 块。',
+    '如果角色继续回复线上消息，且当前不是朋友圈动态事件（无 vv_feed 注入），你必须只输出一个完整的 [VV_CHAT_SYNC] ... [/VV_CHAT_SYNC] 块。',
     '不要输出 [聊天界面]。',
     '[VV_CHAT_SYNC] 只用于前端同步，只包含本轮新增消息，不要重复历史消息。',
     '[VV_CHAT_SYNC] 中的 chatId 和 target 必须与 [VV_EVENT] 中的完全一致，不得自行替换为其他名称或ID。',
