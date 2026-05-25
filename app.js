@@ -3661,10 +3661,11 @@ function renderFeedList() {
 
     const comments = (post.comments || []).map((c, idx) => {
       const isMyComment = c.from === myName;
+      const cleanText = (c.text || '').replace(/\s*replyTo=[^\s\n]*/g, '').trim();
 
       return `
         <div class="feed-comment">
-          <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(c.text)}
+          <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(cleanText)}
           <span style="color:#999;cursor:pointer;margin-left:8px;" onclick="replyFeedComment('${post.id}',${idx})">回复</span>
           ${isMyComment ? `<span style="color:#d9534f;cursor:pointer;margin-left:8px;" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>` : ''}
         </div>
