@@ -481,6 +481,7 @@ const VV_BRIDGE_CONFIG = {
       '⚠️ 禁止输出 callPhase 或 [通话] 块。',
       '⚠️ 禁止模拟用户（维夏/"我"）的回复，from 不能是维夏或我。',
       '⚠️ 禁止输出任何解释、旁白、正文叙事。',
+      'replyTo= 必须作为独立一行，不可以写在 content= 的值里面。content= 只包含纯回复文字。',
       '',
       promptText,
       '',
@@ -2360,7 +2361,9 @@ async function triggerSlash(cmd, options) {
         requestId,
         viewId,
         command: cmd,
-        feedMode: !!(options && options.feedMode)
+        feedMode: !!(options && options.feedMode),
+        feedMeta: (options && options.feedMeta) || null,
+        userInteraction: (options && options.userInteraction) || null
       }, '*');
 
       console.log('[VV] posted VV_EXECUTE_SLASH', {
