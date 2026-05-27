@@ -1657,15 +1657,26 @@ function parseFeedSyncRaw(raw) {
   // 解析 AI 主动动态
   // =========================
 
-  const postBlockMatch = block.match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+  // 改成取最后一个 [动态]
+  const postBlocks = block.match(/\[动态\][\s\S]*?\[\/动态\]/gi) || [];
+  const latestPostBlock = postBlocks[postBlocks.length - 1];
 
-  if (postBlockMatch) {
-    const pb = postBlockMatch[1];
+  if (latestPostBlock) {
+
+    const pbMatch = latestPostBlock.match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+    const pb = pbMatch ? pbMatch[1] : '';
 
     const fromMatch = pb.match(/from\s*=\s*(.+)/i);
     const bridgeNameMatch = pb.match(/bridgeName\s*=\s*(.+)/i);
-    const contentMatch = pb.match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|\[\/动态\]|$)/i);
-    const photoMatch = pb.match(/photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|\[\/动态\]|$)/i);
+
+    // 多行安全 content
+    const contentMatch = pb.match(
+      /content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|$)/i
+    );
+
+    const photoMatch = pb.match(
+      /photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|$)/i
+    );
 
     result.post = {
       from: fromMatch ? fromMatch[1].trim() : '',
@@ -1678,7 +1689,9 @@ function parseFeedSyncRaw(raw) {
     if (photoMatch) {
       const photoText = photoMatch[1].trim();
 
-      const imageMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
+      const imageMatches = [
+        ...photoText.matchAll(/\[图\d+:(.*?)\]/g)
+      ];
 
       result.post.photos = imageMatches.map(m => ({
         simulated: true,
@@ -1698,7 +1711,11 @@ function parseFeedSyncRaw(raw) {
 
       const fromMatch = ib.match(/from\s*=\s*(.+)/i);
       const actionMatch = ib.match(/action\s*=\s*(.+)/i);
-      const contentMatch = ib.match(/content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i);
+
+      const contentMatch = ib.match(
+        /content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i
+      );
+
       const replyToMatch = ib.match(/replyTo\s*=\s*(.+)/i);
 
       const from = fromMatch ? fromMatch[1].trim() : '';
