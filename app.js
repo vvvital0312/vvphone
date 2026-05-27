@@ -9945,6 +9945,81 @@ function renderThemeList() {
   });
 }
 
+function rebuildFeedPostsFromHiddenData() {
+
+  const hiddenNodes = document.querySelectorAll('.vv-feed-hidden');
+
+  if (!hiddenNodes.length) {
+    console.warn('[VV][FEED] no hidden feed nodes found');
+    return;
+  }
+
+  const rebuiltPosts = [];
+
+  hiddenNodes.forEach(node => {
+
+    const raw = node.innerText || node.textContent || '';
+
+    if (!raw.includes('[VV_FEED_HIDDEN_DATA]')) return;
+
+    const parsed = parseFeedSyncRaw(
+      raw.replace(
+        '[VV_FEED_HIDDEN_DATA]',
+        '[VV_FEED_SYNC]'
+      ).replace(
+        '[/VV_FEED_HIDDEN_DATA]',
+        '[/VV_FEED_SYNC]'
+      )
+    );
+
+    if (!parsed.postId || !parsed.post) return;
+
+    const post = {
+      id: parsed.postId,
+      author: parsed.post.from || '',
+      bridgeName: parsed.post.bridgeName || '',
+      content: parsed.post.content || '',
+      time: parsed.time || '',
+      images: parsed.post.photos || [],
+      likes: [],
+      comments: []
+    };
+
+    // 互动恢复
+    parsed.interactions.forEach(item => {
+
+      if (item.action === 'like') {
+
+        post.likes.push({
+          from: item.from
+        });
+
+      } else if (item.action === 'comment') {
+
+        post.comments.push({
+          from: item.from,
+          text: item.content || '',
+          ...(item.replyTo
+            ? { replyTo: item.replyTo }
+            : {})
+        });
+      }
+    });
+
+    rebuiltPosts.push(post);
+  });
+
+  feedPosts = rebuiltPosts;
+
+  saveAll();
+  renderFeedList();
+
+  console.log(
+    '[VV][FEED] rebuilt from hidden data:',
+    rebuiltPosts.length
+  );
+}
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
