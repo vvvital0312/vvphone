@@ -3818,7 +3818,7 @@ function renderFeedList() {
         <div class="feed-comment">
           <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(cleanText)}
           <span style="color:#999;cursor:pointer;margin-left:8px;" onclick="replyFeedComment('${post.id}',${idx})">回复</span>
-          ${isMyComment ? `<span style="color:#d9534f;cursor:pointer;margin-left:8px;" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>` : ''}
+          <span style="color:#d9534f;cursor:pointer;margin-left:8px;" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>
         </div>
       `;
     }).join('');
@@ -3829,7 +3829,7 @@ function renderFeedList() {
         <div class="feed-main">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div class="feed-author">${escapeHTML(post.author)}</div>
-            ${isMine ? `<button class="feed-delete-btn" onclick="deleteFeedPost('${post.id}')">删除</button>` : ''}
+            <button class="feed-delete-btn" onclick="deleteFeedPost('${post.id}')">删除</button>
           </div>
           <div class="feed-content">${escapeHTML(post.content)}</div>
           ${images}
@@ -4008,16 +4008,11 @@ function deleteFeedPost(postId) {
   const index = feedPosts.findIndex(post => post.id === postId);
   if (index === -1) return;
 
-  const post = feedPosts[index];
-  if (post.author !== (myProfile.nickname || appProfile.myName || '我')) {
-    alert('只能删除自己发布的动态');
-    return;
-  }
-
   const ok = confirm('确定删除这条动态吗？');
   if (!ok) return;
 
   feedPosts.splice(index, 1);
+
   saveAll();
   renderFeedList();
 }
@@ -4026,18 +4021,11 @@ function deleteFeedComment(postId, commentIndex) {
   const post = feedPosts.find(i => i.id === postId);
   if (!post || !post.comments?.[commentIndex]) return;
 
-  const comment = post.comments[commentIndex];
-  const myName = myProfile.nickname || appProfile.myName || '我';
-
-  if (comment.from !== myName) {
-    alert('只能删除自己的评论');
-    return;
-  }
-
   const ok = confirm('确定删除这条评论吗？');
   if (!ok) return;
 
   post.comments.splice(commentIndex, 1);
+
   saveAll();
   renderFeedList();
 }
