@@ -1848,10 +1848,25 @@ async function handleVVFeedSyncRaw(data) {
     }
   });
 
-  if (changed) {
-    saveAll();
-    renderFeedList();
-    console.log('[VV][FEED] feed sync applied, postId =', parsed.postId, 'interactions =', parsed.interactions.length);
+  if (parsed.post) {
+
+    post.content = parsed.post.content || post.content;
+
+    if (parsed.post.photos?.length) {
+      post.images = parsed.post.photos;
+    }
+
+    if (parsed.post.from) {
+      post.author = parsed.post.from;
+    }
+
+    if (parsed.post.bridgeName) {
+      post.bridgeName = parsed.post.bridgeName;
+    }
+
+    changed = true; // ← 加这一句
+
+    console.log('[VV][FEED] AI post updated:', parsed.postId);
   }
 }
 
