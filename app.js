@@ -1750,6 +1750,7 @@ async function handleVVFeedSyncRaw(data) {
   if (!/\[VV_FEED_SYNC\]/i.test(raw)) return;
 
   const parsed = parseFeedSyncRaw(raw);
+
   if (!parsed.postId) {
     console.warn('[VV][FEED] handleVVFeedSyncRaw: missing postId');
     return;
@@ -1758,33 +1759,26 @@ async function handleVVFeedSyncRaw(data) {
   let post = feedPosts.find(p => p.id === parsed.postId);
 
   // =========================
-  // AI主动动态：如果不存在，则创建
+  // AI主动动态：尝试匹配占位动态
   // =========================
 
   if (!post && parsed.post) {
 
-    const contact = contactList.find(c =>
-      c.bridgeName === parsed.post.bridgeName
+    const pendingPost = feedPosts.find(p =>
+      p.author === parsed.post.from &&
+      (
+        !p.content ||
+        p.content === '正在发布中...' ||
+        p.content.includes('正在发布')
+      )
     );
 
-    const authorId = contact ? contact.id : '';
+    if (pendingPost) {
+      post = pendingPost;
+      post.id = parsed.postId;
 
-    post = {
-      id: parsed.postId,
-      authorId,
-      author: parsed.post.from || parsed.post.bridgeName,
-      bridgeName: parsed.post.bridgeName,
-      authorAvatar: '',
-      content: parsed.post.content || '',
-      time: parsed.time || getNowTime(),
-      images: parsed.post.photos || [],
-      likes: [],
-      comments: []
-    };
-
-    feedPosts.unshift(post);
-
-    console.log('[VV][FEED] AI post created:', parsed.postId);
+      console.log('[VV][FEED] matched pending post:', parsed.postId);
+    }
   }
 
   // =========================
@@ -1796,8 +1790,10 @@ async function handleVVFeedSyncRaw(data) {
     return;
   }
 
+  let changed = false;
+
   // =========================
-  // AI主动动态：更新占位动态
+  // AI主动动态：更新内容
   // =========================
 
   if (parsed.post) {
@@ -1816,10 +1812,11 @@ async function handleVVFeedSyncRaw(data) {
       post.bridgeName = parsed.post.bridgeName;
     }
 
+    changed = true;
+
     console.log('[VV][FEED] AI post updated:', parsed.postId);
   }
 
-  let changed = false;
   const myNames = new Set([
     '我',
     myProfile.nickname || '',
@@ -1827,46 +1824,46 @@ async function handleVVFeedSyncRaw(data) {
   ].filter(Boolean));
 
   parsed.interactions.forEach(function (item) {
-    // 不允许自己给自己点赞/评论
+
     if (myNames.has(item.from)) return;
 
     if (item.action === 'like') {
+
       post.likes = post.likes || [];
+
       const already = post.likes.find(l => l.from === item.from);
+
       if (!already) {
         post.likes.push({ from: item.from });
         changed = true;
       }
+
     } else if (item.action === 'comment' && item.content) {
+
       post.comments = post.comments || [];
+
       post.comments.push({
         from: item.from,
         text: item.content,
         ...(item.replyTo ? { replyTo: item.replyTo } : {})
       });
+
       changed = true;
     }
   });
 
-  if (parsed.post) {
+  // =========================
+  // 最终刷新
+  // =========================
 
-    post.content = parsed.post.content || post.content;
+  if (changed) {
+    saveAll();
+    renderFeedList();
 
-    if (parsed.post.photos?.length) {
-      post.images = parsed.post.photos;
-    }
-
-    if (parsed.post.from) {
-      post.author = parsed.post.from;
-    }
-
-    if (parsed.post.bridgeName) {
-      post.bridgeName = parsed.post.bridgeName;
-    }
-
-    changed = true; // ← 加这一句
-
-    console.log('[VV][FEED] AI post updated:', parsed.postId);
+    console.log(
+      '[VV][FEED] feed sync applied:',
+      parsed.postId
+    );
   }
 }
 
