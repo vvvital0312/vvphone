@@ -1633,7 +1633,13 @@ function parseVVChatBlocks(raw, fallback = {}) {
 }
 
 function parseFeedSyncRaw(raw) {
-  const result = { postId: '', time: '', interactions: [] };
+  const result = {
+    postId: '',
+    time: '',
+    interactions: [],
+    post: null
+  };
+
   if (!raw) return result;
 
   const syncMatch = raw.match(/\[VV_FEED_SYNC\]([\s\S]*?)\[\/VV_FEED_SYNC\]/i);
@@ -1643,12 +1649,53 @@ function parseFeedSyncRaw(raw) {
 
   const postIdMatch = block.match(/postId\s*=\s*(.+)/i);
   const timeMatch = block.match(/time\s*=\s*(.+)/i);
+
   result.postId = postIdMatch ? postIdMatch[1].trim() : '';
   result.time = timeMatch ? timeMatch[1].trim() : '';
 
+  // =========================
+  // 解析 AI 主动动态
+  // =========================
+
+  const postBlockMatch = block.match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+
+  if (postBlockMatch) {
+    const pb = postBlockMatch[1];
+
+    const fromMatch = pb.match(/from\s*=\s*(.+)/i);
+    const bridgeNameMatch = pb.match(/bridgeName\s*=\s*(.+)/i);
+    const contentMatch = pb.match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|\[\/动态\]|$)/i);
+    const photoMatch = pb.match(/photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|\[\/动态\]|$)/i);
+
+    result.post = {
+      from: fromMatch ? fromMatch[1].trim() : '',
+      bridgeName: bridgeNameMatch ? bridgeNameMatch[1].trim() : '',
+      content: contentMatch ? contentMatch[1].trim() : '',
+      photos: []
+    };
+
+    // 提取模拟图片
+    if (photoMatch) {
+      const photoText = photoMatch[1].trim();
+
+      const imageMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
+
+      result.post.photos = imageMatches.map(m => ({
+        simulated: true,
+        desc: m[1].trim()
+      }));
+    }
+  }
+
+  // =========================
+  // 解析互动
+  // =========================
+
   const interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi);
+
   if (interactionBlocks) {
     interactionBlocks.forEach(function (ib) {
+
       const fromMatch = ib.match(/from\s*=\s*(.+)/i);
       const actionMatch = ib.match(/action\s*=\s*(.+)/i);
       const contentMatch = ib.match(/content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i);
@@ -1656,15 +1703,22 @@ function parseFeedSyncRaw(raw) {
 
       const from = fromMatch ? fromMatch[1].trim() : '';
       const action = actionMatch ? actionMatch[1].trim().toLowerCase() : '';
+
       if (!from || !action) return;
 
-      const item = { from, action };
+      const item = {
+        from,
+        action
+      };
+
       if (action === 'comment' && contentMatch) {
         item.content = contentMatch[1].trim();
       }
+
       if (replyToMatch) {
         item.replyTo = replyToMatch[1].trim();
       }
+
       result.interactions.push(item);
     });
   }
@@ -1684,10 +1738,68 @@ async function handleVVFeedSyncRaw(data) {
     return;
   }
 
-  const post = feedPosts.find(p => p.id === parsed.postId);
+  let post = feedPosts.find(p => p.id === parsed.postId);
+
+  // =========================
+  // AI主动动态：如果不存在，则创建
+  // =========================
+
+  if (!post && parsed.post) {
+
+    const contact = contactList.find(c =>
+      c.bridgeName === parsed.post.bridgeName
+    );
+
+    const authorId = contact ? contact.id : '';
+
+    post = {
+      id: parsed.postId,
+      authorId,
+      author: parsed.post.from || parsed.post.bridgeName,
+      bridgeName: parsed.post.bridgeName,
+      authorAvatar: '',
+      content: parsed.post.content || '',
+      time: parsed.time || getNowTime(),
+      images: parsed.post.photos || [],
+      likes: [],
+      comments: []
+    };
+
+    feedPosts.unshift(post);
+
+    console.log('[VV][FEED] AI post created:', parsed.postId);
+  }
+
+  // =========================
+  // 如果还是没找到
+  // =========================
+
   if (!post) {
     console.warn('[VV][FEED] handleVVFeedSyncRaw: post not found, postId =', parsed.postId);
     return;
+  }
+
+  // =========================
+  // AI主动动态：更新占位动态
+  // =========================
+
+  if (parsed.post) {
+
+    post.content = parsed.post.content || post.content;
+
+    if (parsed.post.photos?.length) {
+      post.images = parsed.post.photos;
+    }
+
+    if (parsed.post.from) {
+      post.author = parsed.post.from;
+    }
+
+    if (parsed.post.bridgeName) {
+      post.bridgeName = parsed.post.bridgeName;
+    }
+
+    console.log('[VV][FEED] AI post updated:', parsed.postId);
   }
 
   let changed = false;
@@ -5295,6 +5407,8 @@ function buildVVFeedAiPostPayload(postId, author, bridgeName) {
   7. 禁止输出 [VV_CHAT_SYNC]。
   8. 禁止输出 [VV_CALL_SYNC]。
   9. 只输出下面格式。
+  ⚠️ 如果是AI主动发动态，你必须输出 [动态] 块。
+  ⚠️ 不允许输出 [互动]。
 
   [VV_FEED_SYNC]
   postId=${postId}
