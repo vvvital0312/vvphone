@@ -511,8 +511,16 @@ const VV_BRIDGE_CONFIG = {
     const content = opts.content || '';
     const images = opts.images || [];
     const author = opts.author || '我';
+    const bridgeName = opts.bridgeName || author;
 
-    const promptText = buildVVFeedEventPayload(postId, content, images, author);
+    let promptText = '';
+
+    if (opts.isAiPost) {
+      promptText = buildVVFeedAiPostPayload(postId, author, bridgeName);
+    } else {
+      promptText = buildVVFeedEventPayload(postId, content, images, author);
+    }
+
     const cmd = '/send ' + promptText + '\n|\n/trigger';
     return cmd;
   },
@@ -3421,7 +3429,7 @@ function switchContactTab(tab) {
       navAction.textContent = '＋';
       navAction.onclick = () => {
         playClickSound?.();
-        showDialog('postFeedDialog');
+        showDialog('feedChoiceDialog');
       };
     } else {
       navAction.style.display = 'flex';
@@ -3649,9 +3657,12 @@ function renderFeedList() {
 
     const images = (post.images || []).length ? `
       <div class="feed-image-grid">
-        ${(post.images || []).map(src => `
-          <img ${buildMediaSrcAttrs(src)} alt="" onclick="openFeedImageViewerFromNode(this)">
-        `).join('')}
+        ${(post.images || []).map(src => {
+          if (src && src.simulated) {
+            return `<div class="feed-simulated-image">[图片] ${escapeHTML(src.desc)}</div>`;
+          }
+          return `<img ${buildMediaSrcAttrs(src)} alt="" onclick="openFeedImageViewerFromNode(this)">`;
+        }).join('')}
       </div>
     ` : '';
 
@@ -4229,6 +4240,81 @@ async function addFeedPost() {
       });
     } catch (err) {
       console.error('[VV][FEED] triggerSlash error:', err);
+    }
+  }
+}
+
+async function addAiFeedPost() {
+  if (!_selectedAiFeedContactId) {
+    alert('请先选择一个发布身份');
+    return;
+  }
+
+  const contact = contactList.find(c => c.id === _selectedAiFeedContactId);
+  if (!contact) {
+    alert('联系人不存在');
+    return;
+  }
+
+  const bridgeName = contact.bridgeName;
+  const author = contact.displayName || contact.name || bridgeName;
+
+  const authorAvatar =
+    getChatSetting(contact.id)?.theirAvatar ||
+    contact.avatar ||
+    DEFAULT_AVATAR;
+
+  const postId = 'f' + Date.now();
+  const timeStr = getNowTime();
+
+  feedPosts.unshift({
+    id: postId,
+    authorId: contact.id,
+    author,
+    authorAvatar,
+    bridgeName,
+    content: '正在发布中...',
+    time: timeStr,
+    images: [],
+    likes: [],
+    comments: []
+  });
+
+  saveAll();
+  renderFeedList();
+  closeDialog('aiFeedPostDialog');
+
+  _selectedAiFeedBridge = '';
+  _selectedAiFeedContactId = '';
+
+  if (VV_BRIDGE_CONFIG.enabled) {
+    const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
+      postId,
+      content: '',
+      images: [],
+      author,
+      bridgeName,
+      isAiPost: true
+    });
+
+    try {
+      await triggerSlash(cmd, {
+        feedMode: true,
+        feedMeta: {
+          postId,
+          author,
+          authorId: contact.id,
+          bridgeName,
+          time: timeStr,
+          content: '',
+          images: [],
+          photoDesc: '',
+          location: '',
+          isAiPost: true
+        }
+      });
+    } catch (err) {
+      console.error('[VV][FEED] AI feed post triggerSlash error:', err);
     }
   }
 }
@@ -5187,6 +5273,42 @@ function buildVVFeedEventPayload(postId, content, images, author) {
   ];
 
   return lines.join('\n');
+}
+
+function buildVVFeedAiPostPayload(postId, author, bridgeName) {
+  return `【系统指令·AI角色发布朋友圈动态·严格遵守】
+
+  你现在要模拟指定AI角色主动发布一条朋友圈动态。
+
+  发布角色：
+  bridgeName=${bridgeName}
+  显示名称=${author}
+  postId=${postId}
+
+  要求：
+  1. 必须以 ${bridgeName} 的身份发布动态。
+  2. 动态内容由你自己生成，符合该角色性格、当前剧情和关系。
+  3. 可以只发文字，也可以发文字加模拟图片。
+  4. 如果发图片，不要生成真实图片，只用 photo= 字段描述。
+  5. photo 格式示例：
+  photo=[图1:一只正在熟睡的小猫][图2:窗边散落的书和咖啡]
+  6. 禁止输出解释、旁白、分析。
+  7. 禁止输出 [VV_CHAT_SYNC]。
+  8. 禁止输出 [VV_CALL_SYNC]。
+  9. 只输出下面格式。
+
+  [VV_FEED_SYNC]
+  postId=${postId}
+
+  [动态]
+  from=${author}
+  bridgeName=${bridgeName}
+  time=现在
+  content=这里填写角色自己发布的朋友圈文字
+  photo=
+  [/动态]
+
+  [/VV_FEED_SYNC]`;
 }
 
 let isTriggeringAIReply = false;
@@ -8688,7 +8810,131 @@ function getFeedAuthorAvatar(post) {
     return getMyProfileAvatar() || DEFAULT_AVATAR;
   }
 
+  // 最优先：用具体会话 authorId 找头像
+  if (post.authorId) {
+    const contact = contactList.find(c => c.id === post.authorId);
+
+    if (contact) {
+      const setting = getChatSetting(contact.id);
+      return setting.theirAvatar || contact.avatar || DEFAULT_AVATAR;
+    }
+  }
+
+  // 兜底：只有旧动态没有 authorId 时，才用 bridgeName
+  if (post.bridgeName) {
+    const contact = contactList.find(c => c.bridgeName === post.bridgeName);
+
+    if (contact) {
+      const setting = getChatSetting(contact.id);
+      return setting.theirAvatar || contact.avatar || DEFAULT_AVATAR;
+    }
+  }
+
   return post.authorAvatar || DEFAULT_AVATAR;
+}
+
+let _selectedFeedBridge = '';
+let _selectedFeedContactId = '';
+let _selectedAiFeedBridge = '';
+let _selectedAiFeedContactId = '';
+
+function renderAiFeedContactList() {
+  const container = document.getElementById('aiFeedContactList');
+  if (!container) return;
+
+  _selectedAiFeedBridge = '';
+  _selectedAiFeedContactId = '';
+
+  const bridges = getUniqueBridgeNames();
+
+  if (!bridges.length) {
+    container.innerHTML = '<div style="padding:12px;color:#999;text-align:center;background:#fff;">暂无已绑定角色</div>';
+    return;
+  }
+
+  container.innerHTML = bridges.map(b => `
+    <div class="ai-feed-bridge-wrap" data-bridge="${escapeHTML(b.bridgeName)}">
+      <div class="ai-feed-bridge-item"
+           data-bridge="${escapeHTML(b.bridgeName)}"
+           style="padding:12px;cursor:pointer;background:#fff;border-bottom:1px solid #e0e0e0;">
+        <div style="font-size:14px;background:#fff;">${escapeHTML(b.bridgeName)}</div>
+        <div style="font-size:12px;color:#000;margin-top:2px;background:#fff;">${b.count} 个会话</div>
+      </div>
+      <div class="ai-feed-session-list" style="display:none;background:#fff;"></div>
+    </div>
+  `).join('');
+
+  container.onclick = function(e) {
+    const bridgeItem = e.target.closest('.ai-feed-bridge-item');
+    if (bridgeItem) {
+      selectAiFeedBridge(bridgeItem.dataset.bridge);
+      return;
+    }
+
+    const sessionItem = e.target.closest('.ai-feed-session-item');
+    if (sessionItem) {
+      selectAiFeedSession(sessionItem);
+    }
+  };
+}
+
+function selectAiFeedBridge(bridgeName) {
+  _selectedAiFeedBridge = bridgeName;
+  _selectedAiFeedContactId = '';
+
+  document.querySelectorAll('.ai-feed-bridge-item').forEach(item => {
+    item.style.background = '';
+  });
+
+  document.querySelectorAll('.ai-feed-session-list').forEach(box => {
+    box.style.display = 'none';
+    box.innerHTML = '';
+  });
+
+  const wrap = [...document.querySelectorAll('.ai-feed-bridge-wrap')]
+    .find(w => w.dataset.bridge === bridgeName);
+
+  if (!wrap) return;
+
+  const bridgeItem = wrap.querySelector('.ai-feed-bridge-item');
+  const sessionBox = wrap.querySelector('.ai-feed-session-list');
+
+  if (bridgeItem) bridgeItem.style.background = '#f5f5f5;background:#fff;';
+  if (!sessionBox) return;
+
+  const list = contactList.filter(c => c.bridgeName === bridgeName);
+
+  sessionBox.style.display = 'block';
+  sessionBox.innerHTML = list.map(contact => {
+    const displayName = contact.displayName || contact.name || bridgeName;
+
+    return `
+      <div class="ai-feed-session-item"
+           data-id="${escapeHTML(contact.id)}"
+           style="padding:9px 12px 9px 28px;cursor:pointer;border-bottom: 1px solid #e0e0e0;font-size:14px;background:#fff;">
+        ${escapeHTML(displayName)}
+      </div>
+    `;
+  }).join('');
+}
+
+function selectAiFeedSession(el) {
+  const contactId = el.dataset.id;
+  _selectedAiFeedContactId = contactId;
+
+  document.querySelectorAll('.ai-feed-session-item').forEach(item => {
+    item.style.background = item.dataset.id === contactId ? '#f5f5f5;background:#fff;' : '';
+  });
+
+  console.log('[VV][FEED] selected contact id:', contactId);
+}
+
+function selectAiFeedContact(el, contactId) {
+  _selectedFeedContactId = contactId;
+
+  document.querySelectorAll('#aiFeedContactList .bridge-list-item')
+    .forEach(i => i.classList.remove('selected'));
+  el.classList.add('selected');
 }
 
 function updateContactHeaderByTab(tab) {

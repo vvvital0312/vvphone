@@ -129,7 +129,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 }
 .dialog.show{opacity:1}
 .dialog-content{
-  background:#fde5ec;padding:18px;border-radius:16px;width:90%;max-width:290px;max-height:74vh;
+  padding:18px;border-radius:16px;width:90%;max-width:290px;max-height:74vh;
   overflow-y:auto;transform:scale(.9);transition:all .3s ease;border:2px solid #000
 }
 .dialog.show .dialog-content{transform:scale(1)}
@@ -248,6 +248,19 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .feed-comment{font-size:12px;color:#444;line-height:1.4}
 .feed-comment strong{color:#576b95}
 .feed-op-btn{border:none;background:#f2f2f2;padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer}
+.feed-simulated-image {
+  background: #f0f0f0;
+  border-radius: 6px;
+  padding: 20px 12px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  word-break: break-all;
+}
 
 /* chat */
 .chat-detail-bg{position:absolute;inset:63px 0 0 0;background-size:cover;background-position:center;z-index:0}
@@ -963,9 +976,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 /* 已绑定角色列表项 */
 .bridge-list-item {
   padding: 10px 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  margin-bottom: 6px;
+  border: 0.5px solid #f2f2f2;
   cursor: pointer;
   font-size: 14px;
   background: #fff;
@@ -1069,6 +1080,25 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   background: transparent;
   border-radius: 10px;
 }
+
+#aiFeedContactList {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#aiFeedContactList::-webkit-scrollbar {
+  display: none;
+}
+
+#existingBridgeList {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#existingBridgeList::-webkit-scrollbar {
+  display: none;
+}
+
 
 /* 时间模式选择器 */
 #timeModeSelect {

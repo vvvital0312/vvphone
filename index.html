@@ -543,9 +543,9 @@
       <div class="dialog-content">
         <h3>添加联系人</h3>
         <div class="dialog-buttons" style="flex-direction:column;gap:12px;">
-          <button onclick="playClickSound();closeDialog('addContactDialog');showDialog('existingBridgeDialog')" style="width:100%;padding:12px;font-size:15px;">已绑定角色（新建会话）</button>
+          <button onclick="playClickSound();closeDialog('addContactDialog');showDialog('existingBridgeDialog')" style="width:100%;padding:12px;font-size:15px;">已绑定角色</button>
           <button onclick="playClickSound();closeDialog('addContactDialog');showDialog('newBridgeDialog')" style="width:100%;padding:12px;font-size:15px;">新绑定角色</button>
-          <button onclick="playClickSound();closeDialog('addContactDialog')" style="width:100%;padding:12px;font-size:15px;color:#999;">取消</button>
+          <button onclick="playClickSound();closeDialog('addContactDialog')" style="width:100%;padding:12px;font-size:15px;color:#000000;">取消</button>
         </div>
       </div>
     </div>
@@ -609,6 +609,33 @@
         <div class="dialog-buttons">
           <button onclick="playClickSound();addGroup()">创建群聊</button>
           <button onclick="playClickSound();closeDialog('addGroupDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 发布选择弹窗 -->
+    <div id="feedChoiceDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>发布动态</h3>
+        <div class="dialog-buttons" style="flex-direction:column;gap:12px;">
+          <button onclick="playClickSound();closeDialog('feedChoiceDialog');showDialog('aiFeedPostDialog');renderAiFeedContactList()">AI角色发布动态</button>
+          <button onclick="playClickSound();closeDialog('feedChoiceDialog');showDialog('postFeedDialog')">我发布动态</button>
+          <button onclick="playClickSound();closeDialog('feedChoiceDialog')">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI角色发布动态弹窗 -->
+    <div id="aiFeedPostDialog" class="dialog">
+      <div class="dialog-content">
+        <h3>AI角色发布动态</h3>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:13px;color:#000000;">选择角色：</label>
+          <div id="aiFeedContactList" style="max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:8px;margin-top:4px;background:#fff;"></div>
+        </div>
+        <div class="dialog-buttons">
+          <button onclick="playClickSound();addAiFeedPost()">发布</button>
+          <button onclick="playClickSound();closeDialog('aiFeedPostDialog')">取消</button>
         </div>
       </div>
     </div>
