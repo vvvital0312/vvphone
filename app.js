@@ -3573,7 +3573,6 @@ function generateItem(item, type) {
       <div class="chat-info">
         <div class="chat-name-row">
           <div class="chat-name">${escapeHTML(showName)}${rel.blockedByMe ? '（已拉黑）' : ''}</div>
-          <div class="chat-type-badge">${typeLabel}</div>
         </div>
         <div class="chat-time">${escapeHTML(item.lastTime || '')}</div>
         <div class="chat-last-msg">${escapeHTML(lastMsg)}</div>
