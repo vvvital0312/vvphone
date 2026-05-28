@@ -8891,6 +8891,58 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      // ========== AI 角色主动发布动态 ==========
+      if (type === 'VV_AI_FEED_POST') {
+        const p = data.payload;
+        if (!p || !p.from || !p.content) {
+          console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
+          return;
+        }
+
+        console.log('[VV][NAV] VV_AI_FEED_POST received:', p);
+
+        // 找到对应联系人（用 bridgeName 匹配）
+        const contact = contactList.find(c =>
+          c.bridgeName === p.bridgeName ||
+          c.name === p.from ||
+          c.displayName === p.from
+        );
+
+        const authorAvatar = contact
+          ? (getChatSetting(contact.id)?.theirAvatar || contact.avatar || DEFAULT_AVATAR)
+          : DEFAULT_AVATAR;
+
+        const postId = p.postId || ('f' + Date.now());
+
+        // 防重复：同一 postId 不重复插入
+        if (feedPosts.find(fp => fp.id === postId)) {
+          console.log('[VV][NAV] VV_AI_FEED_POST: postId already exists, skip:', postId);
+          return;
+        }
+
+        feedPosts.unshift({
+          id: postId,
+          authorId: contact ? contact.id : p.bridgeName,
+          author: p.from,
+          authorAvatar,
+          bridgeName: p.bridgeName || p.from,
+          content: p.content,
+          time: p.time || getNowTime(),
+          images: p.photos || [],
+          likes: [],
+          comments: []
+        });
+
+        saveAll();
+        renderFeedList();
+
+        // 跳转到朋友圈
+        switchTab('feed');
+
+        console.log('[VV][NAV] VV_AI_FEED_POST: post created and feed tab opened, postId:', postId);
+        return;
+      }
+
       if (type === 'VVPHONE_OPEN_CHAT') {
         const chatId = String(data.chatId || data.viewId || '').trim();
         const target = String(data.target || '').trim();
