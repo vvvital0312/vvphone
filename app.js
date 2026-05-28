@@ -2140,100 +2140,39 @@ function appendVVChatReplyToLocal(chatData, msgIndex) {
   }
 }
 
-function rebuildFeedPostsFromSTHiddenData() {
+function rebuildFeedPostsFromRaw(fullRaw) {
+  if (!fullRaw) return;
 
-  try {
+  var blocks = fullRaw.match(
+    /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g
+  ) || [];
 
-    if (
-      !window.parent ||
-      !window.parent.document
-    ) {
-      console.warn('[VV][FEED] no parent');
-      return;
+  console.log('[VV][FEED] found hidden blocks:', blocks.length);
+
+  if (blocks.length === 0) return;
+
+  var rebuilt = [];
+
+  blocks.forEach(function(block) {
+    try {
+      var syncRaw = block
+        .replace('[VV_FEED_HIDDEN_DATA]', '[VV_FEED_SYNC]')
+        .replace('[/VV_FEED_HIDDEN_DATA]', '[/VV_FEED_SYNC]');
+
+      var parsed = parseFeedSyncRaw(syncRaw);
+      if (!parsed || !parsed.post) return;
+
+      rebuilt.push(parsed.post);
+    } catch (err) {
+      console.warn('[VV][FEED] parse block failed:', err);
     }
+  });
 
-    var rootDoc = window.parent.document;
-
-    var mesNodes =
-      rootDoc.querySelectorAll('.mes');
-
-    console.log(
-      '[VV][FEED] mes nodes:',
-      mesNodes.length
-    );
-
-    var rebuilt = [];
-
-    mesNodes.forEach(function(node){
-
-      var raw =
-        String(node.innerText || '');
-
-      if (
-        !raw.includes('[VV_FEED_HIDDEN_DATA]')
-      ) return;
-
-      var blocks =
-        raw.match(
-          /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g
-        ) || [];
-
-      blocks.forEach(function(block){
-
-        try {
-
-          var syncRaw =
-            block
-              .replace(
-                '[VV_FEED_HIDDEN_DATA]',
-                '[VV_FEED_SYNC]'
-              )
-              .replace(
-                '[/VV_FEED_HIDDEN_DATA]',
-                '[/VV_FEED_SYNC]'
-              );
-
-          var parsed =
-            parseFeedSyncRaw(syncRaw);
-
-          if (
-            !parsed ||
-            !parsed.post
-          ) return;
-
-          rebuilt.push(parsed.post);
-
-        } catch(err){
-
-          console.warn(
-            '[VV][FEED] parse block failed:',
-            err
-          );
-
-        }
-
-      });
-
-    });
-
+  if (rebuilt.length > 0) {
     feedPosts = rebuilt;
-
     saveAll();
-
     renderFeedList();
-
-    console.log(
-      '[VV][FEED] rebuild done:',
-      rebuilt.length
-    );
-
-  } catch(err){
-
-    console.error(
-      '[VV][FEED] rebuild failed:',
-      err
-    );
-
+    console.log('[VV][FEED] rebuild done:', rebuilt.length, 'posts');
   }
 }
 
@@ -8850,9 +8789,9 @@ function initVVHostNavigationBridge() {
         return;
       }     
 
-      if (type === 'VV_FEED_HIDDEN_UPDATED') {
-        console.log('[VV][FEED] hidden updated, rebuilding...');
-        rebuildFeedPostsFromSTHiddenData();
+      if (type === 'VV_FEED_HIDDEN_RAW') {
+        console.log('[VV][FEED] received raw from host, length =', (data.raw || '').length);
+        rebuildFeedPostsFromRaw(data.raw || '');
         return;
       }
 
@@ -10048,148 +9987,6 @@ function renderThemeList() {
   });
 }
 
-function startFeedHiddenObserver() {
-
-  let hostDoc = null;
-
-  try {
-
-    hostDoc =
-      window.parent?.document ||
-      window.top?.document ||
-      document;
-
-  } catch (e) {
-
-    hostDoc = document;
-  }
-
-  if (!hostDoc) return;
-
-  const observer = new MutationObserver(function(mutations) {
-
-    let changed = false;
-
-    mutations.forEach(function(m) {
-
-      if (
-        m.type === 'characterData' ||
-        m.type === 'childList'
-      ) {
-        changed = true;
-      }
-    });
-
-    if (changed) {
-
-      console.log(
-        '[VV][FEED] hidden data changed'
-      );
-
-      rebuildFeedPostsFromHiddenData();
-    }
-  });
-
-  observer.observe(hostDoc.body, {
-
-    childList: true,
-    subtree: true,
-    characterData: true
-
-  });
-
-  console.log(
-    '[VV][FEED] hidden observer started'
-  );
-}
-
-function rebuildFeedPostsFromHiddenData() {
-
-  let hostDoc = null;
-
-  try {
-
-    hostDoc =
-      window.parent?.document ||
-      window.top?.document ||
-      document;
-
-  } catch (e) {
-
-    hostDoc = document;
-  }
-
-  const hiddenNodes =
-    hostDoc.querySelectorAll('.vv-feed-hidden');
-
-  console.log(
-    '[VV][FEED] hidden nodes:',
-    hiddenNodes.length
-  );
-
-  if (!hiddenNodes.length) return;
-
-  const rebuiltPosts = [];
-
-  hiddenNodes.forEach(node => {
-
-    const raw =
-      node.innerText ||
-      node.textContent ||
-      '';
-
-    if (!raw.includes('[VV_FEED_HIDDEN_DATA]')) return;
-
-    const fakeSync = raw
-      .replace(
-        '[VV_FEED_HIDDEN_DATA]',
-        '[VV_FEED_SYNC]'
-      )
-      .replace(
-        '[/VV_FEED_HIDDEN_DATA]',
-        '[/VV_FEED_SYNC]'
-      );
-
-    const parsed = parseFeedSyncRaw(fakeSync);
-
-    if (!parsed.postId || !parsed.post) return;
-
-    rebuiltPosts.push({
-
-      id: parsed.postId,
-
-      author: parsed.post.from || '',
-
-      bridgeName:
-        parsed.post.bridgeName || '',
-
-      content:
-        parsed.post.content || '',
-
-      time:
-        parsed.time || '',
-
-      images:
-        parsed.post.photos || [],
-
-      likes: [],
-
-      comments: []
-    });
-  });
-
-  feedPosts = rebuiltPosts;
-
-  saveAll();
-
-  renderFeedList();
-
-  console.log(
-    '[VV][FEED] rebuilt:',
-    rebuiltPosts
-  );
-}
-
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
@@ -10231,7 +10028,6 @@ window.onload = async function () {
   migrateFeedPostsAuthorId();
   initFontSystem();
   await initTheme(); 
-  startFeedHiddenObserver();
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();
