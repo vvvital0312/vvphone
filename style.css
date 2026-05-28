@@ -239,8 +239,73 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .feed-main{flex:1}
 .feed-author{font-size:15px;font-weight:600;color:#576b95;margin-bottom:4px}
 .feed-content{font-size:14px;color:#222;line-height:1.55;white-space:pre-wrap;margin-bottom:8px}
-.feed-image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:220px;margin-bottom:8px}
-.feed-image-grid img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px}
+/* 动态图片网格 */
+.feed-image-grid {
+  display: grid;
+  gap: 3px;
+  margin-top: 20px;
+  margin-bottom: 15px;
+  margin-left: 0px;
+  margin-right: 0px;
+  width: 100%;
+}
+
+.feed-image-grid--1col {
+  grid-template-columns: 1fr;
+}
+.feed-image-grid--1col img {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+}
+
+.feed-image-grid--2col {
+  grid-template-columns: repeat(2, 1fr);
+}
+.feed-image-grid--2col img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.feed-image-grid--3col {
+  grid-template-columns: repeat(3, 1fr);
+}
+.feed-image-grid--3col img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+/* 模拟图片（AI发布时） */
+.feed-simulated-image--thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  background: #f0f0f0;
+  padding: 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.feed-sim-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.feed-sim-desc {
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .feed-meta-row{display:flex;justify-content:space-between;align-items:center}
 .feed-meta{font-size:12px;color:#999}
 .feed-comment-box{margin-top:8px;background:#f6f6f6;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:5px}
@@ -925,7 +990,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   max-width: 92%;
   max-height: 92%;
   object-fit: contain;
-  border-radius: 8px;
 }
 
 

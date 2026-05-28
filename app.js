@@ -3918,11 +3918,20 @@ function renderFeedList() {
     const isMine = post.authorId === 'me' || myNames.has(post.author);
     const postAvatar = getFeedAuthorAvatar(post);
 
-    const images = (post.images || []).length ? `
-      <div class="feed-image-grid">
-        ${(post.images || []).map(src => {
+    const rawImages = (post.images || []).slice(0, 9); // 最多9张
+    const imgCount = rawImages.length;
+
+    // 决定每行列数：1张=1列，2张=2列，其余=3列
+    const gridCols = imgCount === 1 ? 1 : imgCount === 2 ? 2 : 3;
+
+    const images = imgCount ? `
+      <div class="feed-image-grid feed-image-grid--${gridCols}col">
+        ${rawImages.map(src => {
           if (src && src.simulated) {
-            return `<div class="feed-simulated-image">[图片] ${escapeHTML(src.desc)}</div>`;
+            return `<div class="feed-simulated-image feed-simulated-image--thumb">
+              <span class="feed-sim-icon">🖼</span>
+              <span class="feed-sim-desc">${escapeHTML(src.desc || '图片')}</span>
+            </div>`;
           }
           return `<img ${buildMediaSrcAttrs(src)} alt="" onclick="openFeedImageViewerFromNode(this)">`;
         }).join('')}
