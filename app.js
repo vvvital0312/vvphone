@@ -831,6 +831,12 @@ function initSTBridgeListener() {
         return;
       }
 
+      if (data.type === 'VV_FEED_HIDDEN_RAW') {
+        console.log('[V][FEED] received raw from host, length =', (data.raw || '').length);
+        rebuildFeedPostsFromRaw(data.raw || '');
+        return;
+      }
+
       if (data.type === 'VV_EXECUTE_RESULT') {
         console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
         return;
@@ -9985,6 +9991,10 @@ function renderThemeList() {
     })(key);
     container.appendChild(item);
   });
+}
+
+function requestFeedRefresh() {
+  window.parent.postMessage({ type: 'VV_REQUEST_FEED_REFRESH' }, '*');
 }
 
 window.addEventListener('beforeunload', () => {
