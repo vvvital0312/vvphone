@@ -831,12 +831,6 @@ function initSTBridgeListener() {
         return;
       }
 
-      if (data.type === 'VV_FEED_HIDDEN_RAW') {
-        console.log('[V][FEED] received raw from host, length =', (data.raw || '').length);
-        rebuildFeedPostsFromRaw(data.raw || '');
-        return;
-      }
-
       if (data.type === 'VV_EXECUTE_RESULT') {
         console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
         return;
@@ -2150,35 +2144,122 @@ function rebuildFeedPostsFromRaw(fullRaw) {
   if (!fullRaw) return;
 
   var blocks = fullRaw.match(
-    /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g
+    /\[VV_FEED_HIDDEN_DATA\]([\s\S]*?)\[\/VV_FEED_HIDDEN_DATA\]/g
   ) || [];
 
   console.log('[VV][FEED] found hidden blocks:', blocks.length);
-
   if (blocks.length === 0) return;
 
-  var rebuilt = [];
+  var changed = false;
 
   blocks.forEach(function(block) {
     try {
-      var syncRaw = block
-        .replace('[VV_FEED_HIDDEN_DATA]', '[VV_FEED_SYNC]')
-        .replace('[/VV_FEED_HIDDEN_DATA]', '[/VV_FEED_SYNC]');
+      // 提取 postId
+      var postIdMatch = block.match(/postId\s*=\s*(.+)/i);
+      if (!postIdMatch) return;
+      var postId = postIdMatch[1].trim();
 
-      var parsed = parseFeedSyncRaw(syncRaw);
-      if (!parsed || !parsed.post) return;
+      // 提取所有 [动态] 块，取最后一个有 content 的
+      var dynBlocks = block.match(/\[动态\]([\s\S]*?)\[\/动态\]/gi) || [];
+      var latestDyn = null;
+      for (var i = dynBlocks.length - 1; i >= 0; i--) {
+        var contentCheck = dynBlocks[i].match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
+        if (contentCheck && contentCheck[1].trim()) {
+          latestDyn = dynBlocks[i];
+          break;
+        }
+      }
+      if (!latestDyn) return; // 没有有效内容，跳过
 
-      rebuilt.push(parsed.post);
+      var fromMatch = latestDyn.match(/from\s*=\s*(.+)/i);
+      var bridgeNameMatch = latestDyn.match(/bridgeName\s*=\s*(.+)/i);
+      var timeMatch = latestDyn.match(/time\s*=\s*(.+)/i);
+      var contentMatch = latestDyn.match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
+      var photoMatch = latestDyn.match(/photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
+
+      var from = fromMatch ? fromMatch[1].trim() : '';
+      var bridgeName = bridgeNameMatch ? bridgeNameMatch[1].trim() : '';
+      var time = timeMatch ? timeMatch[1].trim() : '';
+      var content = contentMatch ? contentMatch[1].trim() : '';
+
+      // 提取模拟图片
+      var photos = [];
+      if (photoMatch) {
+        var photoText = photoMatch[1].trim();
+        var imgMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
+        photos = imgMatches.map(function(m) {
+          return { simulated: true, desc: m[1].trim() };
+        });
+      }
+
+      // 提取互动
+      var interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi) || [];
+      var interactions = [];
+      interactionBlocks.forEach(function(ib) {
+        var ifrom = (ib.match(/from\s*=\s*(.+)/i) || [])[1];
+        var iaction = (ib.match(/action\s*=\s*(.+)/i) || [])[1];
+        var icontent = (ib.match(/content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i) || [])[1];
+        var ireplyTo = (ib.match(/replyTo\s*=\s*(.+)/i) || [])[1];
+        if (!ifrom || !iaction) return;
+        var item = { from: ifrom.trim(), action: iaction.trim().toLowerCase() };
+        if (item.action === 'comment' && icontent) item.text = icontent.trim();
+        if (ireplyTo) item.replyTo = ireplyTo.trim();
+        interactions.push(item);
+      });
+
+      // 找现有动态（按 id 或 postId）
+      var existing = feedPosts.find(function(p) {
+        return p.id === postId || p.postId === postId;
+      });
+
+      if (existing) {
+        // 增量更新，不覆盖已有评论/点赞
+        if (content) existing.content = content;
+        if (time) existing.time = time;
+        if (bridgeName) existing.bridgeName = bridgeName;
+        if (from) existing.author = from;
+        if (photos.length) existing.images = photos;
+        existing.id = postId; // 确保 id 字段统一
+
+        // 合并互动（不重复添加）
+        existing.comments = existing.comments || [];
+        existing.likes = existing.likes || [];
+        interactions.forEach(function(item) {
+          if (item.action === 'like') {
+            if (!existing.likes.find(function(l) { return l.from === item.from; })) {
+              existing.likes.push({ from: item.from });
+            }
+          } else if (item.action === 'comment' && item.text) {
+            existing.comments.push({ from: item.from, text: item.text, replyTo: item.replyTo });
+          }
+        });
+        changed = true;
+      } else {
+        // 新增（只有 hidden data 里有但 feedPosts 里没有的情况）
+        feedPosts.unshift({
+          id: postId,
+          postId: postId,
+          author: from,
+          bridgeName: bridgeName,
+          time: time,
+          content: content,
+          images: photos,
+          comments: interactions.filter(function(i) { return i.action === 'comment'; })
+            .map(function(i) { return { from: i.from, text: i.text, replyTo: i.replyTo }; }),
+          likes: interactions.filter(function(i) { return i.action === 'like'; })
+            .map(function(i) { return { from: i.from }; })
+        });
+        changed = true;
+      }
     } catch (err) {
       console.warn('[VV][FEED] parse block failed:', err);
     }
   });
 
-  if (rebuilt.length > 0) {
-    feedPosts = rebuilt;
+  if (changed) {
     saveAll();
     renderFeedList();
-    console.log('[VV][FEED] rebuild done:', rebuilt.length, 'posts');
+    console.log('[VV][FEED] rebuild done:', feedPosts.length, 'posts');
   }
 }
 
