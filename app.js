@@ -9945,78 +9945,145 @@ function renderThemeList() {
   });
 }
 
+function startFeedHiddenObserver() {
+
+  let hostDoc = null;
+
+  try {
+
+    hostDoc =
+      window.parent?.document ||
+      window.top?.document ||
+      document;
+
+  } catch (e) {
+
+    hostDoc = document;
+  }
+
+  if (!hostDoc) return;
+
+  const observer = new MutationObserver(function(mutations) {
+
+    let changed = false;
+
+    mutations.forEach(function(m) {
+
+      if (
+        m.type === 'characterData' ||
+        m.type === 'childList'
+      ) {
+        changed = true;
+      }
+    });
+
+    if (changed) {
+
+      console.log(
+        '[VV][FEED] hidden data changed'
+      );
+
+      rebuildFeedPostsFromHiddenData();
+    }
+  });
+
+  observer.observe(hostDoc.body, {
+
+    childList: true,
+    subtree: true,
+    characterData: true
+
+  });
+
+  console.log(
+    '[VV][FEED] hidden observer started'
+  );
+}
+
 function rebuildFeedPostsFromHiddenData() {
 
-  const hiddenNodes = document.querySelectorAll('.vv-feed-hidden');
+  let hostDoc = null;
 
-  if (!hiddenNodes.length) {
-    console.warn('[VV][FEED] no hidden feed nodes found');
-    return;
+  try {
+
+    hostDoc =
+      window.parent?.document ||
+      window.top?.document ||
+      document;
+
+  } catch (e) {
+
+    hostDoc = document;
   }
+
+  const hiddenNodes =
+    hostDoc.querySelectorAll('.vv-feed-hidden');
+
+  console.log(
+    '[VV][FEED] hidden nodes:',
+    hiddenNodes.length
+  );
+
+  if (!hiddenNodes.length) return;
 
   const rebuiltPosts = [];
 
   hiddenNodes.forEach(node => {
 
-    const raw = node.innerText || node.textContent || '';
+    const raw =
+      node.innerText ||
+      node.textContent ||
+      '';
 
     if (!raw.includes('[VV_FEED_HIDDEN_DATA]')) return;
 
-    const parsed = parseFeedSyncRaw(
-      raw.replace(
+    const fakeSync = raw
+      .replace(
         '[VV_FEED_HIDDEN_DATA]',
         '[VV_FEED_SYNC]'
-      ).replace(
+      )
+      .replace(
         '[/VV_FEED_HIDDEN_DATA]',
         '[/VV_FEED_SYNC]'
-      )
-    );
+      );
+
+    const parsed = parseFeedSyncRaw(fakeSync);
 
     if (!parsed.postId || !parsed.post) return;
 
-    const post = {
+    rebuiltPosts.push({
+
       id: parsed.postId,
+
       author: parsed.post.from || '',
-      bridgeName: parsed.post.bridgeName || '',
-      content: parsed.post.content || '',
-      time: parsed.time || '',
-      images: parsed.post.photos || [],
+
+      bridgeName:
+        parsed.post.bridgeName || '',
+
+      content:
+        parsed.post.content || '',
+
+      time:
+        parsed.time || '',
+
+      images:
+        parsed.post.photos || [],
+
       likes: [],
+
       comments: []
-    };
-
-    // 互动恢复
-    parsed.interactions.forEach(item => {
-
-      if (item.action === 'like') {
-
-        post.likes.push({
-          from: item.from
-        });
-
-      } else if (item.action === 'comment') {
-
-        post.comments.push({
-          from: item.from,
-          text: item.content || '',
-          ...(item.replyTo
-            ? { replyTo: item.replyTo }
-            : {})
-        });
-      }
     });
-
-    rebuiltPosts.push(post);
   });
 
   feedPosts = rebuiltPosts;
 
   saveAll();
+
   renderFeedList();
 
   console.log(
-    '[VV][FEED] rebuilt from hidden data:',
-    rebuiltPosts.length
+    '[VV][FEED] rebuilt:',
+    rebuiltPosts
   );
 }
 
@@ -10061,6 +10128,7 @@ window.onload = async function () {
   migrateFeedPostsAuthorId();
   initFontSystem();
   await initTheme(); 
+  startFeedHiddenObserver();
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();
