@@ -2140,6 +2140,103 @@ function appendVVChatReplyToLocal(chatData, msgIndex) {
   }
 }
 
+function rebuildFeedPostsFromSTHiddenData() {
+
+  try {
+
+    if (
+      !window.parent ||
+      !window.parent.document
+    ) {
+      console.warn('[VV][FEED] no parent');
+      return;
+    }
+
+    var rootDoc = window.parent.document;
+
+    var mesNodes =
+      rootDoc.querySelectorAll('.mes');
+
+    console.log(
+      '[VV][FEED] mes nodes:',
+      mesNodes.length
+    );
+
+    var rebuilt = [];
+
+    mesNodes.forEach(function(node){
+
+      var raw =
+        String(node.innerText || '');
+
+      if (
+        !raw.includes('[VV_FEED_HIDDEN_DATA]')
+      ) return;
+
+      var blocks =
+        raw.match(
+          /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g
+        ) || [];
+
+      blocks.forEach(function(block){
+
+        try {
+
+          var syncRaw =
+            block
+              .replace(
+                '[VV_FEED_HIDDEN_DATA]',
+                '[VV_FEED_SYNC]'
+              )
+              .replace(
+                '[/VV_FEED_HIDDEN_DATA]',
+                '[/VV_FEED_SYNC]'
+              );
+
+          var parsed =
+            parseFeedSyncRaw(syncRaw);
+
+          if (
+            !parsed ||
+            !parsed.post
+          ) return;
+
+          rebuilt.push(parsed.post);
+
+        } catch(err){
+
+          console.warn(
+            '[VV][FEED] parse block failed:',
+            err
+          );
+
+        }
+
+      });
+
+    });
+
+    feedPosts = rebuilt;
+
+    saveAll();
+
+    renderFeedList();
+
+    console.log(
+      '[VV][FEED] rebuild done:',
+      rebuilt.length
+    );
+
+  } catch(err){
+
+    console.error(
+      '[VV][FEED] rebuild failed:',
+      err
+    );
+
+  }
+}
+
 function handleSyncOverwrite(chatData, chatId, thread, syncKey, allMsgs, contact, time, timeLabel) {
   // 找到这个批次的所有消息在 thread 里的起始位置
   var batchStartIdx = -1;
@@ -8751,26 +8848,13 @@ function initVVHostNavigationBridge() {
         }
 
         return;
-      }
+      }     
 
-      if (data.type === 'VV_REBUILD_FEED_POSTS') {
-
-        console.log(
-          '[VV][FEED] received rebuilt posts:',
-          data.posts
-        );
-
-        if (Array.isArray(data.posts)) {
-
-          feedPosts = data.posts;
-
-          saveAll();
-
-          renderFeedList();
-        }
-
+      if (type === 'VV_FEED_HIDDEN_UPDATED') {
+        console.log('[VV][FEED] hidden updated, rebuilding...');
+        rebuildFeedPostsFromSTHiddenData();
         return;
-      }      
+      }
 
       if (type === 'VVPHONE_OPEN_CHAT') {
         const chatId = String(data.chatId || data.viewId || '').trim();
