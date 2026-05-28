@@ -8753,6 +8753,25 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      if (data.type === 'VV_REBUILD_FEED_POSTS') {
+
+        console.log(
+          '[VV][FEED] received rebuilt posts:',
+          data.posts
+        );
+
+        if (Array.isArray(data.posts)) {
+
+          feedPosts = data.posts;
+
+          saveAll();
+
+          renderFeedList();
+        }
+
+        return;
+      }      
+
       if (type === 'VVPHONE_OPEN_CHAT') {
         const chatId = String(data.chatId || data.viewId || '').trim();
         const target = String(data.target || '').trim();
