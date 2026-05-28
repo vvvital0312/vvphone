@@ -312,20 +312,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
 .feed-comment{font-size:12px;color:#444;line-height:1.4}
 .feed-comment strong{color:#576b95}
 .feed-op-btn{border:none;background:#f2f2f2;padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer}
-.feed-simulated-image {
-  background: #f0f0f0;
-  border-radius: 6px;
-  padding: 20px 12px;
-  text-align: center;
-  color: #666;
-  font-size: 13px;
-  aspect-ratio: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  word-break: break-all;
-}
-
 /* chat */
 .chat-detail-bg{position:absolute;inset:63px 0 0 0;background-size:cover;background-position:center;z-index:0}
 .chat-detail-page {
