@@ -1900,7 +1900,6 @@ function handleAiFeedPost(payload) {
 
   feedPosts.unshift(post);
   saveAll();
-  switchToPage('feedPage');
   renderFeedList();
 
   console.log('[VVPHONE] AI feed post created:', post.postId, 'by', post.author);
