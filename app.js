@@ -1873,22 +1873,20 @@ function handleAiFeedPost(payload) {
     return;
   }
 
-  // 查找对应联系人
-  var contact = contacts.find(function(c) {
-    return c.name === payload.bridgeName || c.name === payload.from;
+  var contact = contactList.find(function(c) {
+    return c.bridgeName === payload.bridgeName || c.name === payload.from;
   });
   var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
 
-  // 处理图片描述
   var images = [];
   if (payload.photos && payload.photos.length > 0) {
     images = payload.photos.map(function(p) {
-      return { type: 'desc', text: p.desc || p };
+      return { simulated: true, desc: p.desc || p };
     });
   }
 
-  // 创建动态
   var post = {
+    id: payload.postId || ('f' + Date.now()),
     postId: payload.postId || ('f' + Date.now()),
     author: payload.from,
     authorId: authorId,
@@ -1896,15 +1894,12 @@ function handleAiFeedPost(payload) {
     time: payload.time || new Date().toLocaleString(),
     content: payload.content,
     images: images,
-    photoDesc: (payload.photos || []).map(function(p) { return p.desc || p; }),
     likes: [],
     comments: []
   };
 
-  feedList.unshift(post);
+  feedPosts.unshift(post);
   saveAll();
-
-  // 自动跳转到动态页
   switchToPage('feedPage');
   renderFeedList();
 
