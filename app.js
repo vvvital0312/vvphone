@@ -1867,6 +1867,50 @@ async function handleVVFeedSyncRaw(data) {
   }
 }
 
+function handleAiFeedPost(payload) {
+  if (!payload || !payload.from || !payload.content) {
+    console.warn('[VVPHONE] invalid AI feed post payload');
+    return;
+  }
+
+  // 查找对应联系人
+  var contact = contacts.find(function(c) {
+    return c.name === payload.bridgeName || c.name === payload.from;
+  });
+  var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
+
+  // 处理图片描述
+  var images = [];
+  if (payload.photos && payload.photos.length > 0) {
+    images = payload.photos.map(function(p) {
+      return { type: 'desc', text: p.desc || p };
+    });
+  }
+
+  // 创建动态
+  var post = {
+    postId: payload.postId || ('f' + Date.now()),
+    author: payload.from,
+    authorId: authorId,
+    bridgeName: payload.bridgeName || payload.from,
+    time: payload.time || new Date().toLocaleString(),
+    content: payload.content,
+    images: images,
+    photoDesc: (payload.photos || []).map(function(p) { return p.desc || p; }),
+    likes: [],
+    comments: []
+  };
+
+  feedList.unshift(post);
+  saveAll();
+
+  // 自动跳转到动态页
+  switchToPage('feedPage');
+  renderFeedList();
+
+  console.log('[VVPHONE] AI feed post created:', post.postId, 'by', post.author);
+}
+
 function appendVVChatReplyToLocal(chatData, msgIndex) {
   try {
     if (!chatData || !chatData.chatId) {
@@ -8898,48 +8942,7 @@ function initVVHostNavigationBridge() {
           console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
           return;
         }
-
-        console.log('[VV][NAV] VV_AI_FEED_POST received:', p);
-
-        // 找到对应联系人（用 bridgeName 匹配）
-        const contact = contactList.find(c =>
-          c.bridgeName === p.bridgeName ||
-          c.name === p.from ||
-          c.displayName === p.from
-        );
-
-        const authorAvatar = contact
-          ? (getChatSetting(contact.id)?.theirAvatar || contact.avatar || DEFAULT_AVATAR)
-          : DEFAULT_AVATAR;
-
-        const postId = p.postId || ('f' + Date.now());
-
-        // 防重复：同一 postId 不重复插入
-        if (feedPosts.find(fp => fp.id === postId)) {
-          console.log('[VV][NAV] VV_AI_FEED_POST: postId already exists, skip:', postId);
-          return;
-        }
-
-        feedPosts.unshift({
-          id: postId,
-          authorId: contact ? contact.id : p.bridgeName,
-          author: p.from,
-          authorAvatar,
-          bridgeName: p.bridgeName || p.from,
-          content: p.content,
-          time: p.time || getNowTime(),
-          images: p.photos || [],
-          likes: [],
-          comments: []
-        });
-
-        saveAll();
-        renderFeedList();
-
-        // 跳转到朋友圈
-        switchTab('feed');
-
-        console.log('[VV][NAV] VV_AI_FEED_POST: post created and feed tab opened, postId:', postId);
+        handleAiFeedPost(p);
         return;
       }
 
