@@ -831,6 +831,12 @@ function initSTBridgeListener() {
         return;
       }
 
+      if (data.type === 'VV_AI_FEED_POST') {
+        console.log('[VV][listener] HIT VV_AI_FEED_POST');
+        handleAiFeedPost(data.payload);
+        return;
+      }
+
       if (data.type === 'VV_EXECUTE_RESULT') {
         console.log('[VV][listener] HIT VV_EXECUTE_RESULT', data);
         return;
