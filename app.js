@@ -342,15 +342,15 @@ var phoneThemes = {
       /* 手机端才生效 */
       @media (max-width: 430px) {
         .phone-container {
-          --mobile-app1-top: 18%;
+          --mobile-app1-top: 19%;
           --mobile-app1-left: 53%;
 
           --mobile-app2-top: 33%;
           --mobile-app2-left: 53%;
 
-          --record-x: -8px;
-          --record-y: 8px;
-          --record-scale: 0.72;
+          --record-x: 18px;
+          --record-y: 28px;
+          --record-scale: 0.8;
         }
 
         .app-1 {
