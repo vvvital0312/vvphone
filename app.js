@@ -319,6 +319,88 @@ var phoneThemes = {
       .app-4 > div {
         pointer-events: auto;
       }
+
+      /* ===== theme1 移动端微调，不影响PC端 ===== */
+      .phone-container {
+        --mobile-app1-top: 115px;
+        --mobile-app1-left: 190px;
+
+        --mobile-app2-top: 210px;
+        --mobile-app2-left: 190px;
+
+        --record-x: 0px;
+        --record-y: 0px;
+        --record-scale: 1;
+      }
+
+      /* 唱片整体控制 */
+      .app-4 {
+        transform: translate(var(--record-x), var(--record-y)) scale(var(--record-scale));
+        transform-origin: top left;
+      }
+
+      /* 手机端才生效 */
+      @media (max-width: 430px) {
+        .phone-container {
+          --mobile-app1-top: 18%;
+          --mobile-app1-left: 53%;
+
+          --mobile-app2-top: 33%;
+          --mobile-app2-left: 53%;
+
+          --record-x: -8px;
+          --record-y: 8px;
+          --record-scale: 0.72;
+        }
+
+        .app-1 {
+          top: var(--mobile-app1-top);
+          left: var(--mobile-app1-left);
+          width: 38%;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+
+        .app-2 {
+          top: var(--mobile-app2-top);
+          left: var(--mobile-app2-left);
+          width: 38%;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+
+        .app-block {
+          padding: 4px 2px;
+          min-height: 56px;
+        }
+
+        .app-block img {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+        }
+
+        .app-block span {
+          font-size: 12px;
+          margin-top: 3px;
+        }
+
+        .app-3 {
+          left: 12px;
+          right: 12px;
+          bottom: 8px;
+        }
+
+        .app-3 .app img {
+          width: 46px;
+          height: 46px;
+          border-radius: 12px;
+        }
+
+        .app-3 .app span {
+          font-size: 12px;
+        }
+      }
     `
   }
 };
@@ -3605,9 +3687,14 @@ async function confirmReplace() {
 
   const finalSrc = await resolveImageRefToUrl(storedRef);
 
+  if (!finalSrc) {
+    alert('图片处理失败，请重试');
+    return;
+  }
+
   if (target === 'wallpaper') {
     const phone = document.querySelector('.phone-container');
-    if (phone) phone.style.backgroundImage = `url(${finalSrc})`;
+    if (phone) phone.style.backgroundImage = `url("${finalSrc}")`;
   } else {
     const el = document.getElementById(target);
     if (el) el.src = finalSrc;
@@ -10033,9 +10120,58 @@ function handleRPMakeCall(targetName) {
 
 // ===== 主题切换系统 =====
 
-async function switchTheme(themeName) {
+async function switchTheme(themeName, options) {
+  options = options || {};
+
   var theme = phoneThemes[themeName];
   if (!theme) return;
+
+  var oldTheme = localStorage.getItem('st_phone_theme') || 'default';
+
+  // resetWallpaper: 主动切主题时清除用户壁纸
+  // resetIcons: 主动切主题时清除用户图标
+  var resetWallpaper = !!options.resetWallpaper;
+  var resetIcons = !!options.resetIcons;
+
+  // 保存当前主题
+  localStorage.setItem('st_phone_theme', themeName);
+
+  // 图标 key 列表
+  var iconKeys = [
+    'icon-forum',
+    'icon-diary',
+    'icon-vvshop',
+    'icon-vvplatform',
+    'icon-contact',
+    'icon-text',
+    'icon-music',
+    'icon-setting'
+  ];
+
+  // 主动切换到其他主题时，清除用户自定义壁纸/图标
+  if (oldTheme !== themeName && (resetWallpaper || resetIcons)) {
+    var savedIcons = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+
+    if (resetWallpaper && savedIcons.wallpaper) {
+      delete savedIcons.wallpaper;
+    }
+
+    if (resetIcons) {
+      for (var i = 0; i < iconKeys.length; i++) {
+        delete savedIcons[iconKeys[i]];
+      }
+    }
+
+    savePhoneIconsSafely(savedIcons);
+
+    // 清掉旧的行内壁纸，否则 CSS 主题背景压不过行内样式
+    if (resetWallpaper) {
+      var phoneBefore = document.querySelector('.phone-container');
+      if (phoneBefore) {
+        phoneBefore.style.backgroundImage = '';
+      }
+    }
+  }
 
   // 替换 homePage 元素
   var oldHome = document.getElementById('homePage');
@@ -10046,7 +10182,7 @@ async function switchTheme(themeName) {
     oldHome.parentNode.replaceChild(newHome, oldHome);
   }
 
-  // 注入主题 CSS（覆盖 style.css 的默认值）
+  // 注入主题 CSS
   var styleEl = document.getElementById('theme-dynamic-style');
   if (!styleEl) {
     styleEl = document.createElement('style');
@@ -10055,8 +10191,25 @@ async function switchTheme(themeName) {
   }
   styleEl.textContent = theme.css || '';
 
-  // 恢复用户自定义图标
-  await restoreUserIcons();
+  // 替换 homePage 后再清一次行内背景，防止残留
+  if (oldTheme !== themeName && resetWallpaper) {
+    var phoneAfter = document.querySelector('.phone-container');
+    if (phoneAfter) {
+      phoneAfter.style.backgroundImage = '';
+    }
+  }
+
+  // 初始化/刷新页面时：恢复用户自定义图标
+  // 主动切主题并 resetIcons 时：不恢复旧图标，让主题默认图标生效
+  if (!resetIcons) {
+    await restoreUserIcons();
+  }
+
+  // 初始化/刷新页面时：恢复用户自定义壁纸
+  // 主动切主题并 resetWallpaper 时：不恢复旧壁纸，让主题默认背景生效
+  if (!resetWallpaper) {
+    await restoreUserWallpaper();
+  }
 
   // 重新应用颜色设置
   var savedBorder = localStorage.getItem('st_phone_border_color');
@@ -10068,10 +10221,7 @@ async function switchTheme(themeName) {
   if (typeof updateTime === 'function') updateTime();
   if (typeof updateWeather === 'function') updateWeather();
 
-  // 保存选择
-  localStorage.setItem('st_phone_theme', themeName);
-
-  // 刷新主题选择器的选中状态（如果对话框开着）
+  // 刷新主题选择器的选中状态
   var container = document.getElementById('themeListContainer');
   if (container) renderThemeList();
 }
@@ -10097,13 +10247,32 @@ async function restoreUserIcons() {
   }
 }
 
+async function restoreUserWallpaper() {
+  var saved = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+  var storedRef = saved.wallpaper;
+  if (!storedRef) return;
+
+  try {
+    var url = await resolveImageRefToUrl(storedRef);
+    if (url) {
+      var phone = document.querySelector('.phone-container');
+      if (phone) {
+        phone.style.backgroundImage = `url(${url})`;
+      }
+    }
+  } catch (e) {
+    console.warn('[restoreUserWallpaper] 恢复壁纸失败:', e);
+  }
+}
+
 async function initTheme() {
   var saved = localStorage.getItem('st_phone_theme') || 'default';
-  if (saved !== 'default') {
-    await switchTheme(saved);
-  } else {
-    await restoreUserIcons();
-  }
+
+  // 初始化主题时不清除用户自定义壁纸和图标
+  await switchTheme(saved, {
+    resetWallpaper: false,
+    resetIcons: false
+  });
 }
 
 function showThemeDialog() {
@@ -10130,7 +10299,19 @@ function renderThemeList() {
     item.onclick = (function(k) {
       return function() {
         playClickSound();
-        switchTheme(k);
+
+        var currentTheme = localStorage.getItem('st_phone_theme') || 'default';
+
+        if (k === currentTheme) {
+          closeDialog('themeDialog');
+          return;
+        }
+
+        switchTheme(k, {
+          resetWallpaper: true,
+          resetIcons: true
+        });
+
         closeDialog('themeDialog');
       };
     })(key);
@@ -10140,6 +10321,20 @@ function renderThemeList() {
 
 function requestFeedRefresh() {
   window.parent.postMessage({ type: 'VV_REQUEST_FEED_REFRESH' }, '*');
+}
+
+function getSavedPhoneIcons() {
+  return safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+}
+
+function savePhoneIconsSafely(data) {
+  try {
+    localStorage.setItem('st_phone_icons', JSON.stringify(data || {}));
+    return true;
+  } catch (err) {
+    console.warn('[PhoneIcons] save failed:', err);
+    return false;
+  }
 }
 
 window.addEventListener('beforeunload', () => {
