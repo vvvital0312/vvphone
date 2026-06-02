@@ -1,6 +1,7 @@
 var phoneThemes = {
   default: {
     name: '默认主题',
+    wallpaper:'https://s41.ax1x.com/2026/04/13/peBWtbV.jpg',
     html: `
         <div id="homePage" class="page">
           <div class="phone-notch">
@@ -46,7 +47,7 @@ var phoneThemes = {
               <img id="icon-forum" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_230401ac0e003ae5dbdd48.jpg" alt="论坛">
               <span>论坛</span>
             </div>
-            <div class="app-block" onclick="playClickSound(); triggerSlash('/send 写日记|/trigger')">
+            <div class="app-block" onclick="playClickSound(); openDiaryChoiceDialog()">
               <img id="icon-diary" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214158c86ca004be758e29.jpg" alt="日记">
               <span>日记</span>
             </div>
@@ -84,6 +85,7 @@ var phoneThemes = {
   },
   theme1: {
     name: '主题一',
+    wallpaper:'https://origin.picgo.net/2026/05/24/screenshot_20260524_025956a38280e38b924ef2.jpg',
     html: `
       <div id="homePage" class="page">
         <div class="phone-notch">
@@ -124,7 +126,7 @@ var phoneThemes = {
         </div>
 
         <div class="app-1">
-          <div class="app-block" onclick="playClickSound(); triggerSlash('/send 写日记|/trigger')">
+          <div class="app-block" onclick="playClickSound(); openDiaryChoiceDialog()">
             <img id="icon-diary" src="https://origin.picgo.net/2026/05/23/-182_202605220003_0152825964f03819ddf4a.jpg" alt="日记">
             <span>日记</span>
           </div>
@@ -223,9 +225,10 @@ var phoneThemes = {
         height:min(85vh,640px);
         border:8px solid var(--phone-border);
         border-radius:36px;
-        background-image:url('https://origin.picgo.net/2026/05/24/screenshot_20260524_025956a38280e38b924ef2.jpg');
-        background-size:cover;background-position:center;
-        position:relative;overflow:hidden;
+        background-size:cover;
+        background-position:center;
+        position:relative;
+        overflow:hidden;
       }
       .widget-container {
         position: absolute;
@@ -463,6 +466,12 @@ let callStartTime = null;
 let callTimerInterval = null;
 let isWaitingCallAIReply = false;
 let callTranscript = [];
+
+var diaryData =
+JSON.parse(
+  localStorage.getItem('st_diary_data')
+  || '{"diaries":[]}'
+);
 
 // 在 VV_BRIDGE_CONFIG 中新增 buildCallEventCommand（不要删除原来的 buildCallCommand）
 // 找到 VV_BRIDGE_CONFIG 对象，在 buildCallCommand 后面加上这个新方法：
@@ -2833,6 +2842,12 @@ function escapeHTMLAttr(str) {
 }
 
 const escapeHtml = escapeHTML;
+var escapeAttr = escapeHTMLAttr;
+
+function openUserDiaryPage() {
+  closeDialog('diaryChoiceDialog');
+  openDiaryPage('me');
+}
 
 function ensureProfileData() {
   if (!myProfile || typeof myProfile !== 'object') {
@@ -3329,7 +3344,8 @@ function saveAll(retryMode = 'normal') {
     safeSetItemJSON('st_app_profile', appProfile),
     safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
     safeSetItemJSON('st_my_profile', myProfile),
-    safeSetItemJSON('st_wallet_data', walletData)
+    safeSetItemJSON('st_wallet_data', walletData),
+    safeSetItemJSON('st_diary_data',diaryData)
   ];
 
   const success = okList.every(Boolean);
@@ -3350,7 +3366,8 @@ function saveAll(retryMode = 'normal') {
       safeSetItemJSON('st_app_profile', appProfile),
       safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
       safeSetItemJSON('st_my_profile', myProfile),
-      safeSetItemJSON('st_wallet_data', walletData)
+      safeSetItemJSON('st_wallet_data', walletData),
+      safeSetItemJSON('st_diary_data',diaryData)
     ];
 
     if (!secondTry.every(Boolean)) {
@@ -3407,6 +3424,15 @@ function loadAll() {
     balance: 0
   });
 
+  diaryData = safeJSONParse(
+    localStorage.getItem('st_diary_data') || '{"diaries":[]}',
+    { diaries: [] }
+  );
+
+  if (!diaryData.diaries) {
+    diaryData.diaries = [];
+  }
+
   ensureProfileData();
   migrateOversizedLegacyStorage();
 }
@@ -3445,6 +3471,20 @@ function applyTextColor(color) {
 
 function applyDialogBgColor(color) {
   document.querySelectorAll('.dialog-content').forEach(function(el) {
+    el.style.background = color;
+  });
+}
+
+function applySavedDialogBgTo(root) {
+  var color = localStorage.getItem('st_phone_dialog_bg_color');
+  if (!color) return;
+
+  var scope = root || document;
+  var contents = scope.querySelectorAll
+    ? scope.querySelectorAll('.dialog-content')
+    : [];
+
+  contents.forEach(function(el) {
     el.style.background = color;
   });
 }
@@ -3631,6 +3671,10 @@ function showDialog(dialogId) {
   const dialog = document.getElementById(dialogId);
   if (!dialog) return;
 
+  if (typeof applyCurrentFontTo === 'function') {
+    applyCurrentFontTo(dialog);
+  }
+
   dialog.style.display = 'flex';
 
   requestAnimationFrame(() => {
@@ -3675,9 +3719,21 @@ function handleImageUpload(e) {
 
 async function confirmReplace() {
   const target = document.getElementById('iconSelect')?.value;
+
   if (!target || !currentUploadImage) {
     alert('请选择目标和图片！');
     return;
+  }
+
+  // 记录开始替换时的主题，防止上传过程中切换主题
+  const themeAtStart = localStorage.getItem('st_phone_theme') || 'default';
+
+  // 本次替换操作的 token
+  const replaceToken = Date.now() + '_' + Math.random();
+
+  // 如果替换的是壁纸，就打断之前还没结束的壁纸恢复任务
+  if (target === 'wallpaper') {
+    window.__vvThemeSwitchToken = replaceToken;
   }
 
   const storedRef = await persistImageToIDB(currentUploadImage, {
@@ -3692,20 +3748,45 @@ async function confirmReplace() {
     return;
   }
 
-  if (target === 'wallpaper') {
-    const phone = document.querySelector('.phone-container');
-    if (phone) phone.style.backgroundImage = `url("${finalSrc}")`;
-  } else {
-    const el = document.getElementById(target);
-    if (el) el.src = finalSrc;
+  // 上传过程中如果主题变了，不再把这张图应用到新主题上
+  const themeNow = localStorage.getItem('st_phone_theme') || 'default';
+
+  if (target === 'wallpaper' && themeNow !== themeAtStart) {
+    alert('主题已切换，请重新选择背景');
+    return;
   }
 
   const saved = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+
   saved[target] = storedRef;
+
   savePhoneIconsSafely(saved);
 
+  if (target === 'wallpaper') {
+    if (window.__vvThemeSwitchToken !== replaceToken) {
+      return;
+    }
+
+    applyUserWallpaperUrl(finalSrc);
+  } else {
+    const el = document.getElementById(target);
+    if (el) {
+      el.src = finalSrc;
+    }
+  }
+
   alert('替换成功！');
+  currentUploadImage = null;
   closeDialog('settingDialog');
+}
+
+function applyUserWallpaperUrl(url) {
+  const phone = document.querySelector('.phone-container');
+  if (!phone || !url) return;
+
+  phone.style.backgroundImage = `url("${url}")`;
+  phone.style.backgroundSize = 'cover';
+  phone.style.backgroundPosition = 'center';
 }
 
 async function restoreIcons() {
@@ -3727,7 +3808,7 @@ async function restoreIcons() {
 }
 
 function hideAllPages() {
-  ['homePage', 'contactPage', 'chatDetailPage', 'callPage', 'incomingCallPage', 'chatSettingPage'].forEach(id => {
+  ['homePage', 'contactPage', 'chatDetailPage', 'callPage', 'incomingCallPage', 'chatSettingPage','diaryPage'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -4651,9 +4732,7 @@ async function addAiFeedPost() {
   const author = contact.displayName || contact.name || bridgeName;
 
   const authorAvatar =
-    getChatSetting(contact.id)?.theirAvatar ||
-    contact.avatar ||
-    DEFAULT_AVATAR;
+    getContactAvatarById(contact.id);
 
   const postId = 'f' + Date.now();
   const timeStr = getNowTime();
@@ -7035,9 +7114,10 @@ async function simulateOutgoingCall(contactId) {
   hideAllPages();
   document.getElementById('callPage').style.display = 'block';
   document.getElementById('callName').innerText = contact.name;
-  document.getElementById('callAvatar').src = await resolveImageRefToUrl(
-    getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR
-  );
+  document.getElementById('callAvatar').src =
+    await resolveImageRefToUrl(
+      getContactAvatarById(contactId)
+    );
   document.getElementById('callStatus').innerText = '正在呼叫…';
   document.getElementById('callTranscript').innerHTML = '<div class="call-line system">拨号中…</div>';
 
@@ -7232,7 +7312,10 @@ async function openCallPage(contactId, accepted = false) {
   document.getElementById('callPage').style.display = 'block';
 
   document.getElementById('callName').innerText = contact.name;
-  document.getElementById('callAvatar').src = await resolveImageRefToUrl(getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR);
+  document.getElementById('callAvatar').src =
+    await resolveImageRefToUrl(
+      getContactAvatarById(contactId)
+    );
   document.getElementById('callStatus').innerText = accepted ? '通话中…' : '正在连接…';
 
   if (!callLogs[contactId]) {
@@ -7588,7 +7671,7 @@ function acceptIncomingCall() {
   document.getElementById('callName').innerText = contact.name;
 
   resolveImageRefToUrl(
-    getChatSetting(contactId).theirAvatar || contact.avatar || DEFAULT_AVATAR
+    getContactAvatarById(contactId)
   ).then(url => {
     document.getElementById('callAvatar').src = url;
   });
@@ -9206,41 +9289,44 @@ function normalizeChatSetting(chatId) {
 }
 
 function getFeedAuthorAvatar(post) {
-  if (!post) return DEFAULT_AVATAR;
+
+  if (!post) {
+    return DEFAULT_AVATAR;
+  }
 
   const myNames = new Set([
     '我',
-    myProfile.nickname || '',
-    appProfile.myName || ''
+    myProfile?.nickname || '',
+    appProfile?.myName || ''
   ].filter(Boolean));
 
-  const isMine = post.authorId === 'me' || myNames.has(post.author);
+  const isMine =
+    post.authorId === 'me' ||
+    myNames.has(post.author);
 
   if (isMine) {
-    return getMyProfileAvatar() || DEFAULT_AVATAR;
+    return (
+      getMyProfileAvatar?.()
+      || DEFAULT_AVATAR
+    );
   }
 
-  // 最优先：用具体会话 authorId 找头像
   if (post.authorId) {
-    const contact = contactList.find(c => c.id === post.authorId);
-
-    if (contact) {
-      const setting = getChatSetting(contact.id);
-      return setting.theirAvatar || contact.avatar || DEFAULT_AVATAR;
-    }
+    return getContactAvatarById(
+      post.authorId
+    );
   }
 
-  // 兜底：只有旧动态没有 authorId 时，才用 bridgeName
   if (post.bridgeName) {
-    const contact = contactList.find(c => c.bridgeName === post.bridgeName);
-
-    if (contact) {
-      const setting = getChatSetting(contact.id);
-      return setting.theirAvatar || contact.avatar || DEFAULT_AVATAR;
-    }
+    return getContactAvatarByBridge(
+      post.bridgeName
+    );
   }
 
-  return post.authorAvatar || DEFAULT_AVATAR;
+  return (
+    post.authorAvatar ||
+    DEFAULT_AVATAR
+  );
 }
 
 let _selectedFeedBridge = '';
@@ -9738,33 +9824,37 @@ function applyFont(fontId) {
 
   let fontFamily = '';
 
-  // 查找内置字体
   const builtin = BUILTIN_FONTS.find(f => f.id === fontId);
   if (builtin) {
     fontFamily = builtin.family;
   } else {
-    // 查找自定义字体
     const custom = customFonts.find(f => f.id === fontId);
     if (custom) {
       fontFamily = `"CustomFont_${fontId}", -apple-system, sans-serif`;
     } else {
-      // 找不到，回退默认
       fontFamily = BUILTIN_FONTS[0].family;
       currentFontId = 'default';
     }
   }
 
-  // 应用到整个页面
+  document.documentElement.style.setProperty('--vv-current-font', fontFamily);
+
   document.body.style.fontFamily = fontFamily;
 
-  // 确保按钮、输入框等也跟随变化
+  const phone = document.querySelector('.phone-container');
+  if (phone) {
+    phone.style.fontFamily = fontFamily;
+  }
+
   document.querySelectorAll('button, input, select, textarea, .dialog, .dialog-content').forEach(el => {
     el.style.fontFamily = fontFamily;
   });
 
-  // 保存选择
   localStorage.setItem('vv_current_font', currentFontId);
-  updateFontLabel();
+
+  if (typeof updateFontLabel === 'function') {
+    updateFontLabel();
+  }
 }
 
 // 更新设置页面的字体标签
@@ -9897,6 +9987,37 @@ function importCustomFont() {
   reader.readAsDataURL(file);
 }
 
+function getFontFamilyById(fontId) {
+  let fontFamily = '';
+
+  // 查找内置字体
+  const builtin = BUILTIN_FONTS.find(f => f.id === fontId);
+
+  if (builtin) {
+    fontFamily = builtin.family;
+    return fontFamily;
+  }
+
+  // 查找自定义字体
+  const custom = customFonts.find(f => f.id === fontId);
+
+  if (custom) {
+    fontFamily = `"CustomFont_${fontId}", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    return fontFamily;
+  }
+
+  // 找不到，回退默认
+  currentFontId = 'default';
+
+  if (BUILTIN_FONTS[0] && BUILTIN_FONTS[0].family) {
+    fontFamily = BUILTIN_FONTS[0].family;
+  } else {
+    fontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  }
+
+  return fontFamily;
+}
+
 // 删除自定义字体
 function deleteCustomFont(fontId) {
   if (!confirm('确定删除此字体？')) return;
@@ -9925,6 +10046,34 @@ function saveCustomFonts() {
     // localStorage 可能满了（字体文件比较大）
     console.warn('保存字体失败，可能存储空间不足:', e);
     alert('存储空间不足，无法保存字体。建议删除部分已导入的字体。');
+  }
+}
+
+function applyCurrentFontTo(root) {
+  if (!root) return;
+
+  let fontId = currentFontId || localStorage.getItem('vv_current_font') || 'default';
+  let fontFamily = '';
+
+  const builtin = BUILTIN_FONTS.find(f => f.id === fontId);
+  if (builtin) {
+    fontFamily = builtin.family;
+  } else {
+    const custom = customFonts.find(f => f.id === fontId);
+    if (custom) {
+      fontFamily = `"CustomFont_${fontId}", -apple-system, sans-serif`;
+    } else {
+      fontFamily = BUILTIN_FONTS[0].family;
+      fontId = 'default';
+    }
+  }
+
+  root.style.fontFamily = fontFamily;
+
+  if (root.querySelectorAll) {
+    root.querySelectorAll('button, input, select, textarea, h3, label, span, div, p').forEach(el => {
+      el.style.fontFamily = fontFamily;
+    });
   }
 }
 
@@ -10126,17 +10275,16 @@ async function switchTheme(themeName, options) {
   var theme = phoneThemes[themeName];
   if (!theme) return;
 
+  var switchToken = Date.now() + '_' + Math.random();
+  window.__vvThemeSwitchToken = switchToken;
+
   var oldTheme = localStorage.getItem('st_phone_theme') || 'default';
 
-  // resetWallpaper: 主动切主题时清除用户壁纸
-  // resetIcons: 主动切主题时清除用户图标
   var resetWallpaper = !!options.resetWallpaper;
   var resetIcons = !!options.resetIcons;
 
-  // 保存当前主题
   localStorage.setItem('st_phone_theme', themeName);
 
-  // 图标 key 列表
   var iconKeys = [
     'icon-forum',
     'icon-diary',
@@ -10148,7 +10296,6 @@ async function switchTheme(themeName, options) {
     'icon-setting'
   ];
 
-  // 主动切换到其他主题时，清除用户自定义壁纸/图标
   if (oldTheme !== themeName && (resetWallpaper || resetIcons)) {
     var savedIcons = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
 
@@ -10163,17 +10310,8 @@ async function switchTheme(themeName, options) {
     }
 
     savePhoneIconsSafely(savedIcons);
-
-    // 清掉旧的行内壁纸，否则 CSS 主题背景压不过行内样式
-    if (resetWallpaper) {
-      var phoneBefore = document.querySelector('.phone-container');
-      if (phoneBefore) {
-        phoneBefore.style.backgroundImage = '';
-      }
-    }
   }
 
-  // 替换 homePage 元素
   var oldHome = document.getElementById('homePage');
   if (oldHome) {
     var temp = document.createElement('div');
@@ -10182,48 +10320,58 @@ async function switchTheme(themeName, options) {
     oldHome.parentNode.replaceChild(newHome, oldHome);
   }
 
-  // 注入主题 CSS
   var styleEl = document.getElementById('theme-dynamic-style');
   if (!styleEl) {
     styleEl = document.createElement('style');
     styleEl.id = 'theme-dynamic-style';
     document.head.appendChild(styleEl);
   }
+
   styleEl.textContent = theme.css || '';
 
-  // 替换 homePage 后再清一次行内背景，防止残留
-  if (oldTheme !== themeName && resetWallpaper) {
-    var phoneAfter = document.querySelector('.phone-container');
-    if (phoneAfter) {
-      phoneAfter.style.backgroundImage = '';
-    }
-  }
+  // 关键：每次切主题后，先明确应用主题自带背景
+  applyThemeWallpaper(themeName);
 
-  // 初始化/刷新页面时：恢复用户自定义图标
-  // 主动切主题并 resetIcons 时：不恢复旧图标，让主题默认图标生效
   if (!resetIcons) {
     await restoreUserIcons();
   }
 
-  // 初始化/刷新页面时：恢复用户自定义壁纸
-  // 主动切主题并 resetWallpaper 时：不恢复旧壁纸，让主题默认背景生效
+  // 防止 await 期间已经切到别的主题
+  if (window.__vvThemeSwitchToken !== switchToken) return;
+
   if (!resetWallpaper) {
-    await restoreUserWallpaper();
+    await restoreUserWallpaperSafe(themeName, switchToken);
   }
 
-  // 重新应用颜色设置
+  if (window.__vvThemeSwitchToken !== switchToken) return;
+
   var savedBorder = localStorage.getItem('st_phone_border_color');
   var savedText = localStorage.getItem('st_phone_text_color');
+
   if (savedBorder) applyBorderColor(savedBorder);
   if (savedText) applyTextColor(savedText);
 
-  // 重新触发时间/天气显示
   if (typeof updateTime === 'function') updateTime();
   if (typeof updateWeather === 'function') updateWeather();
 
-  // 刷新主题选择器的选中状态
   var container = document.getElementById('themeListContainer');
   if (container) renderThemeList();
+}
+
+function applyThemeWallpaper(themeName) {
+  var theme = phoneThemes[themeName] || phoneThemes.default;
+  var phone = document.querySelector('.phone-container');
+  if (!phone || !theme) return;
+
+  var wallpaper = theme.wallpaper || '';
+
+  if (wallpaper) {
+    phone.style.backgroundImage = "url('" + wallpaper + "')";
+    phone.style.backgroundSize = 'cover';
+    phone.style.backgroundPosition = 'center';
+  } else {
+    phone.style.backgroundImage = '';
+  }
 }
 
 async function restoreUserIcons() {
@@ -10262,6 +10410,33 @@ async function restoreUserWallpaper() {
     }
   } catch (e) {
     console.warn('[restoreUserWallpaper] 恢复壁纸失败:', e);
+  }
+}
+
+async function restoreUserWallpaperSafe(themeName, switchToken) {
+  var currentTheme = localStorage.getItem('st_phone_theme') || 'default';
+
+  if (currentTheme !== themeName) return;
+  if (window.__vvThemeSwitchToken !== switchToken) return;
+
+  var saved = safeJSONParse(localStorage.getItem('st_phone_icons') || '{}', {});
+  var storedRef = saved.wallpaper;
+
+  if (!storedRef) return;
+
+  try {
+    var url = await resolveImageRefToUrl(storedRef);
+
+    if (window.__vvThemeSwitchToken !== switchToken) return;
+
+    currentTheme = localStorage.getItem('st_phone_theme') || 'default';
+    if (currentTheme !== themeName) return;
+
+    if (url) {
+      applyUserWallpaperUrl(url);
+    }
+  } catch (e) {
+    console.warn('[restoreUserWallpaperSafe] 恢复壁纸失败:', e);
   }
 }
 
@@ -10337,6 +10512,812 @@ function savePhoneIconsSafely(data) {
   }
 }
 
+//日记函数
+function openDiaryChoiceDialog() {
+  playClickSound();
+
+  var old = document.getElementById('diaryChoiceDialog');
+  if (old) old.remove();
+
+  var phone = document.querySelector('.phone-container') || document.body;
+
+  var dialog = document.createElement('div');
+  dialog.id = 'diaryChoiceDialog';
+  dialog.className = 'dialog';
+
+  dialog.innerHTML = `
+    <div class="dialog-content">
+      <h3>日记</h3>
+
+      <div class="diary-mode-list">
+        <button class="diary-mode-card" onclick="chooseDiaryMode('ai')">
+          <span class="diary-mode-title">AI写日记</span>
+        </button>
+
+        <button class="diary-mode-card" onclick="chooseDiaryMode('user')">
+          <span class="diary-mode-title">用户写日记</span>
+        </button>
+      </div>
+
+      <div class="dialog-buttons">
+        <button onclick="playClickSound();closeDialog('diaryChoiceDialog')">关闭</button>
+      </div>
+    </div>
+  `;
+
+  phone.appendChild(dialog);
+
+  applySavedDialogBgTo(dialog);
+  applyCurrentFontTo(dialog);
+
+  showDialog('diaryChoiceDialog');
+}
+
+function chooseDiaryMode(mode) {
+  playClickSound();
+  closeDialog('diaryChoiceDialog');
+
+  if (mode === 'ai') {
+    openAiDiaryRoleDialog();
+    return;
+  }
+
+  if (mode === 'user') {
+    openUserDiaryPage();
+    return;
+  }
+}
+
+function openAiDiaryRoleDialog() {
+
+  playClickSound();
+
+  var old =
+    document.getElementById('aiDiaryRoleDialog');
+
+  if (old) {
+    showDialog('aiDiaryRoleDialog');
+    return;
+  }
+
+  var phone =
+    document.querySelector('.phone-container')
+    || document.body;
+
+  var dialog = document.createElement('div');
+
+  dialog.id = 'aiDiaryRoleDialog';
+  dialog.className = 'dialog';
+
+  dialog.innerHTML = `
+    <div class="dialog-content ai-diary-dialog">
+
+      <div class="ai-diary-dialog-header">
+        <h3>选择角色</h3>
+      </div>
+
+      <div class="ai-diary-role-list" style="overflow-y: auto;border: 1px solid rgb(238, 238, 238);border-radius: 8px;margin-top: 4px;background: rgb(255, 255, 255);font-family: &quot;Noto Serif SC&quot;, &quot;Songti SC&quot;, SimSun, &quot;Source Han Serif SC&quot;, serif;"></div>
+
+      <div class="dialog-buttons">
+        <button
+          onclick="
+            playClickSound();
+            closeDialog('aiDiaryRoleDialog')
+          "
+        >
+          关闭
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  phone.appendChild(dialog);
+
+  applySavedDialogBgTo(dialog);
+  applyCurrentFontTo(dialog);
+
+  renderAiDiaryRoleList();
+
+  showDialog('aiDiaryRoleDialog');
+}
+
+function groupContactsByBridge() {
+  const groups = {};
+
+  (contactList || []).forEach(contact => {
+    const bridge = contact.bridgeName || contact.name || '未命名角色';
+
+    if (!groups[bridge]) {
+      groups[bridge] = [];
+    }
+
+    groups[bridge].push(contact);
+  });
+
+  return groups;
+}
+
+function selectAiDiaryRole(roleId) {
+  // 关闭弹窗
+  closeDialog('aiDiaryRoleDialog');
+
+  // 打开日记页面，身份为选中的角色
+  openDiaryPage(roleId);
+}
+
+/* ===== 日记页面 - 静态交互 ===== */
+
+// 当前日记状态
+var diaryViewState = {
+  currentIndex: 0,
+  isOnCover: true,
+  stickyCollapsed: false,
+  viewingRole: 'me' // 'me' 或联系人 id
+};
+let diaryExpandedBridges = {};
+
+// 打开日记页面（从弹窗选择后调用）
+function openDiaryPage(role) {
+  diaryViewState.viewingRole = role || 'me';
+  diaryViewState.isOnCover = true;
+  diaryViewState.currentIndex = 0;
+
+  // 更新选择器标签
+  var label = document.getElementById('diarySelectorLabel');
+  if (label) {
+    label.textContent = role === 'me' ? '我的日记' : getDiaryRoleName(role);
+  }
+
+  // 更新封面副标题
+  var subtitle = document.getElementById('diaryCoverSubtitle');
+  if (subtitle) {
+    subtitle.textContent = role === 'me' ? '我的日记' : getDiaryRoleName(role) + '的日记';
+  }
+
+  // 显示封面，隐藏正文
+  showDiaryCover();
+
+  // 隐藏所有页面，显示日记页
+  document.querySelectorAll('.page').forEach(function(p) {
+    p.style.display = 'none';
+  });
+
+  var diaryPage = document.getElementById('diaryPage');
+  if (diaryPage) {
+    diaryPage.style.display = 'flex';
+  }
+}
+
+// 获取指定角色的日记列表
+function getDiariesByRole(role) {
+  if (!diaryData) diaryData = { diaries: [] };
+  if (!diaryData.diaries) diaryData.diaries = [];
+
+  return diaryData.diaries.filter(function(d) {
+    if (role === 'me') return !d.authorId || d.authorId === 'me';
+    return d.authorId === role;
+  });
+}
+
+// 获取角色名称
+function getDiaryRoleName(role) {
+
+  if (role === 'me') return '我';
+
+  const contact = contactList.find(function(c) {
+    return c.id === role;
+  });
+
+  if (!contact) return '未知';
+
+  return (
+    contact.displayName ||
+    contact.name ||
+    contact.bridgeName ||
+    '未知'
+  );
+}
+
+function toggleDiaryBridge(bridgeName) {
+
+  diaryExpandedBridges[bridgeName] =
+    !diaryExpandedBridges[bridgeName];
+
+  renderAiDiaryRoleList();
+}
+
+async function renderAiDiaryRoleList() {
+
+  const container =
+    document.querySelector('.ai-diary-role-list');
+
+  if (!container) return;
+
+  container.innerHTML =
+    buildAiDiaryRoleHtml();
+
+  await hydrateMediaRefs(container);
+}
+
+function buildAiDiaryRoleHtml() {
+
+  var list = [];
+
+  if (
+    typeof contactList !== 'undefined' &&
+    Array.isArray(contactList)
+  ) {
+    list = contactList;
+  }
+  else if (Array.isArray(window.contactList)) {
+    list = window.contactList;
+  }
+
+  if (!list.length) {
+    return `
+      <div class="diary-empty-tip">
+        还没有可选择的联系人。
+      </div>
+    `;
+  }
+
+  const groups = groupContactsByBridge();
+
+  return Object.keys(groups).map(function(bridgeName) {
+
+    const contacts = groups[bridgeName];
+
+    const expanded =
+      !!diaryExpandedBridges[bridgeName];
+
+    const children = expanded
+      ? contacts.map(function(contact) {
+
+          const id = contact.id || '';
+
+          const chatName =
+            contact.displayName ||
+            contact.name ||
+            bridgeName;
+
+          const setting =
+            normalizeChatSetting(id);
+
+          const avatar =
+            getContactAvatarById(id);
+
+          console.log(
+            '[头像]',
+            chatName,
+            avatar
+          );
+
+          return `
+            <div
+              class="ai-diary-chat-item"
+              onclick="selectAiDiaryRole('${escapeHTMLAttr(id)}')"
+            >
+
+            <div class="ai-diary-role-avatar">
+              ${
+                avatar
+                  ? `<img
+                        data-media-ref="${escapeHTMLAttr(String(avatar))}"
+                        alt="${escapeHTMLAttr(chatName)}"
+                    >`
+                  : `<span>${escapeHTML(chatName.slice(0,1))}</span>`
+              }
+            </div>
+
+              <div class="ai-diary-role-info">
+                <div class="ai-diary-role-name">
+                  ${escapeHTML(chatName)}
+                </div>
+              </div>
+
+            </div>
+          `;
+
+        }).join('')
+      : '';
+
+    return `
+      <div class="ai-diary-bridge-group">
+
+        <div
+          class="ai-diary-bridge-title"
+          onclick="toggleDiaryBridge('${escapeHTMLAttr(bridgeName)}')"
+        >
+
+          <div class="ai-diary-bridge-left">
+
+            <span class="ai-diary-bridge-name">
+              ${escapeHTML(bridgeName)}
+            </span>
+
+          </div>
+
+        </div>
+
+        ${
+          expanded
+            ? `
+              <div class="ai-diary-bridge-children">
+                ${children}
+              </div>
+            `
+            : ''
+        }
+
+      </div>
+    `;
+
+  }).join('');
+}
+
+// 显示封面
+function showDiaryCover() {
+  diaryViewState.isOnCover = true;
+
+  var cover = document.getElementById('diaryCover');
+  var content = document.getElementById('diaryContentPage');
+
+  if (cover) {
+    cover.style.display = 'flex';
+    cover.classList.remove('flipped');
+  }
+  if (content) {
+    content.style.display = 'none';
+  }
+
+  var delBtn = document.getElementById('diaryDeleteBtn');
+  if (delBtn) delBtn.style.display = 'none';
+}
+
+// 打开第一页
+function openDiaryFirstPage() {
+  var diaries = getDiariesByRole(diaryViewState.viewingRole);
+  if (!diaries.length) {
+    showToast('还没有日记，点击右上角＋新建一篇吧');
+    return;
+  }
+  diaryViewState.currentIndex = 0;
+  diaryViewState.isOnCover = false;
+  renderDiaryContent();
+}
+
+function showToast(msg) {
+  var toast = document.createElement('div');
+  toast.className = 'vv-toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(function() {
+    toast.classList.add('vv-toast-fade');
+    setTimeout(function() { toast.remove(); }, 300);
+  }, 2000);
+}
+
+function renderDiaryContent() {
+  diaryViewState.isOnCover = false;
+
+  var cover = document.getElementById('diaryCover');
+  var content = document.getElementById('diaryContentPage');
+  if (cover) cover.style.display = 'none';
+  if (content) content.style.display = 'flex';
+
+  // 显示删除按钮
+  var delBtn = document.getElementById('diaryDeleteBtn');
+  if (delBtn) delBtn.style.display = 'flex';
+
+  var role = diaryViewState.viewingRole || 'me';
+  var diaries = getDiariesByRole(role);
+  var idx = diaryViewState.currentIndex;
+
+  if (!diaries.length || idx < 0 || idx >= diaries.length) {
+    showDiaryCover();
+    return;
+  }
+
+  var entry = diaries[idx];
+
+  // 标题
+  var titleEl = document.getElementById('diaryPageTitle');
+  if (titleEl) titleEl.textContent = entry.title || '无标题';
+
+  // 日期
+  var dateEl = document.getElementById('diaryPageDate');
+  if (dateEl) dateEl.textContent = entry.date || '';
+
+  // 天气
+  var weatherEl = document.getElementById('diaryPageWeather');
+  if (weatherEl) weatherEl.textContent = entry.weather || '';
+
+  // 正文
+  var bodyContent = document.getElementById('diaryBodyContent');
+  if (bodyContent) {
+    if (entry.paragraphs && entry.paragraphs.length) {
+      bodyContent.innerHTML = entry.paragraphs.map(function(p, i) {
+        return '<p class="diary-paragraph" data-index="' + i + '">' + escapeHTML(p) + '</p>';
+      }).join('');
+    } else if (entry.content) {
+      bodyContent.innerHTML = '<p class="diary-paragraph">' + escapeHTML(entry.content) + '</p>';
+    } else {
+      bodyContent.innerHTML = '<p class="diary-paragraph diary-empty">（空白日记）</p>';
+    }
+  }
+
+  // 页码
+  var navIndex = document.getElementById('diaryNavIndex');
+  if (navIndex) navIndex.textContent = (idx + 1) + ' / ' + diaries.length;
+
+  // 更新便利贴列表
+  renderDiaryStickyList(diaries, idx);
+}
+
+// 渲染右侧便利贴列表
+function renderDiaryStickyList(diaries, activeIdx) {
+  var container = document.getElementById('diaryStickyItems');
+  if (!container) return;
+
+  container.innerHTML = diaries.map(function(d, i) {
+    var cls = i === activeIdx ? 'diary-sticky-item active' : 'diary-sticky-item';
+    var title = d.title || '无标题';
+
+    return '<div class="' + cls + '" title="' + escapeHTMLAttr(title) + '" onclick="playClickSound();jumpToDiary(' + i + ');">' +
+      '<span class="diary-sticky-dot">●</span>' +
+      '<span class="diary-sticky-title">' + escapeHTML(title) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+// 跳转到指定日记
+function jumpToDiary(idx) {
+  diaryViewState.currentIndex = idx;
+  renderDiaryContent();
+}
+
+// 上一篇
+function prevDiaryEntry() {
+  if (diaryViewState.currentIndex > 0) {
+    diaryViewState.currentIndex--;
+    renderDiaryContent();
+  }
+}
+
+// 下一篇
+function nextDiaryEntry() {
+  var diaries = getDiariesByRole(diaryViewState.viewingRole);
+  if (diaryViewState.currentIndex < diaries.length - 1) {
+    diaryViewState.currentIndex++;
+    renderDiaryContent();
+  }
+}
+
+// 切换便利贴展开/收起
+function toggleDiaryStickyList() {
+  diaryViewState.stickyCollapsed = !diaryViewState.stickyCollapsed;
+  var items = document.getElementById('diaryStickyItems');
+  if (items) {
+    items.style.display = diaryViewState.stickyCollapsed ? 'none' : 'block';
+  }
+}
+
+function formatDiaryDate(date) {
+  if (!date) date = new Date();
+
+  var y = date.getFullYear();
+  var m = date.getMonth() + 1;
+  var d = date.getDate();
+
+  return y + '年' + m + '月' + d + '日';
+}
+
+// 新建日记
+function newDiaryEntry() {
+  playClickSound();
+
+  if (!diaryData) {
+    diaryData = { diaries: [] };
+  }
+
+  if (!Array.isArray(diaryData.diaries)) {
+    diaryData.diaries = [];
+  }
+
+  var role = diaryViewState.viewingRole || 'me';
+
+  var now = new Date();
+
+  var entry = {
+    id: 'diary_' + Date.now(),
+
+    authorId: role,
+    authorName: getDiaryRoleName(role),
+
+    title: '未命名日记',
+
+    date: formatDiaryDate(now),
+
+    weather: '',
+
+    content: '',
+    paragraphs: [],
+
+    annotations: [],
+    review: '',
+
+    createTime: Date.now(),
+    updateTime: Date.now()
+  };
+
+  diaryData.diaries.unshift(entry);
+
+  diaryViewState.currentIndex = 0;
+  diaryViewState.isOnCover = false;
+
+  saveAll();
+
+  renderDiaryContent();
+
+  editDiaryEntry();
+}
+
+// 编辑日记
+function editDiaryEntry() {
+  playClickSound();
+
+  var role = diaryViewState.viewingRole || 'me';
+  var idx = diaryViewState.currentIndex;
+
+  var diaries = getDiariesByRole(role);
+
+  if (!diaries || !diaries.length || idx < 0 || idx >= diaries.length) {
+    showToast('没有可编辑的日记');
+    return;
+  }
+
+  var entry = diaries[idx];
+
+  openDiaryEditDialog(entry.id);
+}
+
+// 左上角选择器（打开身份切换弹窗）
+function openDiarySelector() {
+  openDiaryChoiceDialog();
+}
+
+// ===== 日记页退出与删除 =====
+
+// 返回按钮点击
+function exitDiaryPage() {
+  playClickSound();
+  document.querySelectorAll('.page').forEach(function(p) {
+    p.style.display = 'none';
+  });
+  var homePage = document.getElementById('homePage');
+  if (homePage) homePage.style.display = 'flex';
+}
+
+// 删除当前日记
+function deleteCurrentDiary() {
+  playClickSound();
+
+  var role = diaryViewState.viewingRole || 'me';
+  var idx = diaryViewState.currentIndex;
+
+  var diaries = getDiariesByRole(role);
+
+  if (!diaries || !diaries.length || idx < 0 || idx >= diaries.length) {
+    return;
+  }
+
+  var entry = diaries[idx];
+  var title = entry.title || '这篇日记';
+
+  if (!confirm('确定删除「' + title + '」吗？')) {
+    return;
+  }
+
+  diaryData.diaries = diaryData.diaries.filter(function(d) {
+    return d.id !== entry.id;
+  });
+
+  saveAll();
+
+  renderDiaryContent();
+}
+
+function openDiaryEditDialog(entryId) {
+  var entry = diaryData.diaries.find(function(d) {
+    return d.id === entryId;
+  });
+
+  if (!entry) return;
+
+  var old = document.getElementById('diaryEditDialog');
+  if (old) old.remove();
+
+  var phone = document.querySelector('.phone-container') || document.body;
+
+  var dialog = document.createElement('div');
+  dialog.id = 'diaryEditDialog';
+  dialog.className = 'dialog';
+
+  dialog.innerHTML = `
+    <div class="dialog-content diary-edit-dialog-content">
+      <h3>编辑日记</h3>
+
+      <div class="diary-edit-form">
+
+        <label class="diary-edit-label">标题</label>
+        <input
+          id="diaryEditTitle"
+          class="diary-edit-input"
+          type="text"
+          value="${escapeHTMLAttr(entry.title || '')}"
+          placeholder="请输入标题"
+        >
+
+        <label class="diary-edit-label">日期</label>
+        <input
+          id="diaryEditDate"
+          class="diary-edit-input"
+          type="text"
+          value="${escapeHTMLAttr(entry.date || '')}"
+          placeholder="例如：2025年1月1日"
+        >
+
+        <label class="diary-edit-label">天气</label>
+        <input
+          id="diaryEditWeather"
+          class="diary-edit-input"
+          type="text"
+          value="${escapeHTMLAttr(entry.weather || '')}"
+          placeholder="例如：☀️ 晴"
+        >
+
+        <label class="diary-edit-label">正文</label>
+        <textarea
+          id="diaryEditContent"
+          class="diary-edit-textarea"
+          placeholder="写点什么吧……"
+        >${escapeHTML(entry.content || '')}</textarea>
+
+      </div>
+
+      <div class="dialog-buttons">
+        <button onclick="playClickSound();closeDialog('diaryEditDialog')">取消</button>
+        <button onclick="playClickSound();saveDiaryEdit('${escapeHTMLAttr(entry.id)}')">保存</button>
+      </div>
+    </div>
+  `;
+
+  phone.appendChild(dialog);
+
+  applySavedDialogBgTo(dialog);
+  applyCurrentFontTo(dialog);
+
+  showDialog('diaryEditDialog');
+}
+
+function saveDiaryEdit(entryId) {
+  var entry = diaryData.diaries.find(function(d) {
+    return d.id === entryId;
+  });
+
+  if (!entry) return;
+
+  var titleEl = document.getElementById('diaryEditTitle');
+  var dateEl = document.getElementById('diaryEditDate');
+  var weatherEl = document.getElementById('diaryEditWeather');
+  var contentEl = document.getElementById('diaryEditContent');
+
+  var title = titleEl ? titleEl.value.trim() : '';
+  var date = dateEl ? dateEl.value.trim() : '';
+  var weather = weatherEl ? weatherEl.value.trim() : '';
+  var content = contentEl ? contentEl.value.trim() : '';
+
+  entry.title = title || '无标题';
+  entry.date = date || formatDiaryDate(new Date());
+  entry.weather = weather;
+  entry.content = content;
+
+  entry.paragraphs = content
+    ? content.split(/\n+/).map(function(p) {
+        return p.trim();
+      }).filter(Boolean)
+    : [];
+
+  entry.updateTime = Date.now();
+
+  saveAll();
+  closeDialog('diaryEditDialog');
+  renderDiaryContent();
+  showToast('日记已保存');
+}
+
+// 左滑退出手势
+function initDiarySwipeGesture() {
+  var diaryPage = document.getElementById('diaryPage');
+  if (!diaryPage) return;
+
+  var startX = 0;
+  var startY = 0;
+  var tracking = false;
+
+  diaryPage.addEventListener('touchstart', function(e) {
+    var touch = e.touches[0];
+    // 只在左边缘30px内开始才算
+    if (touch.clientX < 30) {
+      startX = touch.clientX;
+      startY = touch.clientY;
+      tracking = true;
+    }
+  });
+
+  diaryPage.addEventListener('touchmove', function(e) {
+    if (!tracking) return;
+    var touch = e.touches[0];
+    var dx = touch.clientX - startX;
+    var dy = Math.abs(touch.clientY - startY);
+
+    // 水平滑动超过80px且角度合理
+    if (dx > 80 && dy < 60) {
+      tracking = false;
+      exitDiaryPage();
+    }
+  });
+
+  diaryPage.addEventListener('touchend', function() {
+    tracking = false;
+  });
+}
+
+//角色头像
+function getContactAvatarById(contactId) {
+
+  if (!contactId) {
+    return DEFAULT_AVATAR;
+  }
+
+  const contact =
+    contactList.find(c => c.id === contactId);
+
+  if (!contact) {
+    return DEFAULT_AVATAR;
+  }
+
+  const setting =
+    normalizeChatSetting(contact.id);
+
+  return (
+    setting.theirAvatar ||
+    contact.avatar ||
+    contact.avatarUrl ||
+    contact.icon ||
+    DEFAULT_AVATAR
+  );
+}
+
+function getContactAvatarByBridge(bridgeName) {
+
+  if (!bridgeName) {
+    return DEFAULT_AVATAR;
+  }
+
+  const contact =
+    contactList.find(
+      c => c.bridgeName === bridgeName
+    );
+
+  if (!contact) {
+    return DEFAULT_AVATAR;
+  }
+
+  return getContactAvatarById(contact.id);
+}
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });
@@ -10381,6 +11362,8 @@ window.onload = async function () {
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();
+
+  initDiarySwipeGesture()
 
   setTimeout(() => {
     flushPendingVVChatSyncQueue();

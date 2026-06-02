@@ -55,7 +55,7 @@
           <img id="icon-forum" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_230401ac0e003ae5dbdd48.jpg" alt="论坛">
           <span>论坛</span>
         </div>
-        <div class="app-block" onclick="playClickSound(); triggerSlash('/send 写日记|/trigger')">
+        <div class="app-block" onclick="playClickSound(); openDiaryChoiceDialog()">
           <img id="icon-diary" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214158c86ca004be758e29.jpg" alt="日记">
           <span>日记</span>
         </div>
@@ -467,6 +467,73 @@
             <div class="swipe-thumb center-start" id="swipeThumb">●</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="diary-page page" id="diaryPage" style="display:none;">
+
+      <!-- 顶部操作栏 -->
+      <div class="diary-topbar">
+        <div class="diary-back-btn" onclick="exitDiaryPage()">←</div>
+        <div class="diary-delete-btn" id="diaryDeleteBtn" onclick="deleteCurrentDiary()" style="display:none;">
+          <svg width="24" height="24" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="8" y1="8" x2="16" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="16" y1="8" x2="8" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 顶部栏 -->
+      <div class="diary-header">
+        <div class="diary-selector" onclick="playClickSound();openDiarySelector();">
+          <span class="diary-selector-label" id="diarySelectorLabel">我的日记</span>
+          <span class="diary-selector-arrow">▼</span>
+        </div>
+        <button class="diary-new-btn" onclick="playClickSound();newDiaryEntry();">＋ 新建</button>
+      </div>
+
+      <!-- 书本容器 -->
+      <div class="diary-book" id="diaryBook">
+        <!-- 封面 -->
+        <div class="diary-cover" id="diaryCover">
+          <div class="diary-cover-inner">
+            <div class="diary-cover-title">日 记 本</div>
+            <div class="diary-cover-deco">✦</div>
+          </div>
+          <div class="diary-cover-open" onclick="playClickSound();openDiaryFirstPage();"></div>
+        </div>
+
+        <!-- 正文页 -->
+        <div class="diary-content-page" id="diaryContentPage" style="display:none;">
+          <div class="diary-page-info">
+            <div class="diary-page-title" id="diaryPageTitle">无标题</div>
+            <div class="diary-page-meta">
+              <span class="diary-page-date" id="diaryPageDate">2025年1月1日</span>
+              <span class="diary-page-weather" id="diaryPageWeather">☀️ 晴</span>
+            </div>
+          </div>
+
+          <div class="diary-body" id="diaryBody">
+            <div class="diary-body-content" id="diaryBodyContent"></div>
+          </div>
+
+          <div class="diary-nav">
+            <button class="diary-nav-btn diary-nav-prev" onclick="playClickSound();prevDiaryEntry();">← 上一篇</button>
+            <span class="diary-nav-index" id="diaryNavIndex">1 / 1</span>
+            <button class="diary-nav-btn diary-nav-next" onclick="playClickSound();nextDiaryEntry();">下一篇 →</button>
+          </div>
+
+          <button class="diary-edit-btn" onclick="playClickSound();editDiaryEntry();">✎ 编辑</button>
+        </div>
+      </div>
+
+      <!-- 右侧便利贴 -->
+      <div class="diary-sticky-list" id="diaryStickyList">
+        <div class="diary-sticky-toggle" onclick="playClickSound();toggleDiaryStickyList();">
+          <span>≡</span>
+        </div>
+        <div class="diary-sticky-items" id="diaryStickyItems"></div>
       </div>
     </div>
 
