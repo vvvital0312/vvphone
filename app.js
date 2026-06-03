@@ -1580,6 +1580,34 @@ function parseVVDiarySyncBlocks(raw) {
       parseVVDiarySyncBody(body);
 
     if (item) {
+
+      if (Array.isArray(item.paragraphs)) {
+        item.paragraphs =
+          typeof normalizeDiaryParagraphs === 'function'
+            ? normalizeDiaryParagraphs(item.paragraphs)
+            : item.paragraphs.map(function(p) {
+                if (typeof p === 'string') return p;
+                if (p && typeof p === 'object') {
+                  return String(
+                    p.text ||
+                    p.content ||
+                    p.value ||
+                    p.paragraph ||
+                    p.body ||
+                    ''
+                  );
+                }
+                return String(p || '');
+              }).filter(Boolean);
+      }
+      else {
+        item.paragraphs = [];
+      }
+
+      if (!item.content && item.paragraphs.length) {
+        item.content = item.paragraphs.join('\n\n');
+      }
+
       blocks.push(item);
     }
 
@@ -1705,6 +1733,11 @@ async function handleVVDiarySyncRaw(input) {
 
 function appendVVDiaryToLocal(block) {
 
+  if (!block) {
+    console.warn('[VV_DIARY_ADD] empty block');
+    return false;
+  }
+
   if (!window.diaryData) {
     window.diaryData = {
       diaries: []
@@ -1715,9 +1748,21 @@ function appendVVDiaryToLocal(block) {
     diaryData.diaries = [];
   }
 
+  const diaryId =
+    String(
+      block.diaryId ||
+      block.id ||
+      ''
+    ).trim();
+
+  if (!diaryId) {
+    console.warn('[VV_DIARY_ADD] missing diaryId:', block);
+    return false;
+  }
+
   const oldIndex =
     diaryData.diaries.findIndex(
-      d => d.id === block.diaryId
+      d => String(d.id || d.diaryId || '') === diaryId
     );
 
   const author =
@@ -1725,19 +1770,50 @@ function appendVVDiaryToLocal(block) {
       c => c.id === block.authorId
     );
 
+  const safeParagraphs =
+    typeof normalizeDiaryParagraphs === 'function'
+      ? normalizeDiaryParagraphs(
+          Array.isArray(block.paragraphs)
+            ? block.paragraphs
+            : (
+                block.paragraph
+                  ? [block.paragraph]
+                  : []
+              )
+        )
+      : (
+          Array.isArray(block.paragraphs)
+            ? block.paragraphs.map(function(p) {
+                if (typeof p === 'string') return p;
+                if (p && typeof p === 'object') {
+                  return String(
+                    p.text ||
+                    p.content ||
+                    p.value ||
+                    p.paragraph ||
+                    p.body ||
+                    ''
+                  );
+                }
+                return String(p || '');
+              }).filter(Boolean)
+            : []
+        );
+
   const contentFromParagraphs =
-    Array.isArray(block.paragraphs)
-      ? block.paragraphs
-          .map(p => p.text || '')
-          .join('\n\n')
+    safeParagraphs.length
+      ? safeParagraphs.join('\n\n')
       : '';
 
   const diary = {
     id:
-      block.diaryId,
+      diaryId,
+
+    diaryId:
+      diaryId,
 
     authorId:
-      block.authorId,
+      String(block.authorId || '').trim(),
 
     authorName:
       block.authorName ||
@@ -1765,18 +1841,18 @@ function appendVVDiaryToLocal(block) {
       '',
 
     paragraphs:
-      Array.isArray(block.paragraphs)
-        ? block.paragraphs
-        : [],
+      safeParagraphs,
 
     annotations:
-      [],
+      Array.isArray(block.annotations)
+        ? block.annotations
+        : [],
 
     review:
-      '',
+      block.review || '',
 
     source:
-      'ai'
+      block.source || 'ai'
   };
 
   if (oldIndex >= 0) {
@@ -1789,10 +1865,16 @@ function appendVVDiaryToLocal(block) {
     diaryData.diaries.unshift(diary);
   }
 
+  if (typeof saveAll === 'function') {
+    saveAll();
+  }
+
   console.log(
     '[VV_DIARY_ADDED]',
     diary
   );
+
+  return true;
 }
 
 function parseVVChatBlocks(raw, fallback = {}) {
@@ -11323,7 +11405,9 @@ function selectAiDiaryRole(roleId) {
 
 async function triggerAiDiaryGenerate(roleId, diaryId) {
 
-  const contact = contactList.find(c => c.id === roleId);
+  const contact =
+    contactList.find(c => c.id === roleId);
+
   if (!contact) {
     console.warn('[AI_DIARY] contact not found:', roleId);
     return;
@@ -11332,18 +11416,28 @@ async function triggerAiDiaryGenerate(roleId, diaryId) {
   const bridgeName =
     contact.bridgeName || contact.name || contact.displayName || '角色';
 
+  const authorName =
+    contact.displayName || contact.name || bridgeName || '角色';
+
+  const now = new Date();
+  const dateText =
+    now.getFullYear() + '年' +
+    String(now.getMonth() + 1).padStart(2, '0') + '月' +
+    String(now.getDate()).padStart(2, '0') + '日';
+
   const prompt = `【系统指令·AI角色写日记·严格遵守】
 
 你现在要以指定AI角色的身份写一篇私人日记。
 
 写作者信息：
 authorId=${roleId}
-authorName=${contact.name}
+authorName=${authorName}
 bridgeName=${bridgeName}
 diaryId=${diaryId}
+date=${dateText}
 
 重要要求：
-1. 必须以 ${bridgeName} / ${contact.name} 的身份写。
+1. 必须以 ${bridgeName} / ${authorName} 的身份写。
 2. 日记内容要符合该角色性格、当前剧情、与维夏的关系、最近发生的事。
 3. 可以有情绪、隐晦想法、未说出口的话。
 4. 禁止写成聊天回复。
@@ -11356,28 +11450,37 @@ diaryId=${diaryId}
 11. 禁止输出 [VV_INCOMING_CALL]。
 12. 必须且只能输出一个完整的 [VV_DIARY_SYNC] 块。
 13. 不要在 [VV_DIARY_SYNC] 前后添加任何多余文字。
+14. date 字段必须填写准确日期：${dateText}，禁止写“今天”。
 
 格式必须严格如下：
 
 [VV_DIARY_SYNC]
 diaryId=${diaryId}
 authorId=${roleId}
-authorName=${contact.name}
+authorName=${authorName}
 title=这里填写日记标题
-date=今天
+date=${dateText}
 weather=这里填写天气
 paragraph=这里填写第一段日记正文
 paragraph=这里填写第二段日记正文
 paragraph=这里填写第三段日记正文
 [/VV_DIARY_SYNC]`;
 
-  const cmd = `/send ${prompt}`.trim();
+  const cmd =
+    '/send ' + prompt + '\n|/trigger';
 
-  console.log('[AI_DIARY_CMD]', cmd);
+  console.log(
+    '[AI_DIARY_CMD]',
+    cmd
+  );
 
-  const ok = await triggerSlash(cmd);
+  const ok =
+    await triggerSlash(cmd);
 
-  console.log('[AI_DIARY_RESULT]', ok);
+  console.log(
+    '[AI_DIARY_RESULT]',
+    ok
+  );
 }
 
 /* ===== 日记页面 - 静态交互 ===== */
@@ -11686,13 +11789,45 @@ function renderDiaryContent() {
   // 正文
   var bodyContent = document.getElementById('diaryBodyContent');
   if (bodyContent) {
+
+    var rawParagraphs = [];
+
     if (entry.paragraphs && entry.paragraphs.length) {
-      bodyContent.innerHTML = entry.paragraphs.map(function(p, i) {
+      rawParagraphs = entry.paragraphs;
+    }
+    else if (entry.content) {
+      rawParagraphs = String(entry.content)
+        .split(/\n{2,}|\n/)
+        .map(function(s) {
+          return String(s || '').trim();
+        })
+        .filter(Boolean);
+    }
+
+    var safeParagraphs =
+      typeof normalizeDiaryParagraphs === 'function'
+        ? normalizeDiaryParagraphs(rawParagraphs)
+        : rawParagraphs.map(function(p) {
+            if (typeof p === 'string') return p;
+            if (p && typeof p === 'object') {
+              return String(
+                p.text ||
+                p.content ||
+                p.value ||
+                p.paragraph ||
+                p.body ||
+                ''
+              );
+            }
+            return String(p || '');
+          }).filter(Boolean);
+
+    if (safeParagraphs.length) {
+      bodyContent.innerHTML = safeParagraphs.map(function(p, i) {
         return '<p class="diary-paragraph" data-index="' + i + '">' + escapeHTML(p) + '</p>';
       }).join('');
-    } else if (entry.content) {
-      bodyContent.innerHTML = '<p class="diary-paragraph">' + escapeHTML(entry.content) + '</p>';
-    } else {
+    }
+    else {
       bodyContent.innerHTML = '<p class="diary-paragraph diary-empty">（空白日记）</p>';
     }
   }
@@ -11761,6 +11896,40 @@ function formatDiaryDate(date) {
   var d = date.getDate();
 
   return y + '年' + m + '月' + d + '日';
+}
+
+function normalizeDiaryParagraphText(p) {
+  if (p == null) return '';
+
+  if (typeof p === 'string') {
+    return p;
+  }
+
+  if (typeof p === 'number' || typeof p === 'boolean') {
+    return String(p);
+  }
+
+  if (typeof p === 'object') {
+    return String(
+      p.text ||
+      p.content ||
+      p.value ||
+      p.paragraph ||
+      p.body ||
+      ''
+    );
+  }
+
+  return String(p || '');
+}
+
+function normalizeDiaryParagraphs(paragraphs) {
+  if (!Array.isArray(paragraphs)) return [];
+
+  return paragraphs
+    .map(normalizeDiaryParagraphText)
+    .map(s => String(s || '').trim())
+    .filter(Boolean);
 }
 
 // 新建日记
