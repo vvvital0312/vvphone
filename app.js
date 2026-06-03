@@ -923,6 +923,11 @@ function initSTBridgeListener() {
         return;
       }
 
+      if (data.type === 'VVPHONE_DIARY_SYNC') {
+        console.log('[VV][listener] VVPHONE_DIARY_SYNC → skip, handled by NAV bridge');
+        return;
+      }
+
       if (data.type === 'VV_AI_FEED_POST') {
         console.log('[VV][listener] HIT VV_AI_FEED_POST');
         handleAiFeedPost(data.payload);
@@ -1552,6 +1557,242 @@ function savePhoneIconsSafely(savedIcons) {
     });
     safeSetItemJSON('st_phone_icons', clone);
   }
+}
+
+function parseVVDiarySyncBlocks(raw) {
+
+  if (!raw) return [];
+
+  const text = String(raw);
+
+  const blocks = [];
+
+  const reg =
+    /\[VV_DIARY_SYNC\]([\s\S]*?)\[\/VV_DIARY_SYNC\]/g;
+
+  let match;
+
+  while ((match = reg.exec(text)) !== null) {
+
+    const body = match[1] || '';
+
+    const item =
+      parseVVDiarySyncBody(body);
+
+    if (item) {
+      blocks.push(item);
+    }
+
+  }
+
+  return blocks;
+}
+
+function parseVVDiarySyncBody(body) {
+
+  const data = {
+    paragraphs: []
+  };
+
+  const lines =
+    String(body || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+
+  lines.forEach(line => {
+
+    const eqIndex =
+      line.indexOf('=');
+
+    if (eqIndex === -1) return;
+
+    const key =
+      line.slice(0, eqIndex).trim();
+
+    const value =
+      line.slice(eqIndex + 1).trim();
+
+    if (!key) return;
+
+    if (
+      key === 'paragraph' ||
+      key === '段落'
+    ) {
+      data.paragraphs.push({
+        id:
+          'p_' +
+          Date.now() +
+          '_' +
+          Math.random().toString(36).slice(2),
+        text: value,
+        annotations: []
+      });
+    }
+    else {
+      data[key] = value;
+    }
+
+  });
+
+  if (!data.diaryId) {
+    data.diaryId =
+      'diary_' + Date.now();
+  }
+
+  if (!data.authorId) {
+    console.warn(
+      '[VV_DIARY_SYNC] 缺少 authorId',
+      data
+    );
+    return null;
+  }
+
+  return data;
+}
+
+async function handleVVDiarySyncRaw(input) {
+
+  const raw =
+    typeof input === 'string'
+      ? input
+      : String(input && input.raw || '');
+
+  const fallbackAuthorId =
+    typeof input === 'object' && input
+      ? String(input.authorId || '').trim()
+      : '';
+
+  console.log(
+    '[VV_DIARY_SYNC_RAW]',
+    raw
+  );
+
+  const blocks =
+    parseVVDiarySyncBlocks(raw);
+
+  console.log(
+    '[VV_DIARY_SYNC_BLOCKS]',
+    blocks
+  );
+
+  if (!blocks.length) {
+    console.warn(
+      '[VV_DIARY_SYNC] 没解析到日记块'
+    );
+    return false;
+  }
+
+  blocks.forEach(block => {
+
+    if (!block.authorId && fallbackAuthorId) {
+      block.authorId = fallbackAuthorId;
+    }
+
+    appendVVDiaryToLocal(block);
+  });
+
+  saveAll();
+
+  if (
+    typeof renderDiaryContent === 'function'
+  ) {
+    renderDiaryContent();
+  }
+
+  return true;
+}
+
+function appendVVDiaryToLocal(block) {
+
+  if (!window.diaryData) {
+    window.diaryData = {
+      diaries: []
+    };
+  }
+
+  if (!Array.isArray(diaryData.diaries)) {
+    diaryData.diaries = [];
+  }
+
+  const oldIndex =
+    diaryData.diaries.findIndex(
+      d => d.id === block.diaryId
+    );
+
+  const author =
+    contactList.find(
+      c => c.id === block.authorId
+    );
+
+  const contentFromParagraphs =
+    Array.isArray(block.paragraphs)
+      ? block.paragraphs
+          .map(p => p.text || '')
+          .join('\n\n')
+      : '';
+
+  const diary = {
+    id:
+      block.diaryId,
+
+    authorId:
+      block.authorId,
+
+    authorName:
+      block.authorName ||
+      block.name ||
+      author?.displayName ||
+      author?.name ||
+      author?.bridgeName ||
+      'AI角色',
+
+    title:
+      block.title ||
+      '未命名日记',
+
+    date:
+      block.date ||
+      new Date().toLocaleDateString(),
+
+    weather:
+      block.weather ||
+      '未知',
+
+    content:
+      block.content ||
+      contentFromParagraphs ||
+      '',
+
+    paragraphs:
+      Array.isArray(block.paragraphs)
+        ? block.paragraphs
+        : [],
+
+    annotations:
+      [],
+
+    review:
+      '',
+
+    source:
+      'ai'
+  };
+
+  if (oldIndex >= 0) {
+    diaryData.diaries[oldIndex] = {
+      ...diaryData.diaries[oldIndex],
+      ...diary
+    };
+  }
+  else {
+    diaryData.diaries.unshift(diary);
+  }
+
+  console.log(
+    '[VV_DIARY_ADDED]',
+    diary
+  );
 }
 
 function parseVVChatBlocks(raw, fallback = {}) {
@@ -8962,6 +9203,67 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      // ========== 处理聊天同步（从桥接脚本转发过来的） ==========
+      if (type === 'VVPHONE_CHAT_SYNC') {
+        const raw = String(data.raw || '');
+        const chatId = String(data.chatId || '').trim();
+        const viewId = String(data.viewId || '').trim();
+
+        console.log('[VV][NAV] VVPHONE_CHAT_SYNC received, raw length =', raw.length, 'chatId =', chatId);
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VVPHONE_CHAT_SYNC ignored: empty raw');
+          return;
+        }
+
+        if (/\[VV_CALL_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] VVPHONE_CHAT_SYNC also contains VV_CALL_SYNC, handling call first');
+          try {
+            await handleVVCallSyncRaw({ raw, chatId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVCallSyncRaw from chat sync error:', err);
+          }
+        }
+
+        if (/\[VV_CHAT_SYNC\]/i.test(raw)) {
+          try {
+            await handleVVChatSyncRaw({ raw, chatId, viewId });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
+          }
+        }
+        return;
+      }
+
+      // ========== 处理日记同步 ==========
+      if (type === 'VVPHONE_DIARY_SYNC') {
+        const raw = String(data.raw || '');
+        const authorId = String(data.authorId || '').trim();
+
+        console.log(
+          '[VV][NAV] VVPHONE_DIARY_SYNC received, raw length =',
+          raw.length,
+          'authorId =',
+          authorId
+        );
+
+        if (!raw.trim()) {
+          console.warn('[VV][NAV] VVPHONE_DIARY_SYNC ignored: empty raw');
+          return;
+        }
+
+        try {
+          await handleVVDiarySyncRaw({
+            raw,
+            authorId
+          });
+        } catch (err) {
+          console.error('[VV][NAV] handleVVDiarySyncRaw error:', err);
+        }
+
+        return;
+      }
+
       // ========== 处理动态同步 ==========
       if (type === 'VVPHONE_FEED_SYNC') {
         const raw = String(data.raw || '');
@@ -9023,6 +9325,20 @@ function initVVHostNavigationBridge() {
             await handleVVChatSyncRaw({ raw, chatId, viewId });
           } catch (err) {
             console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
+          }
+          return;
+        }
+
+        // 日记同步
+        if (/\[VV_DIARY_SYNC\]/i.test(raw)) {
+          console.log('[VV][NAV] detected VV_DIARY_SYNC, routing to handleVVDiarySyncRaw');
+          try {
+            await handleVVDiarySyncRaw({
+              raw,
+              authorId: String(data.authorId || '').trim()
+            });
+          } catch (err) {
+            console.error('[VV][NAV] handleVVDiarySyncRaw error:', err);
           }
           return;
         }
