@@ -6025,6 +6025,52 @@ function buildVVFeedAiPostPayload(postId, author, bridgeName) {
   [/VV_FEED_SYNC]`;
 }
 
+function buildVVDiaryAiWritePayload(options) {
+  options = options || {};
+
+  const diaryId = String(options.diaryId || ('diary_' + Date.now())).trim();
+  const authorId = String(options.authorId || '').trim();
+  const authorName = String(options.authorName || options.bridgeName || '角色').trim();
+  const bridgeName = String(options.bridgeName || authorName).trim();
+
+  return `【系统指令·AI角色写日记·严格遵守】
+
+你现在要以指定AI角色的身份写一篇私人日记。
+
+写作者信息：
+authorId=${authorId}
+authorName=${authorName}
+bridgeName=${bridgeName}
+diaryId=${diaryId}
+
+重要要求：
+1. 必须以 ${bridgeName} / ${authorName} 的身份写。
+2. 日记内容要符合该角色性格、当前剧情、与维夏的关系、最近发生的事。
+3. 可以有情绪、隐晦想法、未说出口的话。
+4. 禁止写成聊天回复。
+5. 禁止写成电话回复。
+6. 禁止输出解释、分析、旁白。
+7. 禁止输出 [VV_CHAT_SYNC]。
+8. 禁止输出 [VV_CALL_SYNC]。
+9. 禁止输出 [VV_FEED_SYNC]。
+10. 必须且只能输出一个完整的 [VV_DIARY_SYNC] 块。
+11. 不要在 [VV_DIARY_SYNC] 前后添加任何多余文字。
+
+格式必须严格如下：
+
+[VV_DIARY_SYNC]
+diaryId=${diaryId}
+authorId=${authorId}
+authorName=${authorName}
+title=这里填写日记标题
+date=今天
+weather=这里填写天气
+paragraph=这里填写第一段日记正文
+paragraph=这里填写第二段日记正文
+paragraph=这里填写第三段日记正文
+[/VV_DIARY_SYNC]`;
+}
+
 let isTriggeringAIReply = false;
 
 async function triggerAIReply() {
@@ -11277,44 +11323,61 @@ function selectAiDiaryRole(roleId) {
 
 async function triggerAiDiaryGenerate(roleId, diaryId) {
 
-  const contact =
-    contactList.find(c => c.id === roleId);
-
-  if (!contact) return;
+  const contact = contactList.find(c => c.id === roleId);
+  if (!contact) {
+    console.warn('[AI_DIARY] contact not found:', roleId);
+    return;
+  }
 
   const bridgeName =
-    contact.bridgeName || contact.name;
+    contact.bridgeName || contact.name || contact.displayName || '角色';
 
-  const cmd = `
-/send ${
-  bridgeName
-}
+  const prompt = `【系统指令·AI角色写日记·严格遵守】
 
-请以${contact.name}的身份写一篇日记。
+你现在要以指定AI角色的身份写一篇私人日记。
 
-要求：
-1. 输出日记正文
-2. 包含标题
-3. 包含天气
-4. 包含段落
-5. 使用 VV_DIARY_SYNC 返回
+写作者信息：
+authorId=${roleId}
+authorName=${contact.name}
+bridgeName=${bridgeName}
+diaryId=${diaryId}
 
+重要要求：
+1. 必须以 ${bridgeName} / ${contact.name} 的身份写。
+2. 日记内容要符合该角色性格、当前剧情、与维夏的关系、最近发生的事。
+3. 可以有情绪、隐晦想法、未说出口的话。
+4. 禁止写成聊天回复。
+5. 禁止写成电话回复。
+6. 禁止写成朋友圈动态。
+7. 禁止输出解释、分析、旁白。
+8. 禁止输出 [VV_CHAT_SYNC]。
+9. 禁止输出 [VV_CALL_SYNC]。
+10. 禁止输出 [VV_FEED_SYNC]。
+11. 禁止输出 [VV_INCOMING_CALL]。
+12. 必须且只能输出一个完整的 [VV_DIARY_SYNC] 块。
+13. 不要在 [VV_DIARY_SYNC] 前后添加任何多余文字。
+
+格式必须严格如下：
+
+[VV_DIARY_SYNC]
 diaryId=${diaryId}
 authorId=${roleId}
-  `.trim();
+authorName=${contact.name}
+title=这里填写日记标题
+date=今天
+weather=这里填写天气
+paragraph=这里填写第一段日记正文
+paragraph=这里填写第二段日记正文
+paragraph=这里填写第三段日记正文
+[/VV_DIARY_SYNC]`;
 
-  console.log(
-    '[AI_DIARY_CMD]',
-    cmd
-  );
+  const cmd = `/send ${prompt}`.trim();
 
-  const ok =
-    await triggerSlash(cmd);
+  console.log('[AI_DIARY_CMD]', cmd);
 
-  console.log(
-    '[AI_DIARY_RESULT]',
-    ok
-  );
+  const ok = await triggerSlash(cmd);
+
+  console.log('[AI_DIARY_RESULT]', ok);
 }
 
 /* ===== 日记页面 - 静态交互 ===== */
