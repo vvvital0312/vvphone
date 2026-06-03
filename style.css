@@ -2224,3 +2224,26 @@ textarea {
   text-align: center;
   flex-direction: column;
 }
+
+.ai-diary-write-role-list{
+  overflow-y: auto;
+  border: 1px solid rgb(238, 238, 238);
+  border-radius: 8px;
+  margin-top: 4px;
+  background: rgb(255, 255, 255);
+  font-family: "Noto Serif SC", "Songti SC", SimSun, "Source Han Serif SC", serif;
+  display: flex;
+  flex-direction: column;
+  margin: 10px 0px;
+}
+
+.diary-role-item{
+  padding: 8px 12px;
+  cursor: pointer;
+  background: #ffffffc9;
+  border-bottom: 1px solid #d9d9d9;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+}

@@ -47,7 +47,7 @@ var phoneThemes = {
               <img id="icon-forum" src="https://origin.picgo.net/2026/04/15/screenshot_20260415_230401ac0e003ae5dbdd48.jpg" alt="论坛">
               <span>论坛</span>
             </div>
-            <div class="app-block" onclick="playClickSound(); openDiaryChoiceDialog()">
+            <div class="app-block" onclick="playClickSound();currentDiaryAction='write';openDiaryChoiceDialog();">
               <img id="icon-diary" src="https://origin.picgo.net/2026/04/13/screenshot_20260413_214158c86ca004be758e29.jpg" alt="日记">
               <span>日记</span>
             </div>
@@ -126,7 +126,7 @@ var phoneThemes = {
         </div>
 
         <div class="app-1">
-          <div class="app-block" onclick="playClickSound(); openDiaryChoiceDialog()">
+          <div class="app-block" onclick="playClickSound();currentDiaryAction='write';openDiaryChoiceDialog();">
             <img id="icon-diary" src="https://origin.picgo.net/2026/05/23/-182_202605220003_0152825964f03819ddf4a.jpg" alt="日记">
             <span>日记</span>
           </div>
@@ -472,6 +472,7 @@ JSON.parse(
   localStorage.getItem('st_diary_data')
   || '{"diaries":[]}'
 );
+var currentDiaryAction = 'view';
 
 // 在 VV_BRIDGE_CONFIG 中新增 buildCallEventCommand（不要删除原来的 buildCallCommand）
 // 找到 VV_BRIDGE_CONFIG 对象，在 buildCallCommand 后面加上这个新方法：
@@ -10513,7 +10514,8 @@ function savePhoneIconsSafely(data) {
 }
 
 //日记函数
-function openDiaryChoiceDialog() {
+function openDiaryChoiceDialog(mode) {
+  window.currentDiaryDialogMode = mode || 'view';  
   playClickSound();
 
   var old = document.getElementById('diaryChoiceDialog');
@@ -10558,7 +10560,13 @@ function chooseDiaryMode(mode) {
   closeDialog('diaryChoiceDialog');
 
   if (mode === 'ai') {
-    openAiDiaryRoleDialog();
+
+    if (currentDiaryAction === 'write') {
+      openAiDiaryWriteRoleDialog();
+    } else {
+      openAiDiaryRoleDialog();
+    }
+
     return;
   }
 
@@ -10622,6 +10630,305 @@ function openAiDiaryRoleDialog() {
   showDialog('aiDiaryRoleDialog');
 }
 
+function openAiDiaryWriteRoleDialog() {
+
+  playClickSound();
+
+  var old =
+    document.getElementById('aiDiaryWriteRoleDialog');
+
+  if (old) {
+    renderAiDiaryWriteRoleList();
+    showDialog('aiDiaryWriteRoleDialog');
+    return;
+  }
+
+  var phone =
+    document.querySelector('.phone-container')
+    || document.body;
+
+  var dialog = document.createElement('div');
+
+  dialog.id = 'aiDiaryWriteRoleDialog';
+  dialog.className = 'dialog';
+
+  dialog.innerHTML = `
+    <div class="dialog-content ai-diary-dialog">
+
+      <div class="ai-diary-dialog-header">
+        <h3>选择写日记角色</h3>
+      </div>
+
+      <div id="aiDiaryWriteRoleList" class="ai-diary-write-role-list" style="overflow-y: auto;border: 1px solid rgb(238, 238, 238);border-radius: 8px;margin-top: 4px;background: rgb(255, 255, 255);font-family: &quot;Noto Serif SC&quot;, &quot;Songti SC&quot;, SimSun, &quot;Source Han Serif SC&quot;, serif;"></div>
+
+      <div class="dialog-buttons">
+        <button onclick="
+          playClickSound();
+          closeDialog('aiDiaryWriteRoleDialog');
+        ">
+          关闭
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  phone.appendChild(dialog);
+
+  applySavedDialogBgTo(dialog);
+  applyCurrentFontTo(dialog);
+
+  renderAiDiaryWriteRoleList();
+
+  showDialog('aiDiaryWriteRoleDialog');
+}
+
+function renderAiDiaryWriteRoleList() {
+
+  const container =
+    document.getElementById('aiDiaryWriteRoleList');
+
+  if (!container) return;
+
+  const groups = groupContactsByBridge();
+
+  let html = '';
+
+  Object.entries(groups).forEach(
+    ([bridgeName, contacts]) => {
+
+      // 默认展开
+      if (
+        typeof diaryExpandedBridges[bridgeName] === 'undefined'
+      ) {
+        diaryExpandedBridges[bridgeName] = true;
+      }
+
+      const expanded =
+        diaryExpandedBridges[bridgeName];
+
+      html += `
+      <div class="diary-bridge-group">
+
+        <div
+          class="diary-bridge-title"
+          onclick="
+            playClickSound();
+            toggleDiaryBridge('${escapeAttr(bridgeName)}');
+          "
+        >
+          <span>${escapeHTML(bridgeName)}</span>
+          <span class="diary-bridge-arrow">
+            ${expanded ? '⌄' : '›'}
+          </span>
+        </div>
+      `;
+
+      if (expanded) {
+
+        contacts.forEach(contact => {
+
+          const roleName =
+            contact.displayName ||
+            contact.chatDetailName ||
+            contact.name ||
+            contact.bridgeName ||
+            '未命名';
+
+          const avatarRef =
+            getContactAvatarById(contact.id);
+
+          html += `
+          <div
+            class="ai-diary-role-item"
+            onclick="
+              playClickSound();
+              startAiDiaryDraft('${escapeAttr(contact.id)}');
+            "
+          >
+
+            <img
+              class="ai-diary-role-avatar"
+              data-media-ref="${escapeAttr(String(avatarRef || ''))}"
+              src="${escapeAttr(DEFAULT_AVATAR || '')}"
+              alt="${escapeAttr(roleName)}"
+            >
+
+            <div class="ai-diary-role-name">
+              ${escapeHTML(roleName)}
+            </div>
+
+          </div>
+          `;
+
+        });
+
+      }
+
+      html += `</div>`;
+
+    }
+  );
+
+  container.innerHTML = html;
+
+  resolveDiaryWriteRoleAvatars(container);
+}
+
+function resolveDiaryWriteRoleAvatars(container) {
+
+  if (!container) return;
+
+  const imgs =
+    container.querySelectorAll(
+      'img.ai-diary-role-avatar[data-media-ref]'
+    );
+
+  imgs.forEach(async function(img) {
+
+    const ref =
+      img.getAttribute('data-media-ref');
+
+    if (!ref) {
+      img.src = DEFAULT_AVATAR;
+      return;
+    }
+
+    try {
+
+      let url = ref;
+
+      if (
+        typeof resolveImageRefToUrl === 'function'
+      ) {
+        url = await resolveImageRefToUrl(ref);
+      }
+
+      img.src =
+        url ||
+        DEFAULT_AVATAR;
+
+    } catch (err) {
+
+      console.warn(
+        '[AI_DIARY_AVATAR_RESOLVE_FAIL]',
+        ref,
+        err
+      );
+
+      img.src = DEFAULT_AVATAR;
+    }
+
+  });
+}
+
+async function startAiDiaryDraft(roleId) {
+
+  console.log(
+    '[AI_DIARY_START]',
+    roleId
+  );
+
+  const contact =
+    contactList.find(c => c.id === roleId);
+
+  if (!contact) return;
+
+  const diary = {
+
+    id:
+      'diary_' + Date.now(),
+
+    authorId:
+      contact.id,
+
+    authorName:
+      contact.name,
+
+    title:
+      '正在写日记...',
+
+    date:
+      new Date().toLocaleDateString(),
+
+    weather:
+      '',
+
+    content:
+      '请稍候...',
+
+    pending:
+      true,
+
+    paragraphs: [],
+    annotations: [],
+    review: ''
+  };
+
+  diaryData.diaries.unshift(diary);
+
+  saveAll();
+
+  // 先打开占位页
+  openDiaryPage(roleId);
+
+  // 真正触发AI
+  await triggerAiDiaryGenerate(
+    roleId,
+    diary.id
+  );
+}
+
+function createPendingAiDiary(contactId) {
+
+  var contact =
+    contactList.find(
+      c => c.id === contactId
+    );
+
+  if (!contact) return;
+
+  var diary = {
+
+    id:
+      'diary_' + Date.now(),
+
+    authorId:
+      contact.id,
+
+    authorName:
+      contact.name,
+
+    title:
+      '正在写日记...',
+
+    date:
+      new Date().toLocaleDateString(),
+
+    weather:
+      '',
+
+    content:
+      '请稍候...',
+
+    pending:
+      true,
+
+    paragraphs: [],
+    annotations: [],
+    review: ''
+  };
+
+  diaryData.diaries.unshift(diary);
+
+  // 改这里
+  saveAll();
+
+  // 你这里还有第二个隐藏问题
+  openDiaryPage(contactId);
+
+}
+
 function groupContactsByBridge() {
   const groups = {};
 
@@ -10639,11 +10946,59 @@ function groupContactsByBridge() {
 }
 
 function selectAiDiaryRole(roleId) {
-  // 关闭弹窗
+
   closeDialog('aiDiaryRoleDialog');
 
-  // 打开日记页面，身份为选中的角色
+  // AI写日记
+  if (currentDiaryAction === 'write') {
+    startAiDiaryDraft(roleId);
+    return;
+  }
+
+  // 查看AI角色日记
   openDiaryPage(roleId);
+}
+
+async function triggerAiDiaryGenerate(roleId, diaryId) {
+
+  const contact =
+    contactList.find(c => c.id === roleId);
+
+  if (!contact) return;
+
+  const bridgeName =
+    contact.bridgeName || contact.name;
+
+  const cmd = `
+/send ${
+  bridgeName
+}
+
+请以${contact.name}的身份写一篇日记。
+
+要求：
+1. 输出日记正文
+2. 包含标题
+3. 包含天气
+4. 包含段落
+5. 使用 VV_DIARY_SYNC 返回
+
+diaryId=${diaryId}
+authorId=${roleId}
+  `.trim();
+
+  console.log(
+    '[AI_DIARY_CMD]',
+    cmd
+  );
+
+  const ok =
+    await triggerSlash(cmd);
+
+  console.log(
+    '[AI_DIARY_RESULT]',
+    ok
+  );
 }
 
 /* ===== 日记页面 - 静态交互 ===== */
@@ -10724,7 +11079,17 @@ function toggleDiaryBridge(bridgeName) {
   diaryExpandedBridges[bridgeName] =
     !diaryExpandedBridges[bridgeName];
 
-  renderAiDiaryRoleList();
+  if (
+    document.getElementById('aiDiaryWriteRoleList')
+  ) {
+    renderAiDiaryWriteRoleList();
+  }
+
+  if (
+    document.querySelector('.ai-diary-role-list')
+  ) {
+    renderAiDiaryRoleList();
+  }
 }
 
 async function renderAiDiaryRoleList() {
@@ -10741,6 +11106,7 @@ async function renderAiDiaryRoleList() {
 }
 
 function buildAiDiaryRoleHtml() {
+  console.log('[buildAiDiaryRoleHtml]执行了');
 
   var list = [];
 
@@ -10803,8 +11169,9 @@ function buildAiDiaryRoleHtml() {
               ${
                 avatar
                   ? `<img
-                        data-media-ref="${escapeHTMLAttr(String(avatar))}"
-                        alt="${escapeHTMLAttr(chatName)}"
+                      data-media-ref="${escapeHTMLAttr(String(avatar))}"
+                      src="${escapeHTMLAttr(DEFAULT_AVATAR || '')}"
+                      alt="${escapeHTMLAttr(chatName)}"
                     >`
                   : `<span>${escapeHTML(chatName.slice(0,1))}</span>`
               }
@@ -10812,7 +11179,11 @@ function buildAiDiaryRoleHtml() {
 
               <div class="ai-diary-role-info">
                 <div class="ai-diary-role-name">
-                  ${escapeHTML(chatName)}
+                  ${escapeHTML(
+                    contact.displayName ||
+                    contact.name ||
+                    bridgeName
+                  )}
                 </div>
               </div>
 
@@ -11084,6 +11455,7 @@ function editDiaryEntry() {
 
 // 左上角选择器（打开身份切换弹窗）
 function openDiarySelector() {
+  currentDiaryAction = 'view';
   openDiaryChoiceDialog();
 }
 
