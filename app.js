@@ -11774,6 +11774,11 @@ function renderDiaryContent() {
 
   var entry = diaries[idx];
 
+  // 确保 annotations 存在
+  if (!Array.isArray(entry.annotations)) {
+    entry.annotations = [];
+  }
+
   // 标题
   var titleEl = document.getElementById('diaryPageTitle');
   if (titleEl) titleEl.textContent = entry.title || '无标题';
@@ -11824,7 +11829,20 @@ function renderDiaryContent() {
 
     if (safeParagraphs.length) {
       bodyContent.innerHTML = safeParagraphs.map(function(p, i) {
-        return '<p class="diary-paragraph" data-index="' + i + '">' + escapeHTML(p) + '</p>';
+
+        var count = getDiaryAnnotationCount(entry, i);
+
+        var badge = count > 0
+          ? '<span class="diary-annotation-badge">' + count + '</span>'
+          : '<span class="diary-annotation-badge empty">＋</span>';
+
+        return '' +
+          '<div class="diary-paragraph-wrap" data-index="' + i + '" onclick="playClickSound();openDiaryAnnotationDialog(' + i + ')">' +
+            '<p class="diary-paragraph" data-index="' + i + '">' +
+              escapeHTML(p) +
+            '</p>' +
+            badge +
+          '</div>';
       }).join('');
     }
     else {
@@ -11838,6 +11856,231 @@ function renderDiaryContent() {
 
   // 更新便利贴列表
   renderDiaryStickyList(diaries, idx);
+}
+
+function getCurrentDiaryEntry() {
+  var role = diaryViewState.viewingRole || 'me';
+  var diaries = getDiariesByRole(role);
+  var idx = diaryViewState.currentIndex;
+
+  if (!diaries || !diaries.length || idx < 0 || idx >= diaries.length) {
+    return null;
+  }
+
+  return diaries[idx];
+}
+
+function getDiaryAnnotationCount(entry, paragraphIndex) {
+  if (!entry) return 0;
+
+  if (!Array.isArray(entry.annotations)) {
+    entry.annotations = [];
+  }
+
+  return entry.annotations.filter(function(a) {
+    return Number(a.paragraphIndex) === Number(paragraphIndex);
+  }).length;
+}
+
+function getDiaryParagraphText(entry, paragraphIndex) {
+  if (!entry) return '';
+
+  var rawParagraphs = [];
+
+  if (entry.paragraphs && entry.paragraphs.length) {
+    rawParagraphs = entry.paragraphs;
+  }
+  else if (entry.content) {
+    rawParagraphs = String(entry.content)
+      .split(/\n{2,}|\n/)
+      .map(function(s) {
+        return String(s || '').trim();
+      })
+      .filter(Boolean);
+  }
+
+  var safeParagraphs =
+    typeof normalizeDiaryParagraphs === 'function'
+      ? normalizeDiaryParagraphs(rawParagraphs)
+      : rawParagraphs.map(function(p) {
+          if (typeof p === 'string') return p;
+          if (p && typeof p === 'object') {
+            return String(
+              p.text ||
+              p.content ||
+              p.value ||
+              p.paragraph ||
+              p.body ||
+              ''
+            );
+          }
+          return String(p || '');
+        }).filter(Boolean);
+
+  return safeParagraphs[paragraphIndex] || '';
+}
+
+function openDiaryAnnotationDialog(paragraphIndex) {
+  var entry = getCurrentDiaryEntry();
+
+  if (!entry) {
+    showToast('没有可标注的日记');
+    return;
+  }
+
+  if (!Array.isArray(entry.annotations)) {
+    entry.annotations = [];
+  }
+
+  paragraphIndex = Number(paragraphIndex);
+
+  var paragraphText = getDiaryParagraphText(entry, paragraphIndex);
+
+  var annotations = entry.annotations.filter(function(a) {
+    return Number(a.paragraphIndex) === Number(paragraphIndex);
+  });
+
+  var old = document.getElementById('diaryAnnotationDialog');
+  if (old) old.remove();
+
+  var phone = document.querySelector('.phone-container') || document.body;
+
+  var dialog = document.createElement('div');
+  dialog.id = 'diaryAnnotationDialog';
+  dialog.className = 'dialog';
+
+  var annotationHtml = '';
+
+  if (annotations.length) {
+    annotationHtml = annotations.map(function(a) {
+      return '' +
+        '<div class="diary-annotation-item">' +
+          '<div class="diary-annotation-meta">' +
+            escapeHTML(formatDiaryAnnotationTime(a.createTime)) +
+          '</div>' +
+          '<div class="diary-annotation-text">' +
+            escapeHTML(a.text || '') +
+          '</div>' +
+          '<button class="diary-annotation-delete" onclick="playClickSound();deleteDiaryAnnotation(\'' + escapeHTMLAttr(a.id) + '\',' + paragraphIndex + ')">删除</button>' +
+        '</div>';
+    }).join('');
+  }
+  else {
+    annotationHtml =
+      '<div class="diary-annotation-empty">还没有标注，写下你的想法吧。</div>';
+  }
+
+  dialog.innerHTML = `
+    <div class="dialog-content diary-annotation-dialog-content">
+      <h3>段落标注</h3>
+
+      <div class="diary-annotation-paragraph-preview">
+        ${escapeHTML(paragraphText)}
+      </div>
+
+      <div class="diary-annotation-list">
+        ${annotationHtml}
+      </div>
+
+      <textarea
+        id="diaryAnnotationInput"
+        class="diary-annotation-input"
+        placeholder="给这一段写一点标注……"
+      ></textarea>
+
+      <div class="dialog-buttons">
+        <button onclick="playClickSound();closeDialog('diaryAnnotationDialog')">关闭</button>
+        <button onclick="playClickSound();saveDiaryAnnotation(${paragraphIndex})">保存标注</button>
+      </div>
+    </div>
+  `;
+
+  phone.appendChild(dialog);
+
+  applySavedDialogBgTo(dialog);
+  applyCurrentFontTo(dialog);
+
+  showDialog('diaryAnnotationDialog');
+}
+
+function saveDiaryAnnotation(paragraphIndex) {
+  var entry = getCurrentDiaryEntry();
+
+  if (!entry) {
+    showToast('没有可标注的日记');
+    return;
+  }
+
+  if (!Array.isArray(entry.annotations)) {
+    entry.annotations = [];
+  }
+
+  var input = document.getElementById('diaryAnnotationInput');
+  var text = input ? input.value.trim() : '';
+
+  if (!text) {
+    showToast('标注不能为空');
+    return;
+  }
+
+  var annotation = {
+    id: 'anno_' + Date.now() + '_' + Math.random().toString(36).slice(2),
+    paragraphIndex: Number(paragraphIndex),
+    text: text,
+    authorId: 'me',
+    authorName: '我',
+    createTime: Date.now(),
+    updateTime: Date.now()
+  };
+
+  entry.annotations.push(annotation);
+  entry.updateTime = Date.now();
+
+  saveAll();
+
+  closeDialog('diaryAnnotationDialog');
+  renderDiaryContent();
+
+  showToast('标注已保存');
+}
+
+function deleteDiaryAnnotation(annotationId, paragraphIndex) {
+  var entry = getCurrentDiaryEntry();
+
+  if (!entry || !Array.isArray(entry.annotations)) {
+    return;
+  }
+
+  entry.annotations = entry.annotations.filter(function(a) {
+    return a.id !== annotationId;
+  });
+
+  entry.updateTime = Date.now();
+
+  saveAll();
+
+  closeDialog('diaryAnnotationDialog');
+  renderDiaryContent();
+
+  showToast('标注已删除');
+
+  setTimeout(function() {
+    openDiaryAnnotationDialog(paragraphIndex);
+  }, 80);
+}
+
+function formatDiaryAnnotationTime(time) {
+  if (!time) return '';
+
+  var date = new Date(time);
+
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  var h = String(date.getHours()).padStart(2, '0');
+  var min = String(date.getMinutes()).padStart(2, '0');
+
+  return y + '年' + m + '月' + d + '日 ' + h + ':' + min;
 }
 
 // 渲染右侧便利贴列表

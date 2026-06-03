@@ -2247,3 +2247,124 @@ textarea {
   text-align: center;
   flex-direction: column;
 }
+
+.diary-paragraph-wrap {
+  position: relative;
+  display: block;
+  padding-right: 34px;
+  margin-bottom: 14px;
+  cursor: pointer;
+}
+
+.diary-paragraph-wrap .diary-paragraph {
+  margin-bottom: 0;
+}
+
+.diary-paragraph-wrap:active {
+  transform: scale(0.995);
+  opacity: 0.86;
+}
+
+.diary-annotation-badge {
+  position: absolute;
+  right: 2px;
+  top: 4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 184, 77, 0.95);
+  color: #5c3600;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.diary-annotation-badge.empty {
+  background: rgba(255, 255, 255, 0.55);
+  color: rgba(80, 60, 40, 0.65);
+  font-weight: 600;
+}
+
+.diary-annotation-dialog-content {
+  width: 86%;
+  max-height: 78%;
+  overflow-y: auto;
+}
+
+.diary-annotation-paragraph-preview {
+  max-height: 130px;
+  overflow-y: auto;
+  margin: 10px 0 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 248, 226, 0.72);
+  color: #4b3524;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.diary-annotation-list {
+  margin: 8px 0 12px;
+}
+
+.diary-annotation-empty {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
+  color: rgba(80, 60, 40, 0.68);
+  font-size: 13px;
+  text-align: center;
+}
+
+.diary-annotation-item {
+  position: relative;
+  padding: 10px 52px 10px 10px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.62);
+  color: #3d2d22;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.diary-annotation-meta {
+  margin-bottom: 4px;
+  color: rgba(80, 60, 40, 0.55);
+  font-size: 11px;
+}
+
+.diary-annotation-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diary-annotation-delete {
+  position: absolute;
+  right: 8px;
+  top: 9px;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 96, 96, 0.86);
+  color: #fff;
+  font-size: 11px;
+}
+
+.diary-annotation-input {
+  width: 100%;
+  min-height: 86px;
+  box-sizing: border-box;
+  resize: none;
+  padding: 10px;
+  border: none;
+  outline: none;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
