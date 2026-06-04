@@ -2789,6 +2789,22 @@ async function handleVVChatSyncRaw(payload) {
   const payloadChatId = typeof payload === 'object' ? (payload?.chatId || '') : '';
   const payloadViewId = typeof payload === 'object' ? (payload?.viewId || '') : '';
 
+  if (/\[VV_ANNOTATION_SYNC\]/i.test(raw)) {
+    console.log(
+      '[VV][ANNOTATION] sync detected'
+    );
+
+    const parsed =
+      parseVVAnnotationBlocks(raw);
+
+    if (parsed) {
+      appendVVAnnotationReplyToLocal(
+        parsed
+      );
+      return true;
+    }
+  }
+
   // ========== 新增：如果只有电话同步没有聊天同步，直接转给电话处理 ==========
   if (/\[VV_CALL_SYNC\]/i.test(raw) && !/\[VV_CHAT_SYNC\]/i.test(raw)) {
     console.log('[VV] handleVVChatSyncRaw: only VV_CALL_SYNC found, redirecting to handleVVCallSyncRaw');
@@ -11759,7 +11775,6 @@ function renderDiaryContent() {
   if (cover) cover.style.display = 'none';
   if (content) content.style.display = 'flex';
 
-  // 显示删除按钮
   var delBtn = document.getElementById('diaryDeleteBtn');
   if (delBtn) delBtn.style.display = 'flex';
 
@@ -11774,24 +11789,19 @@ function renderDiaryContent() {
 
   var entry = diaries[idx];
 
-  // 确保 annotations 存在
   if (!Array.isArray(entry.annotations)) {
     entry.annotations = [];
   }
 
-  // 标题
   var titleEl = document.getElementById('diaryPageTitle');
   if (titleEl) titleEl.textContent = entry.title || '无标题';
 
-  // 日期
   var dateEl = document.getElementById('diaryPageDate');
   if (dateEl) dateEl.textContent = entry.date || '';
 
-  // 天气
   var weatherEl = document.getElementById('diaryPageWeather');
   if (weatherEl) weatherEl.textContent = entry.weather || '';
 
-  // 正文
   var bodyContent = document.getElementById('diaryBodyContent');
   if (bodyContent) {
 
@@ -11831,17 +11841,23 @@ function renderDiaryContent() {
       bodyContent.innerHTML = safeParagraphs.map(function(p, i) {
 
         var count = getDiaryAnnotationCount(entry, i);
+        var bubble = '';
 
-        var badge = count > 0
-          ? '<span class="diary-annotation-badge">' + count + '</span>'
-          : '<span class="diary-annotation-badge empty">＋</span>';
+        if (count > 0) {
+          bubble = '' +
+            '<span class="diary-comment-bubble" data-index="' + i + '" ' +
+                 'onclick="event.stopImmediatePropagation();playClickSound();showDiaryAnnotationCard(' + i + ', event)">' +
+              '<span class="bubble-icon">💬</span>' +
+              '<span class="bubble-count">' + count + '</span>' +
+            '</span>';
+        }
 
         return '' +
-          '<div class="diary-paragraph-wrap" data-index="' + i + '" onclick="playClickSound();openDiaryAnnotationDialog(' + i + ')">' +
-            '<p class="diary-paragraph" data-index="' + i + '">' +
-              escapeHTML(p) +
-            '</p>' +
-            badge +
+          '<div class="diary-paragraph-wrap" data-index="' + i + '" ' +
+               'onpointerdown="diaryParagraphLongPressStart(this, ' + i + ')" ' +
+               'onpointerup="diaryParagraphLongPressEnd(this)" ' +
+               'onpointerleave="diaryParagraphLongPressEnd(this)">' +
+            '<p class="diary-paragraph">' + escapeHTML(p) + bubble + '</p>' +
           '</div>';
       }).join('');
     }
@@ -11850,11 +11866,9 @@ function renderDiaryContent() {
     }
   }
 
-  // 页码
   var navIndex = document.getElementById('diaryNavIndex');
   if (navIndex) navIndex.textContent = (idx + 1) + ' / ' + diaries.length;
 
-  // 更新便利贴列表
   renderDiaryStickyList(diaries, idx);
 }
 
@@ -11866,109 +11880,142 @@ function getCurrentDiaryEntry() {
   if (!diaries || !diaries.length || idx < 0 || idx >= diaries.length) {
     return null;
   }
-
   return diaries[idx];
 }
 
 function getDiaryAnnotationCount(entry, paragraphIndex) {
   if (!entry) return 0;
-
-  if (!Array.isArray(entry.annotations)) {
-    entry.annotations = [];
-  }
-
-  return entry.annotations.filter(function(a) {
-    return Number(a.paragraphIndex) === Number(paragraphIndex);
-  }).length;
+  if (!Array.isArray(entry.annotations)) entry.annotations = [];
+  return entry.annotations.filter(a => Number(a.paragraphIndex) === Number(paragraphIndex)).length;
 }
 
 function getDiaryParagraphText(entry, paragraphIndex) {
   if (!entry) return '';
-
   var rawParagraphs = [];
 
   if (entry.paragraphs && entry.paragraphs.length) {
     rawParagraphs = entry.paragraphs;
-  }
-  else if (entry.content) {
+  } else if (entry.content) {
     rawParagraphs = String(entry.content)
       .split(/\n{2,}|\n/)
-      .map(function(s) {
-        return String(s || '').trim();
-      })
+      .map(s => String(s || '').trim())
       .filter(Boolean);
   }
 
-  var safeParagraphs =
-    typeof normalizeDiaryParagraphs === 'function'
-      ? normalizeDiaryParagraphs(rawParagraphs)
-      : rawParagraphs.map(function(p) {
-          if (typeof p === 'string') return p;
-          if (p && typeof p === 'object') {
-            return String(
-              p.text ||
-              p.content ||
-              p.value ||
-              p.paragraph ||
-              p.body ||
-              ''
-            );
-          }
-          return String(p || '');
-        }).filter(Boolean);
+  var safeParagraphs = typeof normalizeDiaryParagraphs === 'function'
+    ? normalizeDiaryParagraphs(rawParagraphs)
+    : rawParagraphs.map(p => {
+        if (typeof p === 'string') return p;
+        if (p && typeof p === 'object') return String(p.text || p.content || p.value || p.paragraph || p.body || '');
+        return String(p || '');
+      }).filter(Boolean);
 
   return safeParagraphs[paragraphIndex] || '';
 }
 
+// 长按逻辑
+let diaryLongPressTimer = null;
+let diaryLongPressTriggered = false;
+
+function diaryParagraphLongPressStart(el, paragraphIndex) {
+  diaryLongPressTriggered = false;
+  clearTimeout(diaryLongPressTimer);
+
+  diaryLongPressTimer = setTimeout(() => {
+    diaryLongPressTriggered = true;
+    playClickSound();
+    openDiaryAnnotationDialog(paragraphIndex);
+  }, 580);
+}
+
+function diaryParagraphLongPressEnd(el) {
+  clearTimeout(diaryLongPressTimer);
+}
+
+// ==================== 新增：只读卡片 ====================
+let currentAnnotationCard = null;
+
+function showDiaryAnnotationCard(paragraphIndex, evt) {
+  if (currentAnnotationCard) currentAnnotationCard.remove();
+
+  var entry = getCurrentDiaryEntry();
+  if (!entry) return;
+
+  paragraphIndex = Number(paragraphIndex);
+  var annotations = entry.annotations.filter(a => Number(a.paragraphIndex) === paragraphIndex);
+
+  var card = document.createElement('div');
+  card.className = 'diary-annotation-card';
+
+  var html = annotations.map(a =>
+    '<div class="diary-card-annotation">' +
+      '<div class="diary-card-meta">' + escapeHTML(formatDiaryAnnotationTime(a.createTime)) + '</div>' +
+      '<div class="diary-card-text">' + escapeHTML(a.text || '') + '</div>' +
+    '</div>'
+  ).join('');
+
+  card.innerHTML = html;
+
+  var phone = document.querySelector('.phone-container') || document.body;
+  phone.appendChild(card);
+  currentAnnotationCard = card;
+
+  var rect = evt.currentTarget.getBoundingClientRect();
+  var phoneRect = phone.getBoundingClientRect();
+
+  // 💡 【调整左右距离】
+  var offsetX = rect.left - phoneRect.left - 12;
+
+  // 💡 【调整上下距离】
+  // 这个数字代表卡片底部离气泡顶部的空隙，数字越大离得越远，-2会让它们非常贴近！
+  var offsetY = rect.top - phoneRect.top - card.offsetHeight - 13;
+
+  card.style.left = offsetX + 'px';
+  card.style.top = offsetY + 'px';
+
+  // 点击外部关闭
+  setTimeout(() => {
+    document.addEventListener('click', closeDiaryAnnotationCard, { once: true });
+  }, 50);
+}
+
+function closeDiaryAnnotationCard() {
+  if (currentAnnotationCard) {
+    currentAnnotationCard.remove();
+    currentAnnotationCard = null;
+  }
+}
+
+// ==================== 原有功能弹窗 ====================
 function openDiaryAnnotationDialog(paragraphIndex) {
   var entry = getCurrentDiaryEntry();
-
   if (!entry) {
     showToast('没有可标注的日记');
     return;
   }
-
-  if (!Array.isArray(entry.annotations)) {
-    entry.annotations = [];
-  }
+  if (!Array.isArray(entry.annotations)) entry.annotations = [];
 
   paragraphIndex = Number(paragraphIndex);
-
   var paragraphText = getDiaryParagraphText(entry, paragraphIndex);
-
-  var annotations = entry.annotations.filter(function(a) {
-    return Number(a.paragraphIndex) === Number(paragraphIndex);
-  });
+  var annotations = entry.annotations.filter(a => Number(a.paragraphIndex) === paragraphIndex);
 
   var old = document.getElementById('diaryAnnotationDialog');
   if (old) old.remove();
 
   var phone = document.querySelector('.phone-container') || document.body;
-
   var dialog = document.createElement('div');
   dialog.id = 'diaryAnnotationDialog';
   dialog.className = 'dialog';
 
-  var annotationHtml = '';
-
-  if (annotations.length) {
-    annotationHtml = annotations.map(function(a) {
-      return '' +
+  var annotationHtml = annotations.length
+    ? annotations.map(a =>
         '<div class="diary-annotation-item">' +
-          '<div class="diary-annotation-meta">' +
-            escapeHTML(formatDiaryAnnotationTime(a.createTime)) +
-          '</div>' +
-          '<div class="diary-annotation-text">' +
-            escapeHTML(a.text || '') +
-          '</div>' +
+          '<div class="diary-annotation-meta">' + escapeHTML(formatDiaryAnnotationTime(a.createTime)) + '</div>' +
+          '<div class="diary-annotation-text">' + escapeHTML(a.text || '') + '</div>' +
           '<button class="diary-annotation-delete" onclick="playClickSound();deleteDiaryAnnotation(\'' + escapeHTMLAttr(a.id) + '\',' + paragraphIndex + ')">删除</button>' +
-        '</div>';
-    }).join('');
-  }
-  else {
-    annotationHtml =
-      '<div class="diary-annotation-empty">还没有标注，写下你的想法吧。</div>';
-  }
+        '</div>'
+      ).join('')
+    : '<div class="diary-annotation-empty">还没有标注，写下你的想法吧。</div>';
 
   dialog.innerHTML = `
     <div class="dialog-content diary-annotation-dialog-content">
@@ -11982,11 +12029,7 @@ function openDiaryAnnotationDialog(paragraphIndex) {
         ${annotationHtml}
       </div>
 
-      <textarea
-        id="diaryAnnotationInput"
-        class="diary-annotation-input"
-        placeholder="给这一段写一点标注……"
-      ></textarea>
+      <textarea id="diaryAnnotationInput" class="diary-annotation-input" placeholder="给这一段写一点标注……"></textarea>
 
       <div class="dialog-buttons">
         <button onclick="playClickSound();closeDialog('diaryAnnotationDialog')">关闭</button>
@@ -11996,24 +12039,18 @@ function openDiaryAnnotationDialog(paragraphIndex) {
   `;
 
   phone.appendChild(dialog);
-
   applySavedDialogBgTo(dialog);
   applyCurrentFontTo(dialog);
-
   showDialog('diaryAnnotationDialog');
 }
 
 function saveDiaryAnnotation(paragraphIndex) {
   var entry = getCurrentDiaryEntry();
-
   if (!entry) {
     showToast('没有可标注的日记');
     return;
   }
-
-  if (!Array.isArray(entry.annotations)) {
-    entry.annotations = [];
-  }
+  if (!Array.isArray(entry.annotations)) entry.annotations = [];
 
   var input = document.getElementById('diaryAnnotationInput');
   var text = input ? input.value.trim() : '';
@@ -12037,49 +12074,298 @@ function saveDiaryAnnotation(paragraphIndex) {
   entry.updateTime = Date.now();
 
   saveAll();
-
   closeDialog('diaryAnnotationDialog');
   renderDiaryContent();
 
-  showToast('标注已保存');
+  const wantReply = confirm(
+    '标注已保存，是否让角色回复？'
+  );
+
+  if (wantReply) {
+    triggerDiaryAnnotationReply(
+      entry.id,
+      annotation.id
+    );
+    showToast('已请求角色回复');
+  } else {
+    showToast('仅保存标注');
+  }
+}
+
+function buildVVAnnotationEvent(diaryId, annotationId) {
+  const diary = (diaryData?.diaries || []).find(
+    d => String(d.id) === String(diaryId)
+  );
+
+  if (!diary) return '';
+
+  const annotation = (diary.annotations || []).find(
+    a => String(a.id) === String(annotationId)
+  );
+
+  if (!annotation) return '';
+
+  const paragraphText =
+    (diary.paragraphs || [])[annotation.paragraphIndex] || '';
+
+  return [
+    '[VV_EVENT]',
+    'type=annotation',
+    'diaryId=' + diary.id,
+    'annotationId=' + annotation.id,
+    'authorId=' + (diary.authorId || ''),
+    'authorName=' + (diary.authorName || ''),
+    'paragraphIndex=' + annotation.paragraphIndex,
+    'paragraph=' + paragraphText,
+    'annotation=' + annotation.text,
+    '[/VV_EVENT]',
+    '',
+    '请针对这条标注进行回复。',
+    '如果回复，请使用以下格式：',
+    '',
+    '[VV_ANNOTATION_SYNC]',
+    'diaryId=' + diary.id,
+    'annotationId=' + annotation.id,
+    '',
+    '[回复]',
+    'sender=' + (diary.authorName || '角色'),
+    'content=回复内容',
+    '[/回复]',
+    '',
+    '[/VV_ANNOTATION_SYNC]'
+  ].join('\n');
+}
+
+async function triggerDiaryAnnotationReply(
+  diaryId,
+  annotationId
+) {
+  try {
+    const diary = (diaryData?.diaries || []).find(
+      d => String(d.id) === String(diaryId)
+    );
+
+    if (!diary) {
+      showToast('日记不存在');
+      return false;
+    }
+
+    const promptText =
+      buildVVAnnotationEvent(
+        diaryId,
+        annotationId
+      );
+
+    if (!promptText) {
+      showToast('生成标注事件失败');
+      return false;
+    }
+
+    const bridgeName =
+      diary.authorName || '';
+
+    const cmd =
+      VV_BRIDGE_CONFIG.buildReplyCommand({
+        bridgeName,
+        chatId: diary.authorId || '',
+        chatType: 'annotation',
+        promptText
+      });
+
+    console.log(
+      '[VV][ANNOTATION] cmd >>>'
+    );
+    console.log(cmd);
+
+    const ok = await triggerSlash(cmd);
+
+    if (ok) {
+      showToast('已请求角色回复');
+    } else {
+      showToast('请求失败');
+    }
+
+    return ok;
+  } catch (err) {
+    console.error(
+      '[VV][ANNOTATION] trigger error:',
+      err
+    );
+
+    showToast('请求异常');
+    return false;
+  }
+}
+
+function parseVVAnnotationBlocks(raw) {
+  raw = String(raw || '');
+
+  const blockMatch =
+    raw.match(
+      /\[VV_ANNOTATION_SYNC\]([\s\S]*?)\[\/VV_ANNOTATION_SYNC\]/i
+    );
+
+  if (!blockMatch) return null;
+
+  const block = blockMatch[1];
+
+  const diaryId =
+    (block.match(/diaryId=(.+)/i) || [])[1]?.trim() || '';
+
+  const annotationId =
+    (block.match(/annotationId=(.+)/i) || [])[1]?.trim() || '';
+
+  const replies = [];
+
+  const replyRegex =
+    /\[回复\]([\s\S]*?)\[\/回复\]/gi;
+
+  let match;
+
+  while ((match = replyRegex.exec(block))) {
+    const replyBlock = match[1];
+
+    const sender =
+      (
+        replyBlock.match(/sender=(.+)/i) || []
+      )[1]?.trim() || '';
+
+    const content =
+      (
+        replyBlock.match(/content=([\s\S]*)/i) || []
+      )[1]?.trim() || '';
+
+    replies.push({
+      sender,
+      content
+    });
+  }
+
+  return {
+    diaryId,
+    annotationId,
+    replies
+  };
+}
+
+function appendVVAnnotationReplyToLocal(parsed) {
+  if (!parsed) return 0;
+
+  const diary =
+    (diaryData?.diaries || []).find(
+      d => String(d.id) === String(parsed.diaryId)
+    );
+
+  if (!diary) {
+    console.warn(
+      '[VV][ANNOTATION] diary not found:',
+      parsed.diaryId
+    );
+    return 0;
+  }
+
+  const annotation =
+    (diary.annotations || []).find(
+      a =>
+        String(a.id) ===
+        String(parsed.annotationId)
+    );
+
+  if (!annotation) {
+    console.warn(
+      '[VV][ANNOTATION] annotation not found:',
+      parsed.annotationId
+    );
+    return 0;
+  }
+
+  if (!Array.isArray(annotation.replies)) {
+    annotation.replies = [];
+  }
+
+  let appended = 0;
+
+  parsed.replies.forEach(reply => {
+    const syncKey =
+      parsed.annotationId +
+      '|' +
+      reply.sender +
+      '|' +
+      reply.content;
+
+    const exists =
+      annotation.replies.some(
+        r => r.syncKey === syncKey
+      );
+
+    if (exists) return;
+
+    annotation.replies.push({
+      id:
+        'reply_' +
+        Date.now() +
+        '_' +
+        Math.random()
+          .toString(36)
+          .slice(2),
+
+      syncKey,
+
+      sender: reply.sender,
+      content: reply.content,
+
+      createTime: Date.now()
+    });
+
+    appended++;
+  });
+
+  if (appended > 0) {
+    diary.updateTime = Date.now();
+
+    saveAll();
+
+    if (
+      typeof renderDiaryContent ===
+      'function'
+    ) {
+      renderDiaryContent();
+    }
+  }
+
+  console.log(
+    '[VV][ANNOTATION] appended:',
+    appended
+  );
+
+  return appended;
 }
 
 function deleteDiaryAnnotation(annotationId, paragraphIndex) {
   var entry = getCurrentDiaryEntry();
+  if (!entry || !Array.isArray(entry.annotations)) return;
 
-  if (!entry || !Array.isArray(entry.annotations)) {
-    return;
-  }
-
-  entry.annotations = entry.annotations.filter(function(a) {
-    return a.id !== annotationId;
-  });
-
+  entry.annotations = entry.annotations.filter(a => a.id !== annotationId);
   entry.updateTime = Date.now();
 
   saveAll();
-
   closeDialog('diaryAnnotationDialog');
   renderDiaryContent();
-
   showToast('标注已删除');
 
-  setTimeout(function() {
+  setTimeout(() => {
     openDiaryAnnotationDialog(paragraphIndex);
-  }, 80);
+  }, 100);
 }
 
 function formatDiaryAnnotationTime(time) {
   if (!time) return '';
-
   var date = new Date(time);
-
-  var y = date.getFullYear();
-  var m = String(date.getMonth() + 1).padStart(2, '0');
-  var d = String(date.getDate()).padStart(2, '0');
-  var h = String(date.getHours()).padStart(2, '0');
-  var min = String(date.getMinutes()).padStart(2, '0');
-
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
   return y + '年' + m + '月' + d + '日 ' + h + ':' + min;
 }
 
