@@ -10990,69 +10990,20 @@ function savePhoneIconsSafely(data) {
 }
 
 //日记函数
-function handleAnnotationReplySync(raw, diaryId, annotationId) {
-  if (!diaryData || !diaryData.diaries) {
-    console.warn('[VV] diaryData 未初始化');
-    return;
-  }
+function handleAnnotationReplySync(raw) {
 
-  // 提取所有 [标注回复] 块
-  const replyMatches = raw.match(/\[标注回复\]([\s\S]*?)\[\/标注回复\]/gi);
-  if (!replyMatches || replyMatches.length === 0) {
-    console.log('[VV] 未找到 [标注回复] 块');
-    return;
-  }
+  const parsed = parseVVAnnotationBlocks(raw);
 
-  let updated = false;
-
-  replyMatches.forEach(block => {
-    const dIdMatch = block.match(/diaryId\s*[=:]\s*([^\s\n]+)/i);
-    const aIdMatch = block.match(/annotationId\s*[=:]\s*([^\s\n]+)/i);
-    const senderMatch = block.match(/sender\s*[=:]\s*([^\s\n]+)/i);
-    const contentMatch = block.match(/content\s*[=:]\s*([\s\S]*?)(?=\n\[|\/\[标注回复\]|$)/i);
-
-    const realDiaryId = dIdMatch ? dIdMatch[1].trim() : diaryId;
-    const realAnnotationId = aIdMatch ? aIdMatch[1].trim() : annotationId;
-    const sender = senderMatch ? senderMatch[1].trim() : '未知';
-    const content = contentMatch ? contentMatch[1].trim() : '';
-
-    if (!realAnnotationId || !content) return;
-
-    // 找对应的日记和标注
-    const diary = diaryData.diaries.find(d => d.id === realDiaryId);
-    if (!diary || !Array.isArray(diary.annotations)) return;
-
-    const annotation = diary.annotations.find(a => a.id === realAnnotationId);
-    if (!annotation) return;
-
-    // 初始化 replies 数组
-    if (!Array.isArray(annotation.replies)) {
-      annotation.replies = [];
-    }
-
-    // 防止重复添加
-    const exists = annotation.replies.some(r =>
-      r.content === content && r.sender === sender
+  if (!parsed) {
+    console.warn(
+      '[VV][ANNOTATION] parse failed'
     );
-    if (exists) return;
-
-    // 添加回复
-    annotation.replies.push({
-      id: 'reply_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10),
-      sender: sender,
-      content: content,
-      createTime: new Date().toISOString()
-    });
-
-    updated = true;
-    console.log('[VV] 标注回复已写入本地', realAnnotationId);
-  });
-
-  if (updated) {
-    saveAll();
-    renderDiaryContent(); // 立即刷新日记内容
-    showToast('角色已回复标注');
+    return false;
   }
+
+  return appendVVAnnotationReplyToLocal(
+    parsed
+  );
 }
 
 function openDiaryChoiceDialog(mode) {
