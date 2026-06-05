@@ -603,11 +603,44 @@ const VV_BRIDGE_CONFIG = {
     const chatId = params.chatId || '';
     const promptText = params.promptText || '';
 
-    // 关键：使用 /inject + /trigger，与 buildFeedCommentCommand 保持一致
+    const lines = [
+      '【系统指令·日记标注回复·严格遵守】',
+      '',
+      '⚠️ 这是日记段落标注回复，不是电话，不是私聊，不是朋友圈。',
+      '⚠️ 禁止输出 [VV_CALL_SYNC]。',
+      '⚠️ 禁止输出 [VV_CHAT_SYNC]。',
+      '⚠️ 禁止输出 [VV_FEED_SYNC]。',
+      '⚠️ 禁止输出 [VV_DIARY_SYNC]。',
+      '⚠️ 禁止输出 [VV_INCOMING_CALL]。',
+      '⚠️ 禁止输出任何 callPhase、[通话] 块、[聊天界面] 块。',
+      '⚠️ 禁止模拟用户（维夏/"我"）的回复。',
+      '⚠️ 禁止输出任何解释、旁白、正文叙事、额外内容。',
+      '',
+      '只允许输出一个 [VV_ANNOTATION_SYNC] 块。',
+      'sender= 必须写真实角色名，不能是维夏或我。',
+      'content= 只包含纯回复文字。',
+      '',
+      promptText,
+      '',
+      '严格按以下格式输出，只输出一个 [VV_ANNOTATION_SYNC] 块：',
+      '',
+      '[VV_ANNOTATION_SYNC]',
+      'diaryId=diary_xxxx',
+      'annotationId=anno_xxxx',
+      '',
+      '[回复]',
+      'sender=角色名',
+      'content=回复内容',
+      '[/回复]',
+      '',
+      '[/VV_ANNOTATION_SYNC]'
+    ];
+
+    const payload = lines.join('\n');
     const cmd =
       '/inject id=vv_annotation_' + Date.now() +
       ' role=system depth=0 scan=true [[\n' +
-      promptText +
+      payload +
       '\n]] |\n/trigger';
 
     console.log('[VV_BRIDGE_CONFIG][buildAnnotationReplyCommand]', {
