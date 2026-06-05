@@ -12258,8 +12258,9 @@ async function triggerDiaryAnnotationReply(
     const bridgeName =
       diary.authorName || '';
 
+    // ★ 修改：改用 buildAnnotationReplyCommand（专为标注设计）
     const cmd =
-      VV_BRIDGE_CONFIG.buildReplyCommand({
+      VV_BRIDGE_CONFIG.buildAnnotationReplyCommand({
         bridgeName,
         chatId: diary.authorId || '',
         chatType: 'annotation',
