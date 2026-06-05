@@ -3166,6 +3166,7 @@ async function triggerSlash(cmd, options) {
         viewId,
         command: cmd,
         feedMode: !!(options && options.feedMode),
+        annotationMode: !!(options && options.annotationMode),
         feedMeta: (options && options.feedMeta) || null,
         userInteraction: (options && options.userInteraction) || null
       }, '*');
@@ -12305,7 +12306,9 @@ async function triggerDiaryAnnotationReply(
     );
     console.log(cmd);
 
-    const ok = await triggerSlash(cmd);
+    const ok = await triggerSlash(cmd, {
+      annotationMode: true
+    });
 
     if (ok) {
       showToast('已请求角色回复');
