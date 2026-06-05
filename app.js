@@ -9409,7 +9409,7 @@ function initVVHostNavigationBridge() {
       }
 
       // ==================== 标注回复同步监听 ====================
-      if (data.type === 'VV_ANNOTATION_HIDDEN_RAW' || data.type === 'VVPHONE_ANNOTATION_SYNC') {
+      if (data.type === 'VVPHONE_ANNOTATION_SYNC') {
         console.log('[VV] 收到标注回复同步', data);
 
         const raw = data.raw || '';
