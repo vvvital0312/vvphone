@@ -11979,12 +11979,50 @@ function showDiaryAnnotationCard(paragraphIndex, evt) {
   var card = document.createElement('div');
   card.className = 'diary-annotation-card';
 
-  var html = annotations.map(a =>
-    '<div class="diary-card-annotation">' +
-      '<div class="diary-card-meta">' + escapeHTML(formatDiaryAnnotationTime(a.createTime)) + '</div>' +
-      '<div class="diary-card-text">' + escapeHTML(a.text || '') + '</div>' +
-    '</div>'
-  ).join('');
+  var html = annotations.map(function(a) {
+
+    var repliesHtml = '';
+
+    if (
+      Array.isArray(a.replies) &&
+      a.replies.length
+    ) {
+      repliesHtml =
+        '<div class="diary-card-replies">' +
+        a.replies.map(function(r) {
+          return (
+            '<div class="diary-card-reply">' +
+              '<div class="diary-card-reply-sender">' +
+                escapeHTML(r.sender || '') +
+              '</div>' +
+              '<div class="diary-card-reply-content">' +
+                escapeHTML(r.content || '') +
+              '</div>' +
+            '</div>'
+          );
+        }).join('') +
+        '</div>';
+    }
+
+    return (
+      '<div class="diary-card-annotation">' +
+
+        '<div class="diary-card-meta">' +
+          escapeHTML(
+            formatDiaryAnnotationTime(a.createTime)
+          ) +
+        '</div>' +
+
+        '<div class="diary-card-text">' +
+          escapeHTML(a.text || '') +
+        '</div>' +
+
+        repliesHtml +
+
+      '</div>'
+    );
+
+  }).join('');
 
   card.innerHTML = html;
 

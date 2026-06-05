@@ -2428,3 +2428,25 @@ textarea {
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+.diary-card-replies{
+  margin-top:8px;
+  border-top:1px solid rgba(255,255,255,.08);
+  padding-top:8px;
+}
+
+.diary-card-reply{
+  margin-top:6px;
+}
+
+.diary-card-reply-sender{
+  font-size:12px;
+  opacity:.7;
+  margin-bottom:2px;
+}
+
+.diary-card-reply-content{
+  font-size:13px;
+  line-height:1.5;
+}
+
