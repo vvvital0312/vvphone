@@ -598,6 +598,30 @@ const VV_BRIDGE_CONFIG = {
     return cmd;
   },
 
+  buildAnnotationReplyCommand: function (params) {
+    const bridgeName = params.bridgeName || '西西';
+    const chatId = params.chatId || '';
+    const promptText = params.promptText || '';
+
+    // 关键：使用 /inject + /trigger，与 buildFeedCommentCommand 保持一致
+    const cmd =
+      '/inject id=vv_annotation_' + Date.now() +
+      ' role=system depth=0 scan=true [[\n' +
+      promptText +
+      '\n]] |\n/trigger';
+
+    console.log('[VV_BRIDGE_CONFIG][buildAnnotationReplyCommand]', {
+      bridgeName,
+      chatId,
+      promptLength: String(promptText || '').length
+    });
+    console.log('[VV_BRIDGE_CONFIG][buildAnnotationReplyCommand][CMD_BEGIN]');
+    console.log(cmd);
+    console.log('[VV_BRIDGE_CONFIG][buildAnnotationReplyCommand][CMD_END]');
+
+    return cmd;
+  },
+
   buildFeedEventCommand: function (opts) {
     const postId = opts.postId || '';
     const content = opts.content || '';
