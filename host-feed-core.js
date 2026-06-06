@@ -1157,7 +1157,7 @@
     }
 
     setInterval(checkForNewUserMessage, pollInterval);
-    console.log('[VVHOST][SUMMON] user input POLLER registered (interval=' + pollInterval + 'ms)');
+    console.log('[VVHOST_FEED] user input POLLER registered (interval=' + pollInterval + 'ms)');
   })();
 
   // ========== AI 主动发动态检测（内容变化检测，不依赖新增楼层）==========
