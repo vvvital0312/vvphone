@@ -12456,10 +12456,12 @@ function appendVVAnnotationReplyToLocal(parsed) {
 
     saveAll();
 
-    if (
-      typeof renderDiaryContent ===
-      'function'
-    ) {
+    console.log(
+      '[VV][ANNOTATION] rerender diary',
+      diary.id
+    );
+
+    if (typeof renderDiaryContent === 'function') {
       renderDiaryContent();
     }
   }
