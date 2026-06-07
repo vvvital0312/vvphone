@@ -467,6 +467,92 @@ let callTimerInterval = null;
 let isWaitingCallAIReply = false;
 let callTranscript = [];
 
+let lastHandledFeedHiddenRawSig = '';
+let lastHandledFeedHiddenRawAt = 0;
+
+function getVVFeedHiddenRawSig(raw) {
+  raw = String(raw || '');
+
+  var hiddenMatch = raw.match(
+    /(<div class="vv-feed-hidden"[\s\S]*?<\/div>)/g
+  );
+
+  return hiddenMatch ? hiddenMatch.join('') : raw;
+}
+
+function shouldSkipDuplicateFeedHiddenRaw(raw) {
+  var sig = getVVFeedHiddenRawSig(raw);
+  var now = Date.now();
+
+  if (!sig) return true;
+
+  if (sig === lastHandledFeedHiddenRawSig && now - lastHandledFeedHiddenRawAt < 5000) {
+    console.log('[VV][FEED] skip duplicated VV_FEED_HIDDEN_RAW');
+    return true;
+  }
+
+  lastHandledFeedHiddenRawSig = sig;
+  lastHandledFeedHiddenRawAt = now;
+
+  return false;
+}
+
+const VV_STATE_SYNC_CHANNEL_NAME = 'VV_PHONE_STATE_SYNC_V1';
+
+let vvStateBroadcastChannel = null;
+let vvStateBroadcastMuteUntil = 0;
+
+try {
+  vvStateBroadcastChannel = new BroadcastChannel(VV_STATE_SYNC_CHANNEL_NAME);
+
+  vvStateBroadcastChannel.onmessage = function (event) {
+    var data = event.data || {};
+
+    if (!data || data.type !== 'VV_STATE_CHANGED') return;
+
+    // 避免自己刚保存后立刻重复刷新
+    if (Date.now() < vvStateBroadcastMuteUntil) return;
+
+    console.log('[VV][STATE_SYNC] received state changed:', data.reason);
+
+    try {
+      if (typeof loadAll === 'function') {
+        loadAll();
+      }
+
+      if (typeof renderCurrentView === 'function') {
+        renderCurrentView();
+      } else {
+        // 兜底刷新当前可见页面
+        if (typeof renderContactList === 'function') renderContactList();
+        if (typeof renderChatList === 'function') renderChatList();
+        if (typeof renderFeedList === 'function') renderFeedList();
+        if (typeof renderMessages === 'function' && window.currentChatId) renderMessages();
+      }
+    } catch (err) {
+      console.warn('[VV][STATE_SYNC] reload/render failed:', err);
+    }
+  };
+} catch (err) {
+  console.warn('[VV][STATE_SYNC] BroadcastChannel unavailable:', err);
+}
+
+function broadcastVVStateChanged(reason) {
+  try {
+    vvStateBroadcastMuteUntil = Date.now() + 300;
+
+    if (vvStateBroadcastChannel) {
+      vvStateBroadcastChannel.postMessage({
+        type: 'VV_STATE_CHANGED',
+        reason: reason || '',
+        time: Date.now()
+      });
+    }
+  } catch (err) {
+    console.warn('[VV][STATE_SYNC] broadcast failed:', err);
+  }
+}
+
 var diaryData =
 JSON.parse(
   localStorage.getItem('st_diary_data')
@@ -2110,6 +2196,94 @@ function parseVVChatBlocks(raw, fallback = {}) {
   return chat;
 }
 
+function normalizeFeedKeyText(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[，。！？、,.!?；;：:]/g, '')
+    .trim();
+}
+
+function buildFeedCommentKey(item) {
+  item = item || {};
+  return [
+    normalizeFeedKeyText(item.from || item.author || ''),
+    normalizeFeedKeyText(item.text || item.content || ''),
+    normalizeFeedKeyText(item.replyTo || '')
+  ].join('|');
+}
+
+function buildFeedLikeKey(item) {
+  item = item || {};
+  return normalizeFeedKeyText(item.from || item.author || '');
+}
+
+function dedupeFeedComments(comments) {
+  const seen = {};
+  const result = [];
+
+  (comments || []).forEach(function (c) {
+    if (!c) return;
+
+    const from = String(c.from || c.author || '').trim();
+    const text = String(c.text || c.content || '').trim();
+    const replyTo = String(c.replyTo || '').trim();
+
+    if (!from || !text) return;
+
+    const key = buildFeedCommentKey({
+      from,
+      text,
+      replyTo
+    });
+
+    if (!key || key === '||') return;
+    if (seen[key]) return;
+
+    seen[key] = true;
+    result.push({
+      from,
+      text,
+      replyTo
+    });
+  });
+
+  return result;
+}
+
+function dedupeFeedLikes(likes) {
+  const seen = {};
+  const result = [];
+
+  (likes || []).forEach(function (l) {
+    if (!l) return;
+
+    const from = String(l.from || l.author || '').trim();
+    if (!from) return;
+
+    const key = buildFeedLikeKey({ from });
+    if (!key) return;
+    if (seen[key]) return;
+
+    seen[key] = true;
+    result.push({ from });
+  });
+
+  return result;
+}
+
+function readFeedField(block, key) {
+  block = String(block || '');
+  key = String(key || '');
+
+  const re = new RegExp(
+    '(?:^|\\n)\\s*' + key + '\\s*=\\s*([\\s\\S]*?)(?=\\n[a-zA-Z\\u4e00-\\u9fa5]+\\s*=|\\n\\[\\/|\\[\\/|$)',
+    'i'
+  );
+
+  const m = block.match(re);
+  return m ? String(m[1] || '').trim() : '';
+}
+
 function parseFeedSyncRaw(raw) {
   const result = {
     postId: '',
@@ -2120,61 +2294,58 @@ function parseFeedSyncRaw(raw) {
 
   if (!raw) return result;
 
-  const syncMatch = raw.match(/\[VV_FEED_SYNC\]([\s\S]*?)\[\/VV_FEED_SYNC\]/i);
+  const syncMatch = String(raw).match(/\[VV_FEED_SYNC\]([\s\S]*?)\[\/VV_FEED_SYNC\]/i);
   if (!syncMatch) return result;
 
   const block = syncMatch[1];
 
-  const postIdMatch = block.match(/postId\s*=\s*(.+)/i);
-  const timeMatch = block.match(/time\s*=\s*(.+)/i);
-
-  result.postId = postIdMatch ? postIdMatch[1].trim() : '';
-  result.time = timeMatch ? timeMatch[1].trim() : '';
+  result.postId = readFeedField(block, 'postId');
+  result.time = readFeedField(block, 'time');
 
   // =========================
   // 解析 AI 主动动态
   // =========================
 
-  // 改成取最后一个 [动态]
   const postBlocks = block.match(/\[动态\][\s\S]*?\[\/动态\]/gi) || [];
-  const latestPostBlock = postBlocks[postBlocks.length - 1];
+  let latestPostBlock = '';
+
+  // 取最后一个有 content 的 [动态]
+  for (let i = postBlocks.length - 1; i >= 0; i--) {
+    const innerMatch = postBlocks[i].match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+    const inner = innerMatch ? innerMatch[1] : '';
+    const content = readFeedField(inner, 'content');
+
+    if (content) {
+      latestPostBlock = postBlocks[i];
+      break;
+    }
+  }
 
   if (latestPostBlock) {
-
     const pbMatch = latestPostBlock.match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
     const pb = pbMatch ? pbMatch[1] : '';
 
-    const fromMatch = pb.match(/from\s*=\s*(.+)/i);
-    const bridgeNameMatch = pb.match(/bridgeName\s*=\s*(.+)/i);
-
-    // 多行安全 content
-    const contentMatch = pb.match(
-      /content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|$)/i
-    );
-
-    const photoMatch = pb.match(
-      /photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z]+\s*=|$)/i
-    );
+    const from = readFeedField(pb, 'from');
+    const bridgeName = readFeedField(pb, 'bridgeName');
+    const content = readFeedField(pb, 'content');
+    const photoText = readFeedField(pb, 'photo');
 
     result.post = {
-      from: fromMatch ? fromMatch[1].trim() : '',
-      bridgeName: bridgeNameMatch ? bridgeNameMatch[1].trim() : '',
-      content: contentMatch ? contentMatch[1].trim() : '',
+      from,
+      bridgeName,
+      content,
       photos: []
     };
 
-    // 提取模拟图片
-    if (photoMatch) {
-      const photoText = photoMatch[1].trim();
+    if (photoText) {
+      const imageMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
 
-      const imageMatches = [
-        ...photoText.matchAll(/\[图\d+:(.*?)\]/g)
-      ];
-
-      result.post.photos = imageMatches.map(m => ({
-        simulated: true,
-        desc: m[1].trim()
-      }));
+      result.post.photos = imageMatches.map(function (m) {
+        return {
+          simulated: true,
+          desc: String(m[1] || '').trim()
+        };
+      });
     }
   }
 
@@ -2182,41 +2353,55 @@ function parseFeedSyncRaw(raw) {
   // 解析互动
   // =========================
 
-  const interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi);
+  const interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi) || [];
+  const seenInteractionKeys = {};
 
-  if (interactionBlocks) {
-    interactionBlocks.forEach(function (ib) {
+  interactionBlocks.forEach(function (ib) {
+    const innerMatch = ib.match(/\[互动\]([\s\S]*?)\[\/互动\]/i);
+    const inner = innerMatch ? innerMatch[1] : ib;
 
-      const fromMatch = ib.match(/from\s*=\s*(.+)/i);
-      const actionMatch = ib.match(/action\s*=\s*(.+)/i);
+    const from = readFeedField(inner, 'from');
+    const action = readFeedField(inner, 'action').toLowerCase();
+    const content = readFeedField(inner, 'content');
+    const replyTo = readFeedField(inner, 'replyTo');
 
-      const contentMatch = ib.match(
-        /content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i
-      );
+    if (!from || !action) return;
 
-      const replyToMatch = ib.match(/replyTo\s*=\s*(.+)/i);
+    const item = {
+      from,
+      action
+    };
 
-      const from = fromMatch ? fromMatch[1].trim() : '';
-      const action = actionMatch ? actionMatch[1].trim().toLowerCase() : '';
+    if (action === 'comment') {
+      if (!content) return;
+      item.content = content;
+      item.text = content;
+    }
 
-      if (!from || !action) return;
+    if (replyTo) {
+      item.replyTo = replyTo;
+    }
 
-      const item = {
-        from,
-        action
-      };
+    let key = '';
 
-      if (action === 'comment' && contentMatch) {
-        item.content = contentMatch[1].trim();
-      }
+    if (action === 'comment') {
+      key = [
+        normalizeFeedKeyText(from),
+        normalizeFeedKeyText(content),
+        normalizeFeedKeyText(replyTo)
+      ].join('|');
+    } else if (action === 'like') {
+      key = 'like|' + normalizeFeedKeyText(from);
+    } else {
+      key = action + '|' + normalizeFeedKeyText(from) + '|' + normalizeFeedKeyText(content);
+    }
 
-      if (replyToMatch) {
-        item.replyTo = replyToMatch[1].trim();
-      }
+    if (!key) return;
+    if (seenInteractionKeys[key]) return;
 
-      result.interactions.push(item);
-    });
-  }
+    seenInteractionKeys[key] = true;
+    result.interactions.push(item);
+  });
 
   return result;
 }
@@ -2659,7 +2844,7 @@ function appendVVChatReplyToLocal(chatData, msgIndex) {
 function rebuildFeedPostsFromRaw(fullRaw) {
   if (!fullRaw) return;
 
-  var blocks = fullRaw.match(
+  var blocks = String(fullRaw).match(
     /\[VV_FEED_HIDDEN_DATA\]([\s\S]*?)\[\/VV_FEED_HIDDEN_DATA\]/g
   ) || [];
 
@@ -2668,90 +2853,206 @@ function rebuildFeedPostsFromRaw(fullRaw) {
 
   var changed = false;
 
-  blocks.forEach(function(block) {
+  blocks.forEach(function (block) {
     try {
       // 提取 postId
-      var postIdMatch = block.match(/postId\s*=\s*(.+)/i);
-      if (!postIdMatch) return;
-      var postId = postIdMatch[1].trim();
+      var postId = readFeedField(block, 'postId');
+      if (!postId) return;
 
       // 提取所有 [动态] 块，取最后一个有 content 的
       var dynBlocks = block.match(/\[动态\]([\s\S]*?)\[\/动态\]/gi) || [];
       var latestDyn = null;
+
       for (var i = dynBlocks.length - 1; i >= 0; i--) {
-        var contentCheck = dynBlocks[i].match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
-        if (contentCheck && contentCheck[1].trim()) {
+        var dynInnerMatch = dynBlocks[i].match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+        var dynInner = dynInnerMatch ? dynInnerMatch[1] : dynBlocks[i];
+        var contentCheck = readFeedField(dynInner, 'content');
+
+        if (contentCheck && contentCheck.trim()) {
           latestDyn = dynBlocks[i];
           break;
         }
       }
-      if (!latestDyn) return; // 没有有效内容，跳过
 
-      var fromMatch = latestDyn.match(/from\s*=\s*(.+)/i);
-      var bridgeNameMatch = latestDyn.match(/bridgeName\s*=\s*(.+)/i);
-      var timeMatch = latestDyn.match(/time\s*=\s*(.+)/i);
-      var contentMatch = latestDyn.match(/content\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
-      var photoMatch = latestDyn.match(/photo\s*=\s*([\s\S]*?)(?=\n[a-zA-Z\u4e00-\u9fa5]+\s*=|\[\/动态\]|$)/i);
+      if (!latestDyn) return;
 
-      var from = fromMatch ? fromMatch[1].trim() : '';
-      var bridgeName = bridgeNameMatch ? bridgeNameMatch[1].trim() : '';
-      var time = timeMatch ? timeMatch[1].trim() : '';
-      var content = contentMatch ? contentMatch[1].trim() : '';
+      var latestInnerMatch = latestDyn.match(/\[动态\]([\s\S]*?)\[\/动态\]/i);
+      var latestInner = latestInnerMatch ? latestInnerMatch[1] : latestDyn;
+
+      var from = readFeedField(latestInner, 'from');
+      var bridgeName = readFeedField(latestInner, 'bridgeName');
+      var time = readFeedField(latestInner, 'time');
+      var content = readFeedField(latestInner, 'content');
+      var photoText = readFeedField(latestInner, 'photo');
 
       // 提取模拟图片
       var photos = [];
-      if (photoMatch) {
-        var photoText = photoMatch[1].trim();
+      if (photoText) {
         var imgMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
-        photos = imgMatches.map(function(m) {
-          return { simulated: true, desc: m[1].trim() };
+        photos = imgMatches.map(function (m) {
+          return {
+            simulated: true,
+            desc: String(m[1] || '').trim()
+          };
         });
       }
 
-      // 提取互动
+      // 提取互动，并在 raw 层先去重
       var interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi) || [];
       var interactions = [];
-      interactionBlocks.forEach(function(ib) {
-        var ifrom = (ib.match(/from\s*=\s*(.+)/i) || [])[1];
-        var iaction = (ib.match(/action\s*=\s*(.+)/i) || [])[1];
-        var icontent = (ib.match(/content\s*=\s*([\s\S]*?)(?=\[\/互动\]|$)/i) || [])[1];
-        var ireplyTo = (ib.match(/replyTo\s*=\s*(.+)/i) || [])[1];
+      var seenInteractionKeys = {};
+
+      interactionBlocks.forEach(function (ib) {
+        var innerMatch = ib.match(/\[互动\]([\s\S]*?)\[\/互动\]/i);
+        var inner = innerMatch ? innerMatch[1] : ib;
+
+        var ifrom = readFeedField(inner, 'from');
+        var iaction = readFeedField(inner, 'action').toLowerCase();
+        var icontent = readFeedField(inner, 'content');
+        var ireplyTo = readFeedField(inner, 'replyTo');
+
         if (!ifrom || !iaction) return;
-        var item = { from: ifrom.trim(), action: iaction.trim().toLowerCase() };
-        if (item.action === 'comment' && icontent) item.text = icontent.trim();
-        if (ireplyTo) item.replyTo = ireplyTo.trim();
+
+        var item = {
+          from: ifrom,
+          action: iaction
+        };
+
+        var key = '';
+
+        if (iaction === 'comment') {
+          if (!icontent) return;
+
+          item.text = icontent;
+          item.content = icontent;
+
+          if (ireplyTo) {
+            item.replyTo = ireplyTo;
+          }
+
+          key = [
+            'comment',
+            normalizeFeedKeyText(ifrom),
+            normalizeFeedKeyText(icontent),
+            normalizeFeedKeyText(ireplyTo)
+          ].join('|');
+        } else if (iaction === 'like') {
+          key = [
+            'like',
+            normalizeFeedKeyText(ifrom)
+          ].join('|');
+        } else {
+          key = [
+            iaction,
+            normalizeFeedKeyText(ifrom),
+            normalizeFeedKeyText(icontent),
+            normalizeFeedKeyText(ireplyTo)
+          ].join('|');
+        }
+
+        if (!key) return;
+        if (seenInteractionKeys[key]) return;
+
+        seenInteractionKeys[key] = true;
         interactions.push(item);
       });
 
-      // 找现有动态（按 id 或 postId）
-      var existing = feedPosts.find(function(p) {
-        return p.id === postId || p.postId === postId;
+      // 找现有动态，按 id 或 postId
+      var existing = feedPosts.find(function (p) {
+        return String(p.id || '') === postId || String(p.postId || '') === postId;
       });
 
       if (existing) {
-        // 增量更新，不覆盖已有评论/点赞
+        // 更新动态主体
         if (content) existing.content = content;
         if (time) existing.time = time;
         if (bridgeName) existing.bridgeName = bridgeName;
         if (from) existing.author = from;
-        if (photos.length) existing.images = photos;
-        existing.id = postId; // 确保 id 字段统一
 
-        // 合并互动（不重复添加）
-        existing.comments = existing.comments || [];
-        existing.likes = existing.likes || [];
-        interactions.forEach(function(item) {
+        if (photos.length) {
+          existing.images = photos;
+        }
+
+        existing.id = postId;
+        existing.postId = postId;
+
+        existing.comments = Array.isArray(existing.comments) ? existing.comments : [];
+        existing.likes = Array.isArray(existing.likes) ? existing.likes : [];
+
+        // 先把已有的也去一次重，清理旧污染
+        existing.comments = dedupeFeedComments(existing.comments);
+        existing.likes = dedupeFeedLikes(existing.likes);
+
+        interactions.forEach(function (item) {
           if (item.action === 'like') {
-            if (!existing.likes.find(function(l) { return l.from === item.from; })) {
-              existing.likes.push({ from: item.from });
+            var likeKey = buildFeedLikeKey(item);
+
+            var hasLike = existing.likes.some(function (l) {
+              return buildFeedLikeKey(l) === likeKey;
+            });
+
+            if (!hasLike) {
+              existing.likes.push({
+                from: item.from
+              });
+              changed = true;
             }
           } else if (item.action === 'comment' && item.text) {
-            existing.comments.push({ from: item.from, text: item.text, replyTo: item.replyTo });
+            var commentItem = {
+              from: item.from,
+              text: item.text,
+              replyTo: item.replyTo || ''
+            };
+
+            var commentKey = buildFeedCommentKey(commentItem);
+
+            var hasComment = existing.comments.some(function (c) {
+              return buildFeedCommentKey(c) === commentKey;
+            });
+
+            if (!hasComment) {
+              existing.comments.push(commentItem);
+              changed = true;
+            }
           }
         });
+
+        // 合并后再去重一次
+        var beforeCommentLen = existing.comments.length;
+        var beforeLikeLen = existing.likes.length;
+
+        existing.comments = dedupeFeedComments(existing.comments);
+        existing.likes = dedupeFeedLikes(existing.likes);
+
+        if (existing.comments.length !== beforeCommentLen || existing.likes.length !== beforeLikeLen) {
+          changed = true;
+        }
+
+        // 主体字段更新也算 changed
         changed = true;
       } else {
-        // 新增（只有 hidden data 里有但 feedPosts 里没有的情况）
+        var newComments = interactions
+          .filter(function (i) {
+            return i.action === 'comment' && i.text;
+          })
+          .map(function (i) {
+            return {
+              from: i.from,
+              text: i.text,
+              replyTo: i.replyTo || ''
+            };
+          });
+
+        var newLikes = interactions
+          .filter(function (i) {
+            return i.action === 'like';
+          })
+          .map(function (i) {
+            return {
+              from: i.from
+            };
+          });
+
         feedPosts.unshift({
           id: postId,
           postId: postId,
@@ -2760,17 +3061,26 @@ function rebuildFeedPostsFromRaw(fullRaw) {
           time: time,
           content: content,
           images: photos,
-          comments: interactions.filter(function(i) { return i.action === 'comment'; })
-            .map(function(i) { return { from: i.from, text: i.text, replyTo: i.replyTo }; }),
-          likes: interactions.filter(function(i) { return i.action === 'like'; })
-            .map(function(i) { return { from: i.from }; })
+          comments: dedupeFeedComments(newComments),
+          likes: dedupeFeedLikes(newLikes)
         });
+
         changed = true;
       }
     } catch (err) {
       console.warn('[VV][FEED] parse block failed:', err);
     }
   });
+
+  // 最后一层保险：所有动态全局清理重复评论/点赞
+  if (Array.isArray(feedPosts)) {
+    feedPosts.forEach(function (post) {
+      if (!post) return;
+
+      post.comments = dedupeFeedComments(post.comments || []);
+      post.likes = dedupeFeedLikes(post.likes || []);
+    });
+  }
 
   if (changed) {
     saveAll();
@@ -2980,26 +3290,56 @@ async function handleVVChatSyncRaw(payload) {
 
   if (Array.isArray(contactList)) {
     let contact = contactList.find(i => String(i?.id || '') === incomingChatId);
+
+    const incomingAvatar =
+      String(parsed?.targetAvatarId || parsed?.avatar || parsed?.targetAvatar || '').trim();
+
     if (!contact) {
       contact = {
         id: incomingChatId,
         name: incomingName || '联系人',
         bridgeName: incomingName || '',
-        avatar: DEFAULT_AVATAR,
+        avatar: incomingAvatar || DEFAULT_AVATAR,
+        avatarId: incomingAvatar || DEFAULT_AVATAR,
         isSticky: false,
         lastTime: parsed?.time || getNowTime(),
         lastPreview: '',
         threadType: 'direct'
       };
+
       contactList.unshift(contact);
       console.log('[VV][SYNC_FLOW] created contact item =', contact);
     } else {
       if (incomingName && (!contact.name || contact.name === '联系人')) {
         contact.name = incomingName;
       }
+
       if (incomingName && !contact.bridgeName) {
         contact.bridgeName = incomingName;
       }
+
+      // 头像保护：只有旧头像为空/默认时，才允许同步头像补全
+      if (incomingAvatar) {
+        const oldAvatar = contact.avatar || contact.avatarId || '';
+
+        if (isDefaultOrEmptyAvatarRef(oldAvatar)) {
+          contact.avatar = incomingAvatar;
+          contact.avatarId = incomingAvatar;
+          console.log('[VV][AVATAR] filled empty/default target avatar from sync:', incomingAvatar);
+        } else {
+          console.log('[VV][AVATAR] keep existing custom target avatar:', oldAvatar);
+        }
+      }
+
+      // 如果 avatar 和 avatarId 只有一个有值，补齐另一个，但不覆盖
+      if (contact.avatar && !contact.avatarId) {
+        contact.avatarId = contact.avatar;
+      }
+
+      if (contact.avatarId && !contact.avatar) {
+        contact.avatar = contact.avatarId;
+      }
+
       console.log('[VV][SYNC_FLOW] updated contact item =', contact);
     }
   } else {
@@ -3119,11 +3459,11 @@ async function flushPendingVVChatSyncQueue() {
   saveAll();
 }
 
-async function triggerSlash(cmd, options) {
+async function triggerSlash(cmd, options = {}) {
   if (!cmd) return false;
 
   if (VV_BRIDGE_CONFIG.debug) {
-    console.log('[VV] 触发指令:', cmd);
+    console.log('[VV] 触发指令:', cmd, 'options=', options);
   }
 
   try {
@@ -3131,12 +3471,24 @@ async function triggerSlash(cmd, options) {
       const requestId = 'vv-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       const viewId = window.__vv_view_id || '';
 
+      let done = false;
+      let timer = null;
+
       function cleanup() {
+        if (done) return;
+        done = true;
+
         window.removeEventListener('message', onMessage);
+
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
       }
 
       function onMessage(event) {
         const data = event.data;
+
         if (!data || typeof data !== 'object') return;
         if (data.type !== 'VV_EXECUTE_RESULT') return;
         if (data.requestId !== requestId) return;
@@ -3160,24 +3512,43 @@ async function triggerSlash(cmd, options) {
 
       window.addEventListener('message', onMessage);
 
-      window.parent.postMessage({
+      const payload = {
         type: 'VV_EXECUTE_SLASH',
         requestId,
         viewId,
         command: cmd,
-        feedMode: !!(options && options.feedMode),
-        annotationMode: !!(options && options.annotationMode),
-        feedMeta: (options && options.feedMeta) || null,
-        userInteraction: (options && options.userInteraction) || null
-      }, '*');
+
+        // 动态
+        feedMode: !!options.feedMode,
+        feedMeta: options.feedMeta || null,
+        userInteraction: options.userInteraction || null,
+
+        // 注释/标注
+        annotationMode: !!options.annotationMode,
+
+        // 电话
+        callMode: !!options.callMode,
+        callPhase: options.callPhase || '',
+        chatId: options.chatId || '',
+        targetName: options.targetName || ''
+      };
+
+      window.parent.postMessage(payload, '*');
 
       console.log('[VV] posted VV_EXECUTE_SLASH', {
         requestId,
-        viewId
+        viewId,
+        feedMode: payload.feedMode,
+        annotationMode: payload.annotationMode,
+        callMode: payload.callMode,
+        callPhase: payload.callPhase,
+        chatId: payload.chatId,
+        targetName: payload.targetName
       });
 
-      setTimeout(() => {
+      timer = setTimeout(() => {
         cleanup();
+
         resolve({
           ok: false,
           error: 'timeout'
@@ -3743,7 +4114,7 @@ function saveAll(retryMode = 'normal') {
     safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
     safeSetItemJSON('st_my_profile', myProfile),
     safeSetItemJSON('st_wallet_data', walletData),
-    safeSetItemJSON('st_diary_data',diaryData)
+    safeSetItemJSON('st_diary_data', diaryData)
   ];
 
   const success = okList.every(Boolean);
@@ -3765,7 +4136,7 @@ function saveAll(retryMode = 'normal') {
       safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
       safeSetItemJSON('st_my_profile', myProfile),
       safeSetItemJSON('st_wallet_data', walletData),
-      safeSetItemJSON('st_diary_data',diaryData)
+      safeSetItemJSON('st_diary_data', diaryData)
     ];
 
     if (!secondTry.every(Boolean)) {
@@ -3773,7 +4144,12 @@ function saveAll(retryMode = 'normal') {
       return false;
     }
 
+    broadcastVVStateChanged('saveAll-aggressive-success');
     return true;
+  }
+
+  if (!success) {
+    return false;
   }
 
   if (STORAGE_DEBUG) {
@@ -3791,6 +4167,7 @@ function saveAll(retryMode = 'normal') {
     } catch (err) {}
   }
 
+  broadcastVVStateChanged('saveAll-success');
   return true;
 }
 
@@ -7597,7 +7974,12 @@ async function simulateOutgoingCall(contactId) {
       promptText
     });
 
-    slashOk = await triggerSlash(cmd);
+    slashOk = await triggerSlash(cmd, {
+      callMode: true,
+      callPhase: 'calling',
+      chatId: contactId,
+      targetName: contact.name || contact.bridgeName || ''
+    });
   }
 
   if (!slashOk || VV_BRIDGE_CONFIG.callMode === 'local') {
@@ -9635,6 +10017,7 @@ function initVVHostNavigationBridge() {
       }     
 
       if (type === 'VV_FEED_HIDDEN_RAW') {
+        if (shouldSkipDuplicateFeedHiddenRaw(data.raw || '')) return;
         console.log('[VV][FEED] received raw from host, length =', (data.raw || '').length);
         rebuildFeedPostsFromRaw(data.raw || '');
         return;
@@ -11323,6 +11706,23 @@ function renderAiDiaryWriteRoleList() {
   container.innerHTML = html;
 
   resolveDiaryWriteRoleAvatars(container);
+}
+
+function isDefaultOrEmptyAvatarRef(ref) {
+  const s = String(ref || '').trim();
+
+  if (!s) return true;
+
+  return (
+    s === 'default' ||
+    s === 'DEFAULT_AVATAR' ||
+    s === 'default_avatar' ||
+    s === 'current_target_avatar' ||
+    s === String(DEFAULT_AVATAR || '').trim() ||
+    s.includes('data:image/svg+xml;base64') ||
+    s.includes('default-avatar') ||
+    s.includes('placeholder')
+  );
 }
 
 function resolveDiaryWriteRoleAvatars(container) {

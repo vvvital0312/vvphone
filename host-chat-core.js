@@ -8,7 +8,7 @@
 
   const config = window.VV_HOST_CONFIG || {};
 
-  const VVHOST_CHAT_VERSION = config.version || 'CHAT-CALL-SAME-FLOOR-005';
+  const VVHOST_CHAT_VERSION = config.version || 'CHAT-ALL-IN-ONE-006';
   const PHONE_ORIGIN = config.phoneOrigin || 'https://vvvital0312.github.io';
   const PHONE_FRAME_ID = config.phoneFrameId || 'phoneFrame';
   const HOST_TYPE = config.hostType || 'chat';
@@ -16,8 +16,12 @@
   const CURRENT_CHAT_ID = String(config.currentChatId || '').trim();
   const CURRENT_TARGET = String(config.currentTarget || '').trim();
 
+  let lastExpectedChatId = CURRENT_CHAT_ID || '';
   let lastVVChatSyncRaw = '';
   let lastViewId = '';
+  let lastExpectedDiaryId = '';
+  let lastExpectedDiaryAuthorId = '';
+  let lastVVDiarySyncRaw = '';
 
   console.log('[VVHOST_CHAT VERSION]', VVHOST_CHAT_VERSION);
   console.log('[VVHOST_CHAT] loaded external core', location.href);
@@ -108,6 +112,123 @@
     return null;
   }
 
+  function normalizeFeedTextForKey(text) {
+    return String(text || '')
+      .replace(/\s+/g, ' ')
+      .replace(/[，。！？、,.!?；;：:]/g, '')
+      .trim();
+  }
+
+  function getFeedField(block, key) {
+    block = String(block || '');
+    key = String(key || '');
+
+    var re = new RegExp(
+      '(?:^|\\n)\\s*' + key + '\\s*=\\s*([\\s\\S]*?)(?=\\n[a-zA-Z\\u4e00-\\u9fa5]+\\s*=|\\n\\[\\/|\\[\\/|$)',
+      'i'
+    );
+
+    var m = block.match(re);
+    return m ? String(m[1] || '').trim() : '';
+  }
+
+  function buildInteractionKey(block) {
+    var from = getFeedField(block, 'from');
+    var action = getFeedField(block, 'action').toLowerCase();
+    var content = getFeedField(block, 'content');
+    var replyTo = getFeedField(block, 'replyTo');
+
+    return [
+      normalizeFeedTextForKey(action),
+      normalizeFeedTextForKey(from),
+      normalizeFeedTextForKey(content),
+      normalizeFeedTextForKey(replyTo)
+    ].join('|');
+  }
+
+  function getExistingInteractionKeyMap(feedHiddenText) {
+    var map = {};
+    var raw = String(feedHiddenText || '');
+    var blocks = raw.match(/\[互动\][\s\S]*?\[\/互动\]/g) || [];
+
+    blocks.forEach(function (block) {
+      var key = buildInteractionKey(block);
+      if (key && key !== '|||') {
+        map[key] = true;
+      }
+    });
+
+    return map;
+  }
+
+  function dedupeInteractionBlocksForAppend(currentMes, interactionBlocks) {
+    var existingMap = getExistingInteractionKeyMap(currentMes);
+    var localMap = {};
+    var result = [];
+
+    (interactionBlocks || []).forEach(function (block) {
+      var key = buildInteractionKey(block);
+
+      if (!key || key === '|||') return;
+
+      if (existingMap[key]) {
+        console.log('[VVHOST_FEED_DEDUPE] skip existing interaction:', key);
+        return;
+      }
+
+      if (localMap[key]) {
+        console.log('[VVHOST_FEED_DEDUPE] skip duplicated in same reply:', key);
+        return;
+      }
+
+      localMap[key] = true;
+      result.push(block);
+    });
+
+    return result;
+  }
+
+  function findHostMessageIndexByMarkers() {
+    var ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) return -1;
+
+    for (var i = ctx.chat.length - 1; i >= 0; i--) {
+      var msg = ctx.chat[i];
+      if (!msg) continue;
+
+      var text = String(msg.mes || '');
+
+      if (
+        text.includes('[VV_CHAT_SYNC]') ||
+        text.includes('[/VV_CHAT_SYNC]') ||
+        text.includes('VV_CALL_HIDDEN_DATA') ||
+        text.includes('VV_FEED_HIDDEN_DATA') ||
+        text.includes('VV_ANNOTATION_SYNC') ||
+        text.includes('vv' + '手机') ||
+        text.includes('vv' + 'phone') ||
+        text.includes('vvvital0312.github.io/' + 'vvphone') ||
+        text.includes('vvvital0312.github.io/') ||
+        text.includes('phone' + 'Frame') ||
+        text.includes('VV' + 'HOST')
+      ) {
+        console.log('[VVHOST_CHAT] found host msg, index:', i, 'snippet:', text.substring(0, 80));
+        return i;
+      }
+    }
+
+    for (var j = ctx.chat.length - 1; j >= 0; j--) {
+      var m = ctx.chat[j];
+
+      if (m && !m.is_user) {
+        console.log('[VVHOST_CHAT] fallback: using latest AI msg, index:', j);
+        return j;
+      }
+    }
+
+    return -1;
+  }
+
   function extractChatIdFromCommand(command) {
     const raw = String(command || '');
 
@@ -116,6 +237,36 @@
       raw.match(/(?:^|\n)\s*chatId\s*[=:]\s*([^\n\r]+)/i);
 
     return m ? String(m[1] || '').trim() : '';
+  }
+
+  function extractDiaryIdFromCommand(command) {
+    const raw = String(command || '');
+
+    const m =
+      raw.match(/(?:^|\n)\s*diaryId\s*[=:]\s*([^\n\r]+)/i) ||
+      raw.match(/(?:^|\n)\s*日记ID\s*[=:：]\s*([^\n\r]+)/i);
+
+    return m ? String(m[1] || '').trim() : '';
+  }
+
+  function extractDiaryAuthorIdFromCommand(command) {
+    const raw = String(command || '');
+
+    const m =
+      raw.match(/(?:^|\n)\s*authorId\s*[=:]\s*([^\n\r]+)/i) ||
+      raw.match(/(?:^|\n)\s*作者ID\s*[=:：]\s*([^\n\r]+)/i);
+
+    return m ? String(m[1] || '').trim() : '';
+  }
+
+  function isDiaryCommand(command) {
+    const raw = String(command || '');
+
+    return (
+      raw.includes('[VV_DIARY_SYNC]') ||
+      /写一篇日记/.test(raw) ||
+      /写日记/.test(raw)
+    );
   }
 
   function extractValidVVChatSyncBlock(text, expectedChatId) {
@@ -160,6 +311,89 @@
     return block;
   }
 
+  function extractValidVVDiarySyncBlock(text, expectedDiaryId, expectedAuthorId) {
+    const raw = String(text || '');
+
+    if (!raw.includes('[VV_DIARY_SYNC]')) return '';
+    if (!raw.includes('[/VV_DIARY_SYNC]')) return '';
+
+    const match = raw.match(/\[VV_DIARY_SYNC\][\s\S]*?\[\/VV_DIARY_SYNC\]/i);
+    if (!match) return '';
+
+    const block = String(match[0] || '').trim();
+
+    if (expectedDiaryId) {
+      const ok =
+        block.includes('diaryId=' + expectedDiaryId) ||
+        block.includes('diaryId: ' + expectedDiaryId) ||
+        block.includes('日记ID=' + expectedDiaryId) ||
+        block.includes('日记ID：' + expectedDiaryId);
+
+      if (!ok) {
+        console.warn('[VVHOST_CHAT][DIARY] diaryId mismatch, expected=', expectedDiaryId);
+        return '';
+      }
+    }
+
+    if (expectedAuthorId) {
+      const ok =
+        block.includes('authorId=' + expectedAuthorId) ||
+        block.includes('authorId: ' + expectedAuthorId) ||
+        block.includes('作者ID=' + expectedAuthorId) ||
+        block.includes('作者ID：' + expectedAuthorId);
+
+      if (!ok) {
+        console.warn('[VVHOST_CHAT][DIARY] authorId mismatch but ignored', {
+          expected: expectedAuthorId
+        });
+      }
+    }
+
+    if (!/title\s*[=:：]/i.test(block)) {
+      console.warn('[VVHOST_CHAT][DIARY] missing title');
+      return '';
+    }
+
+    if (!/weather\s*[=:：]/i.test(block)) {
+      console.warn('[VVHOST_CHAT][DIARY] missing weather');
+      return '';
+    }
+
+    if (!/paragraph\s*[=:：]/i.test(block)) {
+      console.warn('[VVHOST_CHAT][DIARY] missing paragraph');
+      return '';
+    }
+
+    return block;
+  }
+
+  function extractValidVVAnnotationSyncBlock(text) {
+    const raw = String(text || '');
+
+    if (!raw.includes('[VV_ANNOTATION_SYNC]')) return '';
+    if (!raw.includes('[/VV_ANNOTATION_SYNC]')) return '';
+
+    const match = raw.match(/\[VV_ANNOTATION_SYNC\][\s\S]*?\[\/VV_ANNOTATION_SYNC\]/i);
+    if (!match) return '';
+
+    const block = String(match[0] || '').trim();
+
+    if (!/diaryId\s*[=:]/i.test(block)) return '';
+    if (!/annotationId\s*[=:]/i.test(block)) return '';
+
+    return block;
+  }
+
+  function extractValidVVFeedSyncBlock(text) {
+    const raw = String(text || '');
+
+    if (!raw.includes('[VV_FEED_SYNC]')) return '';
+    if (!raw.includes('[/VV_FEED_SYNC]')) return '';
+
+    const match = raw.match(/\[VV_FEED_SYNC\][\s\S]*?\[\/VV_FEED_SYNC\]/i);
+    return match ? String(match[0]).trim() : '';
+  }
+
   function extractValidVVCallSyncBlock(text) {
     const raw = String(text || '');
 
@@ -184,13 +418,13 @@
     if (!syncBlock) return false;
 
     lastVVChatSyncRaw = syncBlock;
-
+    if (chatId) lastExpectedChatId = chatId;
     if (viewId) lastViewId = viewId;
 
     return postToPhone({
       type: 'VVPHONE_CHAT_SYNC',
       raw: syncBlock,
-      chatId: chatId || CURRENT_CHAT_ID || '',
+      chatId: chatId || lastExpectedChatId || CURRENT_CHAT_ID || '',
       viewId: viewId || lastViewId || '',
       msgIndex: msgIndex !== undefined ? msgIndex : -1
     });
@@ -202,7 +436,7 @@
     return postToPhone({
       type: 'VVPHONE_CALL_SYNC',
       raw: raw,
-      chatId: chatId || CURRENT_CHAT_ID || '',
+      chatId: chatId || lastExpectedChatId || CURRENT_CHAT_ID || '',
       viewId: viewId || lastViewId || ''
     });
   }
@@ -213,6 +447,59 @@
     return postToPhone({
       type: 'VVPHONE_INCOMING_CALL',
       raw: raw,
+      viewId: viewId || lastViewId || ''
+    });
+  }
+
+  function postFeedSyncToPhone(block, viewId) {
+    if (!block) return false;
+
+    return postToPhone({
+      type: 'VVPHONE_FEED_SYNC',
+      raw: block,
+      viewId: viewId || lastViewId || ''
+    });
+  }
+
+  function postDiarySyncToPhone(raw, diaryId, authorId, viewId) {
+    if (!raw) return false;
+
+    const rawText = String(raw || '');
+
+    const diaryIdMatch =
+      rawText.match(/(?:^|\n)\s*diaryId\s*[=:：]\s*([^\n\r]+)/i) ||
+      rawText.match(/(?:^|\n)\s*日记ID\s*[=:：]\s*([^\n\r]+)/i);
+
+    const authorIdMatch =
+      rawText.match(/(?:^|\n)\s*authorId\s*[=:：]\s*([^\n\r]+)/i) ||
+      rawText.match(/(?:^|\n)\s*作者ID\s*[=:：]\s*([^\n\r]+)/i);
+
+    const realDiaryId = diaryIdMatch ? String(diaryIdMatch[1] || '').trim() : diaryId;
+    const realAuthorId = authorIdMatch ? String(authorIdMatch[1] || '').trim() : authorId;
+
+    lastVVDiarySyncRaw = raw;
+
+    if (realDiaryId) lastExpectedDiaryId = realDiaryId;
+    if (realAuthorId) lastExpectedDiaryAuthorId = realAuthorId;
+    if (viewId) lastViewId = viewId;
+
+    return postToPhone({
+      type: 'VVPHONE_DIARY_SYNC',
+      raw: raw,
+      diaryId: realDiaryId || lastExpectedDiaryId || '',
+      authorId: realAuthorId || lastExpectedDiaryAuthorId || '',
+      viewId: viewId || lastViewId || ''
+    });
+  }
+
+  function postAnnotationSyncToPhone(raw, diaryId, annotationId, viewId) {
+    if (!raw) return false;
+
+    return postToPhone({
+      type: 'VVPHONE_ANNOTATION_SYNC',
+      raw: raw,
+      diaryId: diaryId || '',
+      annotationId: annotationId || '',
       viewId: viewId || lastViewId || ''
     });
   }
@@ -229,41 +516,7 @@
     var hostMessageIndex = -1;
 
     function findHostMessageIndex() {
-      var ctx = getCtx();
-
-      if (!ctx || !Array.isArray(ctx.chat)) return -1;
-
-      for (var i = ctx.chat.length - 1; i >= 0; i--) {
-        var msg = ctx.chat[i];
-        if (!msg) continue;
-
-        var text = String(msg.mes || '');
-
-        if (
-          text.includes('[VV_CHAT_SYNC]') ||
-          text.includes('[/VV_CHAT_SYNC]') ||
-          text.includes('VV_CALL_HIDDEN_DATA') ||
-          text.includes('vv' + '手机') ||
-          text.includes('vv' + 'phone') ||
-          text.includes('vvvital0312.github.io/' + 'vvphone') ||
-          text.includes('phone' + 'Frame') ||
-          text.includes('VV' + 'HOST')
-        ) {
-          console.log('[CALL_INTERCEPT] found host msg, index:', i, 'snippet:', text.substring(0, 80));
-          return i;
-        }
-      }
-
-      for (var j = ctx.chat.length - 1; j >= 0; j--) {
-        var m = ctx.chat[j];
-
-        if (m && !m.is_user) {
-          console.log('[CALL_INTERCEPT] fallback: using latest AI msg, index:', j);
-          return j;
-        }
-      }
-
-      return -1;
+      return findHostMessageIndexByMarkers();
     }
 
     function appendCallDataToHostMessage(newContent) {
@@ -287,7 +540,9 @@
       );
 
       var hiddenBlock =
-        '\n<div class="vv-call-hidden" style="display:none"></div>\n';
+        '\n<div class="vv-call-hidden" style="display:none">[VV_CALL_HIDDEN_DATA]\n' +
+        String(newContent || '') +
+        '\n[/VV_CALL_HIDDEN_DATA]</div>\n';
 
       msg.mes = currentMes.trimEnd() + hiddenBlock;
 
@@ -684,7 +939,504 @@
 
   console.log('[VVHOST_CHAT] VV_CALL_INTERCEPTOR loaded');
 
-  function pollForAssistantReply(chatId, viewId, timeout) {
+  var VV_FEED_INTERCEPTOR = (function () {
+    var isActive = false;
+    var hostMessageIndex = -1;
+    var eventHandler = null;
+    var processedMessageIds = {};
+
+    function findHostMessageIndex() {
+      return findHostMessageIndexByMarkers();
+    }
+
+    function start(options) {
+      if (isActive) {
+        console.warn('[FEED_INTERCEPT] already active');
+        return false;
+      }
+
+      var ctx = getCtx();
+
+      if (!ctx) {
+        console.error('[FEED_INTERCEPT] cannot get ST context');
+        return false;
+      }
+
+      processedMessageIds = {};
+      hostMessageIndex = findHostMessageIndex();
+
+      if (hostMessageIndex < 0) {
+        console.error('[FEED_INTERCEPT] no host msg floor found');
+        return false;
+      }
+
+      console.log('[FEED_INTERCEPT] started, host index:', hostMessageIndex);
+
+      eventHandler = function (messageIndex) {
+        handleInterceptedMessage(messageIndex);
+      };
+
+      try {
+        ctx.eventSource.on(ctx.eventTypes.MESSAGE_RECEIVED, eventHandler);
+      } catch (e) {
+        console.error('[FEED_INTERCEPT] bind event failed:', e);
+        return false;
+      }
+
+      isActive = true;
+      return true;
+    }
+
+    function stop() {
+      if (!isActive) return;
+
+      var ctx = getCtx();
+
+      if (ctx && eventHandler) {
+        try {
+          ctx.eventSource.removeListener(ctx.eventTypes.MESSAGE_RECEIVED, eventHandler);
+        } catch (e) {
+          try {
+            ctx.eventSource.off(ctx.eventTypes.MESSAGE_RECEIVED, eventHandler);
+          } catch (e2) {}
+        }
+      }
+
+      eventHandler = null;
+      isActive = false;
+      processedMessageIds = {};
+
+      console.log('[FEED_INTERCEPT] stopped');
+    }
+
+    async function handleInterceptedMessage(messageIndex) {
+      var ctx = getCtx();
+
+      if (!ctx || !isActive) return;
+
+      var msg = ctx.chat[messageIndex];
+
+      if (!msg || msg.is_user) return;
+
+      if (messageIndex === hostMessageIndex) {
+        console.log('[FEED_INTERCEPT] skipping host msg floor');
+        return;
+      }
+
+      var msgKey = messageIndex + '_' + String(msg.mes || '').length;
+
+      if (processedMessageIds[msgKey]) {
+        console.log('[FEED_INTERCEPT] already processed:', msgKey);
+        return;
+      }
+
+      processedMessageIds[msgKey] = true;
+
+      var rawContent = String(msg.mes || '');
+      console.log('[FEED_INTERCEPT] intercepted AI reply, index:', messageIndex);
+
+      stop();
+
+      if (!rawContent.includes('[VV_FEED_SYNC]')) {
+        console.warn('[FEED_INTERCEPT] no VV_FEED_SYNC in reply, skipping');
+        return;
+      }
+
+      //postFeedSyncToPhone(rawContent, '');
+
+      try {
+        var hostMsg = ctx.chat[hostMessageIndex];
+
+        if (!hostMsg) {
+          console.warn('[FEED_INTERCEPT] host message not found, index:', hostMessageIndex);
+          await safeDeleteFeedFloor(messageIndex);
+          return;
+        }
+
+        var currentMes = String(hostMsg.mes || '');
+
+        var postBlockMatch = rawContent.match(/\[动态\][\s\S]*?\[\/动态\]/);
+        var rawInteractionBlocks = rawContent.match(/\[互动\][\s\S]*?\[\/互动\]/g) || [];
+        var interactionBlocks = dedupeInteractionBlocksForAppend(currentMes, rawInteractionBlocks);
+
+        var postIdMatch =
+          rawContent.match(/(?:^|\n)\s*postId\s*=\s*([^\n\r]+)/i) ||
+          rawContent.match(/postId\s*=\s*([^\s\n\r]+)/i);
+
+        var targetPostId = postIdMatch ? String(postIdMatch[1] || '').trim() : '';
+
+        if (!postBlockMatch && interactionBlocks.length === 0) {
+          console.log('[FEED_INTERCEPT] no new [动态] or [互动] blocks after dedupe');
+          await safeDeleteFeedFloor(messageIndex);
+          return;
+        }
+
+        var changed = false;
+
+        if (targetPostId && currentMes.includes('postId=' + targetPostId)) {
+          var parts = currentMes.split('[/VV_FEED_HIDDEN_DATA]');
+          var inserted = false;
+
+          for (var p = 0; p < parts.length - 1; p++) {
+            if (parts[p].includes('postId=' + targetPostId) && !inserted) {
+              var appendText = '';
+
+              if (postBlockMatch) {
+                var alreadyHasPost =
+                  parts[p].includes('postId=' + targetPostId) &&
+                  parts[p].includes('[动态]');
+
+                if (!alreadyHasPost) {
+                  appendText += '\n' + postBlockMatch[0] + '\n';
+                } else {
+                  console.log('[VVHOST_FEED_DEDUPE] skip duplicated [动态] for postId:', targetPostId);
+                }
+              }
+
+              if (interactionBlocks.length > 0) {
+                appendText += '\n' + interactionBlocks.join('\n') + '\n';
+              }
+
+              if (appendText.trim()) {
+                parts[p] = parts[p] + appendText;
+                inserted = true;
+                changed = true;
+              }
+            }
+          }
+
+          currentMes = parts.join('[/VV_FEED_HIDDEN_DATA]');
+        } else {
+          var fallbackAppendText = '';
+
+          if (postBlockMatch) {
+            var rawPostIdMatch = postBlockMatch[0].match(/postId\s*=\s*([^\n\r]+)/i);
+            var rawPostId = rawPostIdMatch ? String(rawPostIdMatch[1] || '').trim() : '';
+            var alreadyHasRawPost = rawPostId && currentMes.includes('postId=' + rawPostId);
+
+            if (!alreadyHasRawPost) {
+              fallbackAppendText += '\n' + postBlockMatch[0] + '\n';
+            } else {
+              console.log('[VVHOST_FEED_DEDUPE] skip duplicated fallback [动态] for postId:', rawPostId);
+            }
+          }
+
+          if (interactionBlocks.length > 0) {
+            fallbackAppendText += '\n' + interactionBlocks.join('\n') + '\n';
+          }
+
+          if (fallbackAppendText.trim()) {
+            if (currentMes.includes('[/VV_FEED_HIDDEN_DATA]')) {
+              currentMes = currentMes.replace(
+                /\[\/VV_FEED_HIDDEN_DATA\](?![\s\S]*\[\/VV_FEED_HIDDEN_DATA\])/,
+                fallbackAppendText + '\n[/VV_FEED_HIDDEN_DATA]'
+              );
+            } else {
+              var fallbackPostId = targetPostId || ('feed_' + Date.now());
+
+              currentMes =
+                currentMes.trimEnd() +
+                '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                'postId=' + fallbackPostId + '\n' +
+                fallbackAppendText +
+                '\n[/VV_FEED_HIDDEN_DATA]</div>';
+            }
+
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          hostMsg.mes = currentMes;
+
+          var saveCtx = getCtx();
+
+          if (saveCtx && typeof saveCtx.saveChat === 'function') {
+            try {
+              saveCtx.saveChat();
+            } catch (e) {}
+          }
+
+          console.log('[FEED_INTERCEPT] appended feed sync for postId:', targetPostId);
+
+          pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
+        } else {
+          console.log('[FEED_INTERCEPT] no hidden data changed, skip save/post');
+        }
+      } catch (e) {
+        console.error('[FEED_INTERCEPT] append to host failed:', e);
+      }
+
+      await safeDeleteFeedFloor(messageIndex);
+    }
+
+    async function safeDeleteFeedFloor(aiMessageIndex) {
+      var ctx = getCtx();
+
+      if (!ctx || !Array.isArray(ctx.chat)) return;
+
+      var root = getRoot();
+      var toDelete = [];
+
+      for (var i = ctx.chat.length - 1; i >= 0; i--) {
+        var m = ctx.chat[i];
+
+        if (!m) continue;
+        if (i === hostMessageIndex) continue;
+
+        if (!m.is_user) {
+          var text = String(m.mes || m.message || '');
+
+          if (text.includes('[VV_FEED_SYNC]') || text.includes('[/VV_FEED_SYNC]')) {
+            toDelete.push(i);
+            continue;
+          }
+        }
+
+        if (m.is_user) {
+          var userText = String(m.mes || m.message || '');
+
+          if (
+            userText.includes('朋友圈动态发布') ||
+            userText.includes('VV_FEED_SYNC') ||
+            userText.includes('vv_feed')
+          ) {
+            toDelete.push(i);
+            continue;
+          }
+        }
+
+        if (ctx.chat.length - 1 - i > 10) break;
+      }
+
+      console.log('[FEED_INTERCEPT] floors to delete:', toDelete);
+
+      toDelete.sort(function (a, b) {
+        return b - a;
+      });
+
+      for (var j = 0; j < toDelete.length; j++) {
+        var delIndex = toDelete[j];
+
+        try {
+          var domEl = root.document.querySelector('[mesid="' + delIndex + '"]');
+
+          if (domEl) {
+            domEl.style.display = 'none';
+            domEl.remove();
+          }
+
+          if (ctx.chat[delIndex]) {
+            ctx.chat.splice(delIndex, 1);
+          }
+
+          console.log('[FEED_INTERCEPT] deleted floor:', delIndex);
+        } catch (e) {
+          console.error('[FEED_INTERCEPT] delete error:', e);
+        }
+      }
+
+      try {
+        var allMes = root.document.querySelectorAll('#chat .mes');
+
+        allMes.forEach(function (el, idx) {
+          el.setAttribute('mesid', idx);
+        });
+      } catch (e) {
+        console.warn('[FEED_INTERCEPT] re-index mesid failed:', e);
+      }
+
+      if (typeof ctx.saveChat === 'function') {
+        try {
+          ctx.saveChat();
+        } catch (e) {}
+      }
+
+      console.log('[FEED_INTERCEPT] deletion done');
+    }
+
+    return {
+      start: start,
+      stop: stop,
+      isActive: function () {
+        return isActive;
+      }
+    };
+  })();
+
+  async function safeDeleteDiaryFloors(aiMessageIndex) {
+    var ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) return;
+
+    var root = getRoot();
+
+    console.log('[DIARY_INTERCEPT] start deleting floors, aiIndex:', aiMessageIndex, 'total:', ctx.chat.length);
+
+    var toDelete = [];
+
+    for (var i = ctx.chat.length - 1; i >= 0; i--) {
+      var m = ctx.chat[i];
+
+      if (!m) continue;
+
+      var text = String(m.mes || m.message || '');
+
+      if (!m.is_user) {
+        if (
+          text.includes('[VV_DIARY_SYNC]') ||
+          text.includes('[/VV_DIARY_SYNC]')
+        ) {
+          toDelete.push(i);
+          continue;
+        }
+      }
+
+      if (m.is_user) {
+        if (
+          text.includes('VV_DIARY_SYNC') ||
+          text.includes('diaryId=') ||
+          text.includes('authorId=') ||
+          text.includes('写一篇日记') ||
+          text.includes('写日记')
+        ) {
+          toDelete.push(i);
+          continue;
+        }
+      }
+
+      if (ctx.chat.length - 1 - i > 10) break;
+    }
+
+    console.log('[DIARY_INTERCEPT] floors to delete:', toDelete);
+
+    if (!toDelete.length) return;
+
+    toDelete.sort(function (a, b) {
+      return b - a;
+    });
+
+    for (var j = 0; j < toDelete.length; j++) {
+      var delIndex = toDelete[j];
+
+      try {
+        var domEl = root.document.querySelector('[mesid="' + delIndex + '"]');
+
+        if (domEl) {
+          domEl.style.display = 'none';
+          domEl.remove();
+          console.log('[DIARY_INTERCEPT] DOM removed, mesid:', delIndex);
+        }
+
+        if (ctx.chat[delIndex]) {
+          ctx.chat.splice(delIndex, 1);
+          console.log('[DIARY_INTERCEPT] chat array removed index:', delIndex);
+        }
+      } catch (e) {
+        console.error('[DIARY_INTERCEPT] delete floor error:', e);
+      }
+    }
+
+    try {
+      var allMes = root.document.querySelectorAll('#chat .mes');
+
+      allMes.forEach(function (el, idx) {
+        el.setAttribute('mesid', idx);
+      });
+    } catch (e) {
+      console.warn('[DIARY_INTERCEPT] re-index mesid failed:', e);
+    }
+
+    if (typeof ctx.saveChat === 'function') {
+      try {
+        ctx.saveChat();
+      } catch (e) {}
+    }
+
+    console.log('[DIARY_INTERCEPT] deletion done, remaining floors:', ctx.chat.length);
+  }
+
+  async function appendAnnotationReplyToHostMessage(annotationSyncBlock) {
+    const ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) return;
+
+    try {
+      let hostIdx = findHostMessageIndexByMarkers();
+
+      if (hostIdx < 0) {
+        console.warn('[ANNOTATION] no host floor found');
+        return;
+      }
+
+      let currentMes = String(ctx.chat[hostIdx].mes || '');
+
+      const diaryId =
+        (annotationSyncBlock.match(/diaryId\s*[=:]\s*([^\s\n]+)/i) || [])[1] || '';
+      const annotationId =
+        (annotationSyncBlock.match(/annotationId\s*[=:]\s*([^\s\n]+)/i) || [])[1] || '';
+
+      if (!diaryId || !annotationId) {
+        console.warn('[ANNOTATION] missing id');
+        return;
+      }
+
+      const hiddenBlock =
+        '\n<div class="vv-annotation-hidden" style="display:none">\n' +
+        annotationSyncBlock.trim() +
+        '\n</div>\n';
+
+      currentMes = currentMes.trimEnd() + '\n' + hiddenBlock;
+      ctx.chat[hostIdx].mes = currentMes;
+
+      const deleteIndexes = [];
+
+      for (let i = ctx.chat.length - 1; i > hostIdx; i--) {
+        const text = String(ctx.chat[i].mes || '');
+        const isAnnotationUserFloor =
+          text.includes('type=annotation') || text.includes('annotationId=');
+        const isAiAnnotationFloor = text.includes('[VV_ANNOTATION_SYNC]');
+
+        if (isAnnotationUserFloor || isAiAnnotationFloor) {
+          deleteIndexes.push(i);
+        }
+      }
+
+      deleteIndexes
+        .sort(function (a, b) {
+          return b - a;
+        })
+        .forEach(function (idx) {
+          ctx.chat.splice(idx, 1);
+
+          try {
+            const pdoc = getRoot().document;
+            const el = pdoc.querySelector('#chat .mes[mesid="' + idx + '"]');
+
+            if (el) el.remove();
+          } catch (e) {}
+        });
+
+      try {
+        ctx.saveChat();
+      } catch (e) {}
+
+      console.log('[ANNOTATION] reply appended + floors cleaned for', annotationId);
+
+      postToPhone({
+        type: 'VV_ANNOTATION_HIDDEN_RAW',
+        raw: currentMes,
+        diaryId: diaryId,
+        annotationId: annotationId
+      });
+    } catch (e) {
+      console.error('[ANNOTATION] append failed:', e);
+    }
+  }
+
+  function pollForAssistantReply(chatId, viewId, timeout, mode) {
+    mode = mode || '';
+
     if (VV_CALL_INTERCEPTOR.isActive()) {
       console.log('[VVHOST_CHAT] call interceptor active, skip polling');
       return;
@@ -699,7 +1451,8 @@
     console.log(
       '[VVHOST_CHAT] pollForAssistantReply start',
       'chatId=', chatId,
-      'beforeLength=', beforeLength
+      'beforeLength=', beforeLength,
+      'mode=', mode
     );
 
     if (!chatArr) {
@@ -744,6 +1497,71 @@
             );
           }
 
+          if (text.includes('[VV_DIARY_SYNC]')) {
+            console.log(
+              '[VVHOST_CHAT] poll: found VV_DIARY_SYNC tag at index=',
+              i,
+              'has_close_tag=',
+              text.includes('[/VV_DIARY_SYNC]'),
+              'length=',
+              text.length
+            );
+          }
+
+          const annotationBlock = extractValidVVAnnotationSyncBlock(text);
+
+          if (annotationBlock) {
+            clearInterval(timer);
+
+            console.log('[VVHOST_CHAT] poll FOUND annotation sync at index=', i);
+
+            const dIdMatch = annotationBlock.match(/diaryId\s*[=:]\s*([^\s\n]+)/i);
+            const aIdMatch = annotationBlock.match(/annotationId\s*[=:]\s*([^\s\n]+)/i);
+
+            const realDiaryId = dIdMatch ? dIdMatch[1].trim() : '';
+            const realAnnotationId = aIdMatch ? aIdMatch[1].trim() : '';
+
+            postAnnotationSyncToPhone(annotationBlock, realDiaryId, realAnnotationId, viewId);
+            appendAnnotationReplyToHostMessage(annotationBlock);
+
+            return;
+          }
+
+          const diaryBlock = extractValidVVDiarySyncBlock(
+            text,
+            lastExpectedDiaryId || '',
+            lastExpectedDiaryAuthorId || ''
+          );
+
+          if (diaryBlock) {
+            clearInterval(timer);
+
+            console.log('[VVHOST_CHAT] poll FOUND diary sync in index=', i);
+
+            postDiarySyncToPhone(
+              diaryBlock,
+              lastExpectedDiaryId || '',
+              lastExpectedDiaryAuthorId || '',
+              viewId
+            );
+
+            safeDeleteDiaryFloors(i);
+
+            return;
+          }
+
+          if (mode === 'diary') {
+            if (
+              text.includes('[VV_CALL_SYNC]') ||
+              text.includes('[VV_CHAT_SYNC]') ||
+              text.includes('[VV_FEED_SYNC]')
+            ) {
+              console.warn('[VVHOST_CHAT][DIARY] non-diary sync ignored in diary mode, index=', i);
+            }
+
+            continue;
+          }
+
           const incomingBlock = extractIncomingCallBlock(text);
 
           if (incomingBlock) {
@@ -774,6 +1592,18 @@
             console.log('[VVHOST_CHAT] poll FOUND chat sync in index=', i, 'realChatId=', realChatId);
 
             postChatSyncToPhone(block, realChatId, viewId, i);
+
+            return;
+          }
+
+          const feedBlock = extractValidVVFeedSyncBlock(text);
+
+          if (feedBlock) {
+            clearInterval(timer);
+
+            console.log('[VVHOST_CHAT] poll FOUND feed sync in index=', i);
+
+            postFeedSyncToPhone(feedBlock, viewId);
 
             return;
           }
@@ -964,6 +1794,72 @@
     return !!sent;
   }
 
+  async function triggerGenerationAfterSend() {
+    const root = getRoot();
+
+    if (!root) return false;
+
+    try {
+      if (typeof root.Generate === 'function') {
+        console.log('[VVHOST_CHAT][GEN] using root.Generate()');
+        await root.Generate();
+        return true;
+      }
+    } catch (e) {
+      console.warn('[VVHOST_CHAT][GEN] root.Generate failed:', e);
+    }
+
+    try {
+      if (typeof root.generate === 'function') {
+        console.log('[VVHOST_CHAT][GEN] using root.generate()');
+        await root.generate();
+        return true;
+      }
+    } catch (e) {
+      console.warn('[VVHOST_CHAT][GEN] root.generate failed:', e);
+    }
+
+    try {
+      const doc = root.document;
+
+      const selectors = [
+        '#send_but',
+        '#send-button',
+        '.send-button',
+        '.st-send-button',
+        'button[title*="Send"]',
+        'button[aria-label*="Send"]',
+        '#option_regenerate',
+        '#option_continue'
+      ];
+
+      for (const selector of selectors) {
+        const btn = doc.querySelector(selector);
+
+        if (!btn) continue;
+
+        const style = root.getComputedStyle(btn);
+        const rect = btn.getBoundingClientRect();
+
+        if (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          rect.width > 0 &&
+          rect.height > 0
+        ) {
+          console.log('[VVHOST_CHAT][GEN] clicking button:', selector);
+          btn.click();
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('[VVHOST_CHAT][GEN] button trigger failed:', e);
+    }
+
+    console.warn('[VVHOST_CHAT][GEN] no generation trigger available');
+    return false;
+  }
+
   var VV_RP_COMMAND = (function () {
     function parseMessageCommand(text) {
       if (!text) return null;
@@ -1034,6 +1930,50 @@
 
   console.log('[VVHOST_CHAT] VV_RP_COMMAND loaded');
 
+  function extractAiFeedPostBlock(text) {
+    var match = String(text || '').match(/\[VV_AI_FEED_POST\]([\s\S]*?)\[\/VV_AI_FEED_POST\]/i);
+
+    if (!match) return null;
+
+    var block = match[1];
+
+    function getField(key) {
+      var m = block.match(new RegExp(key + '\\s*=\\s*([^\\n]+)', 'i'));
+      return m ? m[1].trim() : '';
+    }
+
+    var from = getField('from');
+    var bridgeName = getField('bridgeName') || from;
+    var postId = getField('postId') || ('f' + Date.now());
+    var time = getField('time');
+    var content = getField('content');
+    var photoRaw = getField('photo');
+
+    if (!from || !content) return null;
+
+    var photos = [];
+
+    if (photoRaw) {
+      var photoMatches = Array.from(photoRaw.matchAll(/\[图\d+:(.*?)\]/g));
+
+      photos = photoMatches.map(function (m) {
+        return {
+          simulated: true,
+          desc: m[1].trim()
+        };
+      });
+    }
+
+    return {
+      from: from,
+      bridgeName: bridgeName,
+      postId: postId,
+      time: time,
+      content: content,
+      photos: photos
+    };
+  }
+
   (function initUserInputPoller() {
     var lastCheckedIndex = -1;
     var pollInterval = 1000;
@@ -1058,36 +1998,55 @@
         for (var i = lastCheckedIndex + 1; i < chat.length; i++) {
           var msg = chat[i];
 
-          if (!msg || !msg.is_user) continue;
+          if (!msg) continue;
 
           var text = String(msg.mes || '');
 
-          console.log('[VVHOST_CHAT][RP_POLL] new user msg at index', i, ':', JSON.stringify(text.slice(0, 200)));
+          if (msg.is_user) {
+            console.log('[VVHOST_CHAT][RP_POLL] new user msg at index', i, ':', JSON.stringify(text.slice(0, 200)));
 
-          var command = VV_RP_COMMAND.parse(text);
+            var command = VV_RP_COMMAND.parse(text);
 
-          if (!command) {
-            console.log('[VVHOST_CHAT][RP_POLL] no command detected');
+            if (!command) {
+              console.log('[VVHOST_CHAT][RP_POLL] no command detected');
+              continue;
+            }
+
+            console.log('[VVHOST_CHAT][RP_CMD] command detected:', command);
+
+            if (command.type === 'sendMessage') {
+              postToPhone({
+                type: 'VV_RP_SEND_MESSAGE',
+                targetName: command.targetName,
+                messages: command.messages
+              });
+
+              console.log('[VVHOST_CHAT][RP_CMD] sent VV_RP_SEND_MESSAGE to phone');
+            } else if (command.type === 'makeCall') {
+              postToPhone({
+                type: 'VV_RP_MAKE_CALL',
+                targetName: command.targetName
+              });
+
+              console.log('[VVHOST_CHAT][RP_CMD] sent VV_RP_MAKE_CALL to phone');
+            }
+
             continue;
           }
 
-          console.log('[VVHOST_CHAT][RP_CMD] command detected:', command);
+          if (!msg.is_user && text.includes('[VV_AI_FEED_POST]') && text.includes('[/VV_AI_FEED_POST]')) {
+            console.log('[VVHOST_CHAT][AI_FEED] detected VV_AI_FEED_POST in AI msg at index', i);
 
-          if (command.type === 'sendMessage') {
-            postToPhone({
-              type: 'VV_RP_SEND_MESSAGE',
-              targetName: command.targetName,
-              messages: command.messages
-            });
+            var aiPostBlock = extractAiFeedPostBlock(text);
 
-            console.log('[VVHOST_CHAT][RP_CMD] sent VV_RP_SEND_MESSAGE to phone');
-          } else if (command.type === 'makeCall') {
-            postToPhone({
-              type: 'VV_RP_MAKE_CALL',
-              targetName: command.targetName
-            });
+            if (aiPostBlock) {
+              postToPhone({
+                type: 'VV_AI_FEED_POST',
+                payload: aiPostBlock
+              });
 
-            console.log('[VVHOST_CHAT][RP_CMD] sent VV_RP_MAKE_CALL to phone');
+              console.log('[VVHOST_CHAT][AI_FEED] sent VV_AI_FEED_POST to phone:', aiPostBlock);
+            }
           }
         }
 
@@ -1151,7 +2110,7 @@
 
         var started = VV_CALL_INTERCEPTOR.start({
           targetName: data.targetName || data.target || CURRENT_TARGET || '对方',
-          chatId: data.chatId || CURRENT_CHAT_ID || '',
+          chatId: data.chatId || lastExpectedChatId || CURRENT_CHAT_ID || '',
           storyTime: data.storyTime || '',
           onMessage: function (parsed) {
             console.log('[VVHOST_CHAT] call AI reply intercepted:', parsed);
@@ -1194,15 +2153,133 @@
         const requestId = data.requestId || null;
         const command = String(data.command || '');
         const viewId = String(data.viewId || '').trim();
+
+        const feedMode = !!data.feedMode;
+        const callMode = !!data.callMode;
+        const annotationMode = !!data.annotationMode;
+
+        const feedMeta = data.feedMeta || null;
+        const userInteraction = data.userInteraction || null;
+
+        const diaryMode = isDiaryCommand(command);
+        const commandHasTrigger = /\/trigger\b/.test(command);
+
         const chatId =
           String(data.chatId || '').trim() ||
           extractChatIdFromCommand(command) ||
+          lastExpectedChatId ||
           CURRENT_CHAT_ID ||
           '';
 
-        const callMode = !!data.callMode;
-
+        lastExpectedChatId = chatId || lastExpectedChatId || '';
         lastViewId = viewId || lastViewId || '';
+
+        if (diaryMode) {
+          lastExpectedDiaryId = extractDiaryIdFromCommand(command);
+          lastExpectedDiaryAuthorId = extractDiaryAuthorIdFromCommand(command);
+
+          console.log('[VVHOST_CHAT][DIARY] diaryMode detected', {
+            diaryId: lastExpectedDiaryId,
+            authorId: lastExpectedDiaryAuthorId
+          });
+        }
+
+        if (feedMode) {
+          try {
+            var ctx = getCtx();
+
+            if (!ctx || !Array.isArray(ctx.chat)) throw new Error('ctx/chat not available');
+
+            var chatArr = ctx.chat;
+            var hostIdx = findHostMessageIndexByMarkers();
+
+            if (hostIdx >= 0 && chatArr[hostIdx]) {
+              var currentMes = String(chatArr[hostIdx].mes || '');
+
+              if (feedMeta) {
+                var imagesLine = feedMeta.images && feedMeta.images.length ? '\nimages=' + feedMeta.images.join(',') : '';
+                var locationLine = feedMeta.location ? '\nlocation=' + feedMeta.location : '';
+                var photoLine = feedMeta.photoDesc ? '\nphoto=' + feedMeta.photoDesc : '';
+
+                var postIdTag = 'postId=' + feedMeta.postId;
+                var hasExisting = currentMes.includes(postIdTag);
+
+                if (!hasExisting) {
+                  var initBlock =
+                    '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                    'postId=' + feedMeta.postId +
+                    '\n\n[动态]\n' +
+                    'from=' + feedMeta.author + '\n' +
+                    'time=' + feedMeta.time + '\n' +
+                    'content=' + feedMeta.content +
+                    imagesLine +
+                    photoLine +
+                    locationLine +
+                    '\n[/动态]\n\n[/VV_FEED_HIDDEN_DATA]</div>';
+
+                  currentMes = currentMes.trimEnd() + initBlock;
+                }
+
+                chatArr[hostIdx].mes = currentMes;
+
+                try {
+                  ctx.saveChat();
+                } catch (e) {}
+
+                console.log('[VVHOST_CHAT] feed initial block written for', feedMeta.postId);
+              }
+
+              if (userInteraction) {
+                currentMes = String(chatArr[hostIdx].mes || '');
+
+                var replyLine = userInteraction.replyTo ? '\nreplyTo=' + userInteraction.replyTo : '';
+
+                var userBlock =
+                  '\n[互动]\n' +
+                  'from=' + userInteraction.from + '\n' +
+                  'time=' + userInteraction.time + '\n' +
+                  'action=' + userInteraction.action + '\n' +
+                  'content=' + userInteraction.content +
+                  replyLine + '\n' +
+                  '[/互动]\n';
+
+                var targetTag = 'postId=' + userInteraction.postId;
+                var dedupedUserBlocks = dedupeInteractionBlocksForAppend(currentMes, [userBlock]);
+
+                if (dedupedUserBlocks.length === 0) {
+                  console.log('[VVHOST_FEED_DEDUPE] skip duplicated user interaction for', userInteraction.postId);
+                } else if (currentMes.includes(targetTag)) {
+                  var parts = currentMes.split('[/VV_FEED_HIDDEN_DATA]');
+                  var inserted = false;
+
+                  for (var p = 0; p < parts.length - 1; p++) {
+                    if (parts[p].includes(targetTag) && !inserted) {
+                      parts[p] = parts[p] + dedupedUserBlocks[0];
+                      inserted = true;
+                    }
+                  }
+
+                  currentMes = parts.join('[/VV_FEED_HIDDEN_DATA]');
+
+                  chatArr[hostIdx].mes = currentMes;
+
+                  try {
+                    ctx.saveChat();
+                  } catch (e) {}
+
+                  console.log('[VVHOST_CHAT] user interaction appended for', userInteraction.postId);
+                } else {
+                  console.warn('[VVHOST_CHAT] target feed post not found for user interaction:', userInteraction.postId);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[VVHOST_CHAT] feed pre-write error:', e);
+          }
+
+          const startedFeed = VV_FEED_INTERCEPTOR.start();
+          console.log('[VVHOST_CHAT] feed interceptor started:', startedFeed);
+        }
 
         let ok = false;
         let error = null;
@@ -1219,16 +2296,46 @@
           requestId: requestId,
           ok: ok,
           error: error,
-          chatId: chatId,
-          viewId: viewId
+          chatId: lastExpectedChatId || '',
+          diaryId: lastExpectedDiaryId || '',
+          authorId: lastExpectedDiaryAuthorId || '',
+          viewId: lastViewId || ''
         });
 
         if (ok) {
-          if (callMode || VV_CALL_INTERCEPTOR.isActive()) {
+          if (feedMode) {
+            console.log('[VVHOST_CHAT] feed mode, skip polling');
+          } else if (callMode || VV_CALL_INTERCEPTOR.isActive()) {
             console.log('[VVHOST_CHAT] call mode active, skip normal chat polling');
+          } else if (diaryMode) {
+            console.log('[VVHOST_CHAT][DIARY] diary mode');
+
+            if (!commandHasTrigger) {
+              setTimeout(function () {
+                triggerGenerationAfterSend();
+              }, 800);
+            } else {
+              console.log('[VVHOST_CHAT][DIARY] command already has /trigger, skip extra generation');
+            }
+
+            pollForAssistantReply(lastExpectedChatId, lastViewId, 120000, 'diary');
+          } else if (annotationMode) {
+            console.log('[VVHOST_CHAT][ANNOTATION] annotation mode');
+
+            if (!commandHasTrigger) {
+              setTimeout(function () {
+                triggerGenerationAfterSend();
+              }, 800);
+            } else {
+              console.log('[VVHOST_CHAT][ANNOTATION] command already has /trigger, skip extra generation');
+            }
+
+            pollForAssistantReply(lastExpectedChatId, lastViewId, 120000, 'annotation');
           } else {
-            pollForAssistantReply(chatId, viewId);
+            pollForAssistantReply(lastExpectedChatId, lastViewId);
           }
+        } else {
+          if (feedMode) VV_FEED_INTERCEPTOR.stop();
         }
 
         return;
@@ -1238,7 +2345,13 @@
         const rawText = String(data.raw || '');
         const chatIdFromData = String(data.chatId || '').trim();
         const viewId = String(data.viewId || '').trim();
-        const expectedChatId = chatIdFromData || CURRENT_CHAT_ID || '';
+        const expectedChatId = chatIdFromData || lastExpectedChatId || CURRENT_CHAT_ID || '';
+
+        const diaryIdFromData = String(data.diaryId || '').trim();
+        const authorIdFromData = String(data.authorId || '').trim();
+
+        const expectedDiaryId = diaryIdFromData || lastExpectedDiaryId || '';
+        const expectedDiaryAuthorId = authorIdFromData || lastExpectedDiaryAuthorId || '';
 
         let handled = false;
 
@@ -1263,8 +2376,52 @@
           handled = true;
         }
 
+        const diaryBlock = extractValidVVDiarySyncBlock(rawText, expectedDiaryId, expectedDiaryAuthorId);
+        if (diaryBlock) {
+          postDiarySyncToPhone(diaryBlock, expectedDiaryId, expectedDiaryAuthorId, viewId);
+          handled = true;
+        }
+
+        const feedBlock = extractValidVVFeedSyncBlock(rawText);
+        if (feedBlock) {
+          // 这里只作为兜底。正常 feedMode 仍由 VV_FEED_INTERCEPTOR 写入 hidden raw。
+          postFeedSyncToPhone(feedBlock, viewId);
+          handled = true;
+        }
+
         if (!handled) {
-          console.log('[VVHOST_CHAT] VV_RAW_LLM_REPLY has no valid sync block');
+          console.log('[VVHOST][SUMMON] VV_RAW_LLM_REPLY has no valid sync block');
+        }
+        return;
+
+        const annotationBlock = extractValidVVAnnotationSyncBlock(rawText);
+
+        if (annotationBlock) {
+          const dIdMatch = annotationBlock.match(/diaryId\s*[=:]\s*([^\s\n]+)/i);
+          const aIdMatch = annotationBlock.match(/annotationId\s*[=:]\s*([^\s\n]+)/i);
+
+          const realDiaryId = dIdMatch ? dIdMatch[1].trim() : '';
+          const realAnnotationId = aIdMatch ? aIdMatch[1].trim() : '';
+
+          postAnnotationSyncToPhone(annotationBlock, realDiaryId, realAnnotationId, viewId);
+          handled = true;
+        }
+      }
+
+      if (data.type === 'VV_REQUEST_FEED_REFRESH') {
+        var ctxF = getCtx();
+
+        if (!ctxF || !Array.isArray(ctxF.chat)) {
+          console.warn('[VVHOST_CHAT] feed refresh: ctx/chat not available');
+          return;
+        }
+
+        for (var fi = 0; fi < ctxF.chat.length; fi++) {
+          if (ctxF.chat[fi].mes && String(ctxF.chat[fi].mes).includes('VV_FEED_HIDDEN_DATA')) {
+            pushFeedHiddenRawToPhone(ctxF.chat[fi].mes, 'feed-refresh');
+            console.log('[VVHOST_CHAT] feed refresh sent, length:', String(ctxF.chat[fi].mes).length);
+            break;
+          }
         }
 
         return;
@@ -1275,7 +2432,7 @@
         const viewId = String(data.viewId || '').trim();
 
         if (lastVVChatSyncRaw) {
-          postChatSyncToPhone(lastVVChatSyncRaw, chatId || CURRENT_CHAT_ID, viewId || lastViewId || '');
+          postChatSyncToPhone(lastVVChatSyncRaw, chatId || lastExpectedChatId || CURRENT_CHAT_ID, viewId || lastViewId || '');
         } else {
           console.log('[VVHOST_CHAT] no cached chat sync for resend');
         }
@@ -1328,4 +2485,60 @@
       console.warn('[VVHOST_CHAT] message handler error:', err);
     }
   }, false);
+
+  (function initFeedHiddenDataWatcher() {
+    var lastFeedRaw = '';
+    var watchInterval = 2000;
+
+    function findFeedHostMessage() {
+      var ctx = getCtx();
+
+      if (!ctx || !Array.isArray(ctx.chat)) return null;
+
+      for (var i = 0; i < ctx.chat.length; i++) {
+        var mes = String(ctx.chat[i].mes || '');
+
+        if (mes.includes('VV_FEED_HIDDEN_DATA')) {
+          return mes;
+        }
+      }
+
+      return null;
+    }
+
+    setInterval(function () {
+      try {
+        var currentRaw = findFeedHostMessage();
+
+        if (!currentRaw) return;
+
+        var hiddenSig = getFeedHiddenSig(currentRaw);
+
+        if (!hiddenSig) return;
+
+        if (hiddenSig === lastFeedRaw) return;
+
+        // 如果这份 hidden raw 刚刚已经由 feed-interceptor 主动推过，
+        // watcher 不要再补发一次，否则手机会收到重复 VV_FEED_HIDDEN_RAW。
+        if (
+          currentRaw === lastPushedFeedHiddenRaw ||
+          hiddenSig === lastPushedFeedHiddenSig
+        ) {
+          lastFeedRaw = hiddenSig;
+          console.log('[VVHOST][FEED_WATCHER] skip duplicated pushed hidden raw');
+          return;
+        }
+
+        lastFeedRaw = hiddenSig;
+
+        console.log('[VVHOST][FEED_WATCHER] hidden data changed, pushing to phone, length=', currentRaw.length);
+
+        pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher');
+      } catch (err) {
+        console.warn('[VVHOST][FEED_WATCHER] error:', err);
+      }
+    }, watchInterval);
+
+    console.log('[VVHOST] feed hidden data watcher started');
+  })();
 })();
