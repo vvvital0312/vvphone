@@ -17,6 +17,7 @@
   let lastViewId = '';
   let lastPushedFeedHiddenRaw = '';
   let lastPushedFeedHiddenSig = '';
+  let pendingFeedInteraction = null;
 
   function getFeedHiddenSig(raw) {
     raw = String(raw || '');
@@ -191,6 +192,82 @@
     });
 
     return result;
+  }
+
+  function convertWrongCallSyncToFeedInteractionRaw(rawContent) {
+    rawContent = String(rawContent || '');
+
+    if (!pendingFeedInteraction) return rawContent;
+    if (!pendingFeedInteraction.postId) return rawContent;
+
+    if (Date.now() > pendingFeedInteraction.expiresAt) {
+      console.log('[VVHOST][FEED] pending interaction expired');
+      pendingFeedInteraction = null;
+      return rawContent;
+    }
+
+    if (!rawContent.includes('[VV_CALL_SYNC]') || !rawContent.includes('[/VV_CALL_SYNC]')) {
+      return rawContent;
+    }
+
+    var callMatch = rawContent.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
+    if (!callMatch) return rawContent;
+
+    var callBlock = String(callMatch[1] || '');
+
+    var speaker = '';
+    var content = '';
+
+    var talkMatch = callBlock.match(/\[通话\]([\s\S]*?)(?=\[通话\]|$)/i);
+
+    if (talkMatch) {
+      var talkBlock = String(talkMatch[1] || '');
+
+      var speakerM = talkBlock.match(/(?:^|\n)\s*speaker\s*=\s*([^\n\r]+)/i);
+      var contentM = talkBlock.match(/(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:speaker|callPhase|chatId|target|time)\s*=|$)/i);
+
+      speaker = speakerM ? String(speakerM[1] || '').trim() : '';
+      content = contentM ? String(contentM[1] || '').trim() : '';
+    }
+
+    // 兜底：如果没有 [通话] 块，尝试抓 content=
+    if (!content) {
+      var fallbackContentM = callBlock.match(/(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:speaker|callPhase|chatId|target|time)\s*=|$)/i);
+      content = fallbackContentM ? String(fallbackContentM[1] || '').trim() : '';
+    }
+
+    if (!speaker) {
+      var targetM = callBlock.match(/(?:^|\n)\s*target\s*=\s*([^\n\r]+)/i);
+      speaker = targetM ? String(targetM[1] || '').trim() : '';
+    }
+
+    if (!speaker) speaker = pendingFeedInteraction.targetName || '角色';
+    if (!content) {
+      console.warn('[VVHOST][FEED] wrong call sync has no content, cannot convert');
+      return rawContent;
+    }
+
+    var replyTo = pendingFeedInteraction.from || '';
+
+    var converted =
+      '[VV_FEED_SYNC]\n' +
+      'postId=' + pendingFeedInteraction.postId + '\n\n' +
+      '[互动]\n' +
+      'from=' + speaker + '\n' +
+      'action=comment\n' +
+      'content=' + content + '\n' +
+      (replyTo ? 'replyTo=' + replyTo + '\n' : '') +
+      '[/互动]\n' +
+      '[/VV_FEED_SYNC]';
+
+    console.log('[VVHOST][FEED] converted wrong VV_CALL_SYNC to feed interaction:', {
+      postId: pendingFeedInteraction.postId,
+      from: speaker,
+      replyTo: replyTo,
+      content: content
+    });
+
+    return converted;
   }
 
   var VV_CALL_INTERCEPTOR = (function () {
@@ -490,10 +567,12 @@
             try { saveCtx.saveChat(); } catch (e) {}
           }
 
-          console.log('[FEED_INTERCEPT] appended feed sync for postId:', targetPostId);
+            console.log('[FEED_INTERCEPT] appended feed sync for postId:', targetPostId);
 
-          // 写入成功后，把完整 hidden raw 发给手机页
-          pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
+            pendingFeedInteraction = null;
+
+            // 写入成功后，把完整 hidden raw 发给手机页
+            pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
         } else {
           console.log('[FEED_INTERCEPT] no hidden data changed, skip save/post');
         }
@@ -1581,12 +1660,29 @@
 
       if (data.type === 'VV_EXECUTE_SLASH') {
         const requestId = data.requestId || null;
-        const command = String(data.command || '');
+        let command = String(data.command || '');
         const viewId = String(data.viewId || '').trim();
         const feedMode = !!data.feedMode;
         const callMode = !!data.callMode;
         const feedMeta = data.feedMeta || null;
         const userInteraction = data.userInteraction || null;
+
+        if (feedMode && userInteraction) {
+          pendingFeedInteraction = {
+            postId: String(userInteraction.postId || '').trim(),
+            from: String(userInteraction.from || '').trim(),
+            action: String(userInteraction.action || '').trim(),
+            content: String(userInteraction.content || '').trim(),
+            replyTo: String(userInteraction.replyTo || '').trim(),
+            targetName: String(data.targetName || '').trim(),
+            startedAt: Date.now(),
+            expiresAt: Date.now() + 120000
+          };
+
+          console.log('[VVHOST][FEED] pending interaction set:', pendingFeedInteraction);
+        } else if (feedMode && feedMeta) {
+          pendingFeedInteraction = null;
+        }
 
         lastExpectedChatId =
           String(data.chatId || '').trim() ||
@@ -1603,6 +1699,18 @@
             console.warn('[VVHOST_FEED][FEED] call interceptor active before feed, force end');
             VV_CALL_INTERCEPTOR.end();
           }
+
+          // 覆盖可能残留的电话注入，防止模型把朋友圈评论当成电话
+          command =
+            '/inject id=vv_call role=system depth=0 scan=true [[\n' +
+            '当前不是电话场景。当前是朋友圈动态评论互动。\n' +
+            '禁止输出 [VV_CALL_SYNC]。\n' +
+            '禁止输出 [VV_INCOMING_CALL]。\n' +
+            '禁止输出 callPhase。\n' +
+            '禁止输出 [通话] 块。\n' +
+            '如果需要回复，只能输出 [VV_FEED_SYNC]。\n' +
+            ']] |\n' +
+            command;
 
           try {
             var ctx = getCtx();
