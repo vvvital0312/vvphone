@@ -193,6 +193,24 @@
       .trim();
   }
 
+  function normalizeFeedImageRefs(input) {
+    var arr = [];
+
+    if (Array.isArray(input)) {
+      arr = input;
+    } else if (typeof input === 'string') {
+      arr = input.split(',');
+    }
+
+    return arr
+      .map(function (x) {
+        return String(x || '').trim();
+      })
+      .filter(function (x) {
+        return !!x && x !== 'undefined' && x !== 'null';
+      });
+  }
+
   function getFeedField(block, key) {
     block = String(block || '');
     key = String(key || '');
@@ -2384,9 +2402,24 @@
                   console.log('[VVHOST][FEED] pending feed post set:', pendingPostId);
                 }
 
-                var imagesLine = (feedMeta.images && feedMeta.images.length) ? '\nimages=' + feedMeta.images.join(',') : '';
+                var imageRefs = normalizeFeedImageRefs(
+                  feedMeta.images ||
+                  feedMeta.imageRefs ||
+                  feedMeta.photos ||
+                  feedMeta.mediaRefs ||
+                  []
+                );
+
+                var imagesLine = imageRefs.length ? '\nimages=' + imageRefs.join(',') : '';
                 var locationLine = feedMeta.location ? '\nlocation=' + feedMeta.location : '';
-                var photoLine = feedMeta.photoDesc ? '\nphoto=' + feedMeta.photoDesc : '';
+
+                // 如果有真实 images，就不要再写 photo=[图1:图片] 这种纯描述占位。
+                // photo 更适合 AI 发动态时的“模拟图片描述”。
+                var photoLine = '';
+
+                if (!imageRefs.length && feedMeta.photoDesc) {
+                  photoLine = '\nphoto=' + feedMeta.photoDesc;
+                }
 
                 var postIdTag = 'postId=' + feedMeta.postId;
                 var hasExisting = currentMes.includes(postIdTag);

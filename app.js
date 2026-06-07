@@ -4658,7 +4658,7 @@ function closeCallPage() {
 
 function switchContactTab(tab) {
   currentContactTab = tab;
-  
+
   const directPanel = document.getElementById('directPanel');
   const groupPanel = document.getElementById('groupPanel');
   const feedPanel = document.getElementById('feedPanel');
@@ -5626,9 +5626,31 @@ async function addFeedPost() {
   }
 
   const storedImages = [];
+
   for (const img of [...currentFeedImages].slice(0, 9)) {
-    storedImages.push(await persistImageToIDB(img, { area: 'feed.post.image' }));
+    const saved = await persistImageToIDB(img, { area: 'feed.post.image' });
+    if (saved) storedImages.push(saved);
   }
+
+  const storedImageRefs = storedImages
+    .map(img => {
+      if (typeof img === 'string') return img.trim();
+
+      if (img && typeof img === 'object') {
+        return String(
+          img.ref ||
+          img.idbRef ||
+          img.assetKey ||
+          img.id ||
+          img.src ||
+          img.url ||
+          ''
+        ).trim();
+      }
+
+      return '';
+    })
+    .filter(Boolean);
 
   const postId = 'f' + Date.now();
   const author = myProfile.nickname || appProfile.myName || '我';
@@ -5636,13 +5658,14 @@ async function addFeedPost() {
 
   feedPosts.unshift({
     id: postId,
+    postId: postId,
     authorId: 'me',
     author: author,
     authorAvatar: getMyProfileAvatar() || DEFAULT_AVATAR,
     bridgeName: author,
     content,
     time: timeStr,
-    images: storedImages,
+    images: storedImageRefs,
     likes: [],
     comments: []
   });
@@ -5653,16 +5676,21 @@ async function addFeedPost() {
 
   // 触发同层 AI 互动
   if (VV_BRIDGE_CONFIG.enabled) {
-    // 构建图片描述（给 AI 看的文字）
-    const photoDesc = storedImages.map((img, idx) => {
-      const desc = img.desc || '图片';
-      return '[图' + (idx + 1) + ':' + desc + ']';
+    // 构建图片描述：给 AI 看，不用于真实图片渲染
+    const photoDesc = storedImageRefs.map((img, idx) => {
+      return '[图' + (idx + 1) + ':图片]';
     }).join('');
 
     const cmd = VV_BRIDGE_CONFIG.buildFeedEventCommand({
-      postId, content, images: storedImages, author
+      postId,
+      content,
+      images: storedImageRefs,
+      author
     });
+
     console.log('[VV][FEED] triggering feed sync, postId =', postId);
+    console.log('[VV][FEED] storedImageRefs =', storedImageRefs);
+
     try {
       await triggerSlash(cmd, {
         feedMode: true,
@@ -5671,7 +5699,7 @@ async function addFeedPost() {
           author: author,
           time: timeStr,
           content: content,
-          images: storedImages.map(i => i.id || i.src || ''),
+          images: storedImageRefs,
           photoDesc: photoDesc || '',
           location: ''
         }
