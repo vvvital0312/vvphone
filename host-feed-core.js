@@ -494,6 +494,82 @@
       return true;
     }
 
+    async function safeDeleteCallFloor(messageIndex) {
+      var ctx = getCtx();
+
+      if (!ctx || !Array.isArray(ctx.chat)) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: ctx/chat not available');
+        return false;
+      }
+
+      messageIndex = Number(messageIndex);
+
+      if (!Number.isFinite(messageIndex) || messageIndex < 0 || messageIndex >= ctx.chat.length) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: invalid index:', messageIndex);
+        return false;
+      }
+
+      if (messageIndex === hostMessageIndex) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: refuse to delete host floor:', messageIndex);
+        return false;
+      }
+
+      var msg = ctx.chat[messageIndex];
+
+      if (!msg) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: message not found:', messageIndex);
+        return false;
+      }
+
+      if (msg.is_user) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: refuse to delete user message:', messageIndex);
+        return false;
+      }
+
+      try {
+        // 优先使用酒馆自己的删除函数
+        if (typeof window.deleteMessage === 'function') {
+          await window.deleteMessage(messageIndex);
+          console.log('[CALL_INTERCEPT] deleted AI call floor by window.deleteMessage:', messageIndex);
+          return true;
+        }
+
+        if (typeof deleteMessage === 'function') {
+          await deleteMessage(messageIndex);
+          console.log('[CALL_INTERCEPT] deleted AI call floor by deleteMessage:', messageIndex);
+          return true;
+        }
+      } catch (e) {
+        console.warn('[CALL_INTERCEPT] deleteMessage failed, fallback to splice:', e);
+      }
+
+      try {
+        // 兜底：直接从 chat 数组里移除
+        ctx.chat.splice(messageIndex, 1);
+
+        if (typeof ctx.saveChat === 'function') {
+          try {
+            ctx.saveChat();
+          } catch (e) {}
+        }
+
+        // 尝试刷新当前聊天显示
+        try {
+          if (typeof window.reloadCurrentChat === 'function') {
+            await window.reloadCurrentChat();
+          } else if (typeof reloadCurrentChat === 'function') {
+            await reloadCurrentChat();
+          }
+        } catch (e) {}
+
+        console.log('[CALL_INTERCEPT] deleted AI call floor by splice:', messageIndex);
+        return true;
+      } catch (e) {
+        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor splice failed:', e);
+        return false;
+      }
+    }
+
     async function handleInterceptedMessage(messageIndex) {
       var ctx = getCtx();
       if (!ctx || !isCallActive) return;
@@ -568,7 +644,7 @@
 
       // 5. 删除 AI 新开的楼层，实现“同层”
       try {
-        await safeDeleteFeedFloor(messageIndex);
+        await safeDeleteCallFloor(messageIndex);
       } catch (e) {
         console.warn('[CALL_INTERCEPT] delete AI call floor failed:', e);
       }
