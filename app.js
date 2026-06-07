@@ -10065,38 +10065,6 @@ function initVVHostNavigationBridge() {
         return;
       }
 
-      // ========== 处理聊天同步（从桥接脚本转发过来的） ==========
-      if (type === 'VVPHONE_CHAT_SYNC') {
-        const raw = String(data.raw || '');
-        const chatId = String(data.chatId || '').trim();
-        const viewId = String(data.viewId || '').trim();
-
-        console.log('[VV][NAV] VVPHONE_CHAT_SYNC received, raw length =', raw.length, 'chatId =', chatId);
-
-        if (!raw.trim()) {
-          console.warn('[VV][NAV] VVPHONE_CHAT_SYNC ignored: empty raw');
-          return;
-        }
-
-        if (/\[VV_CALL_SYNC\]/i.test(raw)) {
-          console.log('[VV][NAV] VVPHONE_CHAT_SYNC also contains VV_CALL_SYNC, handling call first');
-          try {
-            await handleVVCallSyncRaw({ raw, chatId });
-          } catch (err) {
-            console.error('[VV][NAV] handleVVCallSyncRaw from chat sync error:', err);
-          }
-        }
-
-        if (/\[VV_CHAT_SYNC\]/i.test(raw)) {
-          try {
-            await handleVVChatSyncRaw({ raw, chatId, viewId });
-          } catch (err) {
-            console.error('[VV][NAV] handleVVChatSyncRaw error:', err);
-          }
-        }
-        return;
-      }
-
       // ========== 处理日记同步 ==========
       if (type === 'VVPHONE_DIARY_SYNC') {
         const raw = String(data.raw || '');

@@ -411,6 +411,89 @@
       appendCallDataToHostMessage(buildTranscriptText());
     }
 
+    function parseCallSyncForHost(raw) {
+      raw = String(raw || '');
+
+      var blockMatch = raw.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
+      if (!blockMatch) return null;
+
+      var blockText = blockMatch[1];
+
+      function getField(name) {
+        var re = new RegExp('^\\s*' + name + '\\s*=\\s*(.+)', 'im');
+        var m = blockText.match(re);
+        return m ? String(m[1] || '').trim() : '';
+      }
+
+      var parsed = {
+        chatId: getField('chatId') || callChatId || '',
+        target: getField('target') || callTargetName || '',
+        callPhase: getField('callPhase') || 'reply',
+        time: getField('time') || '',
+        messages: [],
+        raw: raw
+      };
+
+      var callBlockRegex = /\[通话\]([\s\S]*?)(?=\[通话\]|\[\/VV_CALL_SYNC\]|$)/gi;
+      var match;
+
+      while ((match = callBlockRegex.exec(blockText)) !== null) {
+        var inner = match[1] || '';
+
+        var speakerMatch = inner.match(/^\s*speaker\s*=\s*(.+)/im);
+        var contentMatch = inner.match(/^\s*content\s*=\s*([\s\S]*?)(?=\n\s*[a-zA-Z\u4e00-\u9fa5_]+\s*=|\n\s*\[|$)/im);
+
+        var speaker = speakerMatch ? String(speakerMatch[1] || '').trim() : (parsed.target || callTargetName || '对方');
+        var content = contentMatch ? String(contentMatch[1] || '').trim() : '';
+
+        if (speaker && content) {
+          parsed.messages.push({
+            speaker: speaker,
+            text: content,
+            content: content
+          });
+        }
+      }
+
+      return parsed;
+    }
+
+    function appendCallSyncRawToHostMessage(raw) {
+      var ctx = getCtx();
+      if (!ctx || !Array.isArray(ctx.chat)) return false;
+
+      var hostMsg = ctx.chat[hostMessageIndex];
+      if (!hostMsg) {
+        console.warn('[CALL_INTERCEPT] host message not found for call raw append:', hostMessageIndex);
+        return false;
+      }
+
+      raw = String(raw || '').trim();
+      if (!raw) return false;
+
+      var currentMes = String(hostMsg.mes || '');
+
+      // 简单防重：同一段 VV_CALL_SYNC 已经写过就不重复写
+      if (currentMes.includes(raw)) {
+        console.log('[CALL_INTERCEPT] duplicated VV_CALL_SYNC raw, skip append');
+        return false;
+      }
+
+      var hiddenBlock =
+        '\n<div class="vv-call-hidden" style="display:none"></div>';
+
+      hostMsg.mes = currentMes.trimEnd() + hiddenBlock;
+
+      try {
+        if (typeof ctx.saveChat === 'function') {
+          ctx.saveChat();
+        }
+      } catch (e) {}
+
+      console.log('[CALL_INTERCEPT] VV_CALL_SYNC raw appended to host msg');
+      return true;
+    }
+
     async function handleInterceptedMessage(messageIndex) {
       var ctx = getCtx();
       if (!ctx || !isCallActive) return;
@@ -419,169 +502,76 @@
       if (!msg || msg.is_user) return;
 
       if (messageIndex === hostMessageIndex) {
-        console.log('[FEED_INTERCEPT] skipping host msg floor');
+        console.log('[CALL_INTERCEPT] skipping host msg floor');
         return;
       }
 
-      var msgKey = messageIndex + '_' + String(msg.mes || '').length;
+      var rawContent = String(msg.mes || '');
+
+      var msgKey = messageIndex + '_' + rawContent.length;
       if (processedMessageIds[msgKey]) {
-        console.log('[FEED_INTERCEPT] already processed:', msgKey);
+        console.log('[CALL_INTERCEPT] already processed:', msgKey);
         return;
       }
 
       processedMessageIds[msgKey] = true;
 
-      var rawContent = String(msg.mes || '');
-      console.log('[FEED_INTERCEPT] intercepted AI reply, index:', messageIndex);
+      console.log('[CALL_INTERCEPT] intercepted AI reply, index:', messageIndex);
 
-      stop();
-
-      if (!rawContent.includes('[VV_FEED_SYNC]')) {
-        console.warn('[FEED_INTERCEPT] no VV_FEED_SYNC in reply, skipping');
+      // 电话拦截器只认 VV_CALL_SYNC
+      if (!/\[VV_CALL_SYNC\]/i.test(rawContent)) {
+        console.warn('[CALL_INTERCEPT] no VV_CALL_SYNC in reply, skipping');
         return;
       }
 
-      // 先转发给手机页。手机端自己也会做去重。
-      //postFeedSyncToPhone(rawContent, '');
+      var parsed = parseCallSyncForHost(rawContent);
 
-      try {
-        var hostMsg = ctx.chat[hostMessageIndex];
-
-        if (!hostMsg) {
-          console.warn('[FEED_INTERCEPT] host message not found, index:', hostMessageIndex);
-          await safeDeleteFeedFloor(messageIndex);
-          return;
-        }
-
-        var currentMes = String(hostMsg.mes || '');
-
-        // 提取第一个 [动态] 块
-        var postBlockMatch = rawContent.match(/\[动态\][\s\S]*?\[\/动态\]/);
-
-        // 提取所有 [互动]，并基于当前 hidden data 去重
-        var rawInteractionBlocks = rawContent.match(/\[互动\][\s\S]*?\[\/互动\]/g) || [];
-        var interactionBlocks = dedupeInteractionBlocksForAppend(currentMes, rawInteractionBlocks);
-
-        // 从 AI 回复里提取 postId
-        var postIdMatch =
-          rawContent.match(/(?:^|\n)\s*postId\s*=\s*([^\n\r]+)/i) ||
-          rawContent.match(/postId\s*=\s*([^\s\n\r]+)/i);
-
-        var targetPostId = postIdMatch ? String(postIdMatch[1] || '').trim() : '';
-
-        // 没有动态块，也没有新的互动块，就不写 hidden data
-        if (!postBlockMatch && interactionBlocks.length === 0) {
-          console.log('[FEED_INTERCEPT] no new [动态] or [互动] blocks after dedupe');
-          await safeDeleteFeedFloor(messageIndex);
-          return;
-        }
-
-        var changed = false;
-
-        if (targetPostId && currentMes.includes('postId=' + targetPostId)) {
-          // 找到对应 postId：插入到这个 postId 所在的 hidden block 末尾
-          var parts = currentMes.split('[/VV_FEED_HIDDEN_DATA]');
-          var inserted = false;
-
-          for (var p = 0; p < parts.length - 1; p++) {
-            if (parts[p].includes('postId=' + targetPostId) && !inserted) {
-              var appendText = '';
-
-              if (postBlockMatch) {
-                var alreadyHasPost =
-                  parts[p].includes('postId=' + targetPostId) &&
-                  parts[p].includes('[动态]');
-
-                if (!alreadyHasPost) {
-                  appendText += '\n' + postBlockMatch[0] + '\n';
-                } else {
-                  console.log('[VVHOST_FEED_DEDUPE] skip duplicated [动态] for postId:', targetPostId);
-                }
-              }
-
-              if (interactionBlocks.length > 0) {
-                appendText += '\n' + interactionBlocks.join('\n') + '\n';
-              }
-
-              if (appendText.trim()) {
-                parts[p] = parts[p] + appendText;
-                inserted = true;
-                changed = true;
-              } else {
-                console.log('[VVHOST_FEED_DEDUPE] nothing new to append for postId:', targetPostId);
-              }
-            }
-          }
-
-          currentMes = parts.join('[/VV_FEED_HIDDEN_DATA]');
-        } else {
-          // 找不到对应 postId：追加到最后一个 hidden block 的闭合标签前
-          var fallbackAppendText = '';
-
-          if (postBlockMatch) {
-            var rawPostIdMatch = postBlockMatch[0].match(/postId\s*=\s*([^\n\r]+)/i);
-            var rawPostId = rawPostIdMatch ? String(rawPostIdMatch[1] || '').trim() : '';
-
-            var alreadyHasRawPost = rawPostId && currentMes.includes('postId=' + rawPostId);
-
-            if (!alreadyHasRawPost) {
-              fallbackAppendText += '\n' + postBlockMatch[0] + '\n';
-            } else {
-              console.log('[VVHOST_FEED_DEDUPE] skip duplicated fallback [动态] for postId:', rawPostId);
-            }
-          }
-
-          if (interactionBlocks.length > 0) {
-            fallbackAppendText += '\n' + interactionBlocks.join('\n') + '\n';
-          }
-
-          if (fallbackAppendText.trim()) {
-            if (currentMes.includes('[/VV_FEED_HIDDEN_DATA]')) {
-              currentMes = currentMes.replace(
-                /\[\/VV_FEED_HIDDEN_DATA\](?![\s\S]*\[\/VV_FEED_HIDDEN_DATA\])/,
-                fallbackAppendText + '\n[/VV_FEED_HIDDEN_DATA]'
-              );
-            } else {
-              // 极端兜底：如果当前楼层没有 hidden data，就新建一个
-              var fallbackPostId = targetPostId || ('feed_' + Date.now());
-
-              currentMes =
-                currentMes.trimEnd() +
-                '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
-                'postId=' + fallbackPostId + '\n' +
-                fallbackAppendText +
-                '\n[/VV_FEED_HIDDEN_DATA]</div>';
-            }
-
-            changed = true;
-          } else {
-            console.log('[VVHOST_FEED_DEDUPE] fallback nothing new to append');
-          }
-        }
-
-        if (changed) {
-          hostMsg.mes = currentMes;
-
-          var saveCtx = getCtx();
-          if (saveCtx && typeof saveCtx.saveChat === 'function') {
-            try { saveCtx.saveChat(); } catch (e) {}
-          }
-
-            console.log('[FEED_INTERCEPT] appended feed sync for postId:', targetPostId);
-
-            pendingFeedInteraction = null;
-
-            // 写入成功后，把完整 hidden raw 发给手机页
-            pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
-        } else {
-          console.log('[FEED_INTERCEPT] no hidden data changed, skip save/post');
-        }
-      } catch (e) {
-        console.error('[FEED_INTERCEPT] append to host failed:', e);
+      if (!parsed) {
+        console.warn('[CALL_INTERCEPT] parse VV_CALL_SYNC failed');
+        return;
       }
 
-      // 删除 AI 新开的楼层
-      await safeDeleteFeedFloor(messageIndex);
+      console.log('[CALL_INTERCEPT] parsed call sync:', parsed);
+
+      // 1. 把 AI 的通话内容加入 host 侧通话转录
+      parsed.messages.forEach(function (m) {
+        var text = String(m.text || m.content || '').trim();
+        if (!text) return;
+
+        callTranscriptLines.push({
+          side: 'left',
+          speaker: m.speaker || parsed.target || callTargetName || '对方',
+          content: text
+        });
+      });
+
+      // 2. 把本轮 VV_CALL_SYNC 原文写回宿主楼层，保证“一楼有记忆”
+      appendCallSyncRawToHostMessage(rawContent);
+
+      // 3. 同时更新通话记录文本
+      appendCallDataToHostMessage(buildTranscriptText());
+
+      // 4. 回传手机页，让手机页更新通话 UI
+      if (typeof onCallMessageCallback === 'function') {
+        try {
+          onCallMessageCallback({
+            callPhase: parsed.callPhase,
+            messages: parsed.messages,
+            target: parsed.target || callTargetName,
+            chatId: parsed.chatId || callChatId,
+            raw: rawContent
+          });
+        } catch (e) {
+          console.warn('[CALL_INTERCEPT] onMessage callback failed:', e);
+        }
+      }
+
+      // 5. 删除 AI 新开的楼层，实现“同层”
+      try {
+        await safeDeleteFeedFloor(messageIndex);
+      } catch (e) {
+        console.warn('[CALL_INTERCEPT] delete AI call floor failed:', e);
+      }
     }
 
     async function safeDeleteCallFloors(aiMessageIndex) {
@@ -977,6 +967,14 @@
 
           // 写入成功后，把完整 hidden raw 发给手机页
           pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
+
+          if (postBlockMatch) {
+            postToPhone({
+              type: 'VV_OPEN_FEED',
+              reason: 'ai_feed_post',
+              postId: targetPostId || ''
+            });
+          }
         } else {
           console.log('[FEED_INTERCEPT] no hidden data changed, skip save/post');
         }

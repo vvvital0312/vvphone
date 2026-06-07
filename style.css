@@ -1060,7 +1060,7 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   -webkit-user-select: none;
 }
 
-/* 聊天区域滚动条 */
+/* 滚动条 */
 .message-area::-webkit-scrollbar {
   width: 0px;
 }
@@ -1075,7 +1075,6 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   background: transparent;
 }
 
-/* 如果聊天设置页面也有滚动条 */
 .setting-page-body::-webkit-scrollbar {
   width: 0px;
 }
@@ -1127,6 +1126,17 @@ body{display:flex;justify-content:center;align-items:center;background:transpare
   background: transparent;
 }
 .dialog-content::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.call-transcript::-webkit-scrollbar{
+  width: 0px;
+}
+.call-transcript::-webkit-scrollbar-track {
+  background: transparent;
+}
+.call-transcript::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 10px;
 }
