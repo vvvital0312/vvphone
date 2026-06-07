@@ -5008,6 +5008,32 @@ function markLocalFeedOperation(reason) {
   console.log('[VV][FEED] local operation:', reason || '');
 }
 
+function sendFeedLocalMutationToHost(payload) {
+  try {
+    payload = payload || {};
+
+    const msg = {
+      type: 'VV_FEED_LOCAL_MUTATION',
+      viewId: window.__vv_view_id || '',
+      action: payload.action || '',
+      postId: payload.postId || '',
+      from: payload.from || '',
+      content: payload.content || '',
+      replyTo: payload.replyTo || '',
+      liked: !!payload.liked,
+      comment: payload.comment || null
+    };
+
+    console.log('[VV][FEED] send local mutation to host:', msg);
+
+    window.parent.postMessage(msg, '*');
+    return true;
+  } catch (err) {
+    console.warn('[VV][FEED] send local mutation failed:', err);
+    return false;
+  }
+}
+
 function toggleFeedLike(postId) {
   markLocalFeedOperation('like');
 
@@ -5025,18 +5051,29 @@ function toggleFeedLike(postId) {
     return i && i.from === myName;
   });
 
+  let liked = false;
+
   if (idx >= 0) {
     post.likes.splice(idx, 1);
+    liked = false;
   } else {
     post.likes.push({ from: myName });
+    liked = true;
   }
 
-  post.likes = dedupeFeedLikes ? dedupeFeedLikes(post.likes) : post.likes;
+  post.likes = typeof dedupeFeedLikes === 'function' ? dedupeFeedLikes(post.likes) : post.likes;
 
   saveAll();
   renderFeedList();
 
-  console.log('[VV][FEED] like toggled:', postId);
+  sendFeedLocalMutationToHost({
+    action: liked ? 'add-like' : 'remove-like',
+    postId: postId,
+    from: myName,
+    liked: liked
+  });
+
+  console.log('[VV][FEED] like toggled:', postId, liked);
 }
 
 async function feedQuickComment(postId) {
@@ -5052,9 +5089,19 @@ async function feedQuickComment(postId) {
   if (!text) return;
 
   post.comments = post.comments || [];
+  const myName = myProfile.nickname || appProfile.myName || '我';
+
   post.comments.push({
-    from: myProfile.nickname || appProfile.myName || '我',
+    from: myName,
     text: text
+  });
+
+  sendFeedLocalMutationToHost({
+    action: 'add-comment',
+    postId: postId,
+    from: myName,
+    content: text,
+    replyTo: ''
   });
 
   post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
@@ -5128,10 +5175,20 @@ async function replyFeedComment(postId, commentIndex) {
   const text = prompt(`回复 ${target.from}`);
   if (!text) return;
 
+  const myName = myProfile.nickname || appProfile.myName || '我';
+
   post.comments.push({
-    from: myProfile.nickname || appProfile.myName || '我',
+    from: myName,
     replyTo: target.from,
     text: text
+  });
+
+  sendFeedLocalMutationToHost({
+    action: 'add-comment',
+    postId: postId,
+    from: myName,
+    content: text,
+    replyTo: target.from || ''
   });
 
   post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
@@ -5203,6 +5260,11 @@ function deleteFeedPost(postId) {
   saveAll();
   renderFeedList();
 
+  sendFeedLocalMutationToHost({
+    action: 'delete-post',
+    postId: postId
+  });
+
   console.log('[VV][FEED] post deleted:', postId);
 }
 
@@ -5224,6 +5286,8 @@ function deleteFeedComment(postId, commentIndex) {
     return;
   }
 
+  const targetComment = post.comments[index];
+
   const ok = confirm('确定删除这条评论吗？');
   if (!ok) return;
 
@@ -5231,6 +5295,20 @@ function deleteFeedComment(postId, commentIndex) {
 
   saveAll();
   renderFeedList();
+
+  sendFeedLocalMutationToHost({
+    action: 'delete-comment',
+    postId: postId,
+    from: targetComment.from || '',
+    content: targetComment.text || targetComment.content || '',
+    replyTo: targetComment.replyTo || '',
+    comment: {
+      from: targetComment.from || '',
+      text: targetComment.text || targetComment.content || '',
+      content: targetComment.text || targetComment.content || '',
+      replyTo: targetComment.replyTo || ''
+    }
+  });
 
   console.log('[VV][FEED] comment deleted:', postId, commentIndex);
 }

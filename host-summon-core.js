@@ -1102,6 +1102,312 @@
     });
   }
 
+  function escapeVVRegExp(str) {
+    return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function findFeedHostMessageIndex() {
+    var ctx = getCtx();
+    if (!ctx || !Array.isArray(ctx.chat)) return -1;
+
+    for (var i = ctx.chat.length - 1; i >= 0; i--) {
+      var mes = String(ctx.chat[i].mes || '');
+
+      if (
+        mes.includes('VV_FEED_HIDDEN_DATA') ||
+        mes.includes('vv' + '手机') ||
+        mes.includes('vv' + 'phone') ||
+        mes.includes('phone' + 'Frame') ||
+        mes.includes('VV' + 'HOST')
+      ) {
+        return i;
+      }
+    }
+
+    return -1;
+  }
+
+  function buildFeedInteractionBlockFromMutation(data) {
+    data = data || {};
+
+    var action = String(data.action || '');
+    var from = String(data.from || '').trim();
+    var content = String(data.content || '').trim();
+    var replyTo = String(data.replyTo || '').trim();
+
+    var now = new Date();
+    var timeStr =
+      (now.getMonth() + 1) + '月' +
+      now.getDate() + '日 ' +
+      String(now.getHours()).padStart(2, '0') + ':' +
+      String(now.getMinutes()).padStart(2, '0');
+
+    if (!from) return '';
+
+    if (action === 'add-like') {
+      return (
+        '\n[互动]\n' +
+        'from=' + from + '\n' +
+        'time=' + timeStr + '\n' +
+        'action=like\n' +
+        'content=\n' +
+        '[/互动]\n'
+      );
+    }
+
+    if (action === 'add-comment') {
+      if (!content) return '';
+
+      return (
+        '\n[互动]\n' +
+        'from=' + from + '\n' +
+        'time=' + timeStr + '\n' +
+        'action=comment\n' +
+        'content=' + content + '\n' +
+        (replyTo ? 'replyTo=' + replyTo + '\n' : '') +
+        '[/互动]\n'
+      );
+    }
+
+    return '';
+  }
+
+  function buildFeedInteractionKeyFromMutation(data) {
+    data = data || {};
+
+    var action = String(data.action || '').trim();
+    var from = String(data.from || '').trim();
+    var content = String(data.content || '').trim();
+    var replyTo = String(data.replyTo || '').trim();
+
+    if (data.comment) {
+      from = String(data.comment.from || from || '').trim();
+      content = String(data.comment.text || data.comment.content || content || '').trim();
+      replyTo = String(data.comment.replyTo || replyTo || '').trim();
+    }
+
+    if (action === 'remove-like' || action === 'add-like') {
+      return [
+        normalizeFeedTextForKey('like'),
+        normalizeFeedTextForKey(from),
+        '',
+        ''
+      ].join('|');
+    }
+
+    if (action === 'delete-comment' || action === 'add-comment') {
+      return [
+        normalizeFeedTextForKey('comment'),
+        normalizeFeedTextForKey(from),
+        normalizeFeedTextForKey(content),
+        normalizeFeedTextForKey(replyTo)
+      ].join('|');
+    }
+
+    return '';
+  }
+
+  function mutateOneFeedHiddenBlock(blockText, postId, mutator) {
+    blockText = String(blockText || '');
+    postId = String(postId || '').trim();
+
+    if (!postId) return blockText;
+    if (!blockText.includes('postId=' + postId)) return blockText;
+
+    return mutator(blockText);
+  }
+
+  function mutateFeedHiddenDataInMessage(currentMes, postId, mutator) {
+    currentMes = String(currentMes || '');
+    postId = String(postId || '').trim();
+
+    if (!postId) return {
+      text: currentMes,
+      changed: false
+    };
+
+    var changed = false;
+
+    // 优先处理 div 包裹的 hidden block
+    var divRe = /<div class="vv-feed-hidden"[^>]*>[\s\S]*?\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\][\s\S]*?<\/div>/g;
+
+    var replaced = currentMes.replace(divRe, function (block) {
+      if (!block.includes('postId=' + postId)) return block;
+
+      var next = mutateOneFeedHiddenBlock(block, postId, mutator);
+
+      if (next !== block) changed = true;
+
+      return next;
+    });
+
+    if (changed) {
+      return {
+        text: replaced,
+        changed: true
+      };
+    }
+
+    // 兜底：处理没有 div 包裹的纯 VV_FEED_HIDDEN_DATA
+    var pureRe = /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g;
+
+    replaced = currentMes.replace(pureRe, function (block) {
+      if (!block.includes('postId=' + postId)) return block;
+
+      var next = mutateOneFeedHiddenBlock(block, postId, mutator);
+
+      if (next !== block) changed = true;
+
+      return next;
+    });
+
+    return {
+      text: replaced,
+      changed: changed
+    };
+  }
+
+  function handleFeedLocalMutation(data) {
+    data = data || {};
+
+    var action = String(data.action || '').trim();
+    var postId = String(data.postId || '').trim();
+
+    if (!action || !postId) {
+      console.warn('[VVHOST][FEED_MUTATION] missing action/postId', data);
+      return false;
+    }
+
+    var ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) {
+      console.warn('[VVHOST][FEED_MUTATION] ctx/chat not available');
+      return false;
+    }
+
+    var hostIdx = findFeedHostMessageIndex();
+
+    if (hostIdx < 0 || !ctx.chat[hostIdx]) {
+      console.warn('[VVHOST][FEED_MUTATION] host message not found');
+      return false;
+    }
+
+    var currentMes = String(ctx.chat[hostIdx].mes || '');
+    var nextMes = currentMes;
+    var changed = false;
+
+    console.log('[VVHOST][FEED_MUTATION] received:', {
+      action: action,
+      postId: postId,
+      from: data.from,
+      content: data.content,
+      replyTo: data.replyTo
+    });
+
+    if (action === 'delete-post') {
+      var divRe = /<div class="vv-feed-hidden"[^>]*>[\s\S]*?\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\][\s\S]*?<\/div>/g;
+
+      nextMes = currentMes.replace(divRe, function (block) {
+        if (block.includes('postId=' + postId)) {
+          changed = true;
+          return '';
+        }
+
+        return block;
+      });
+
+      // 兜底：如果不是 div 包裹
+      if (!changed) {
+        var pureRe = /\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g;
+
+        nextMes = currentMes.replace(pureRe, function (block) {
+          if (block.includes('postId=' + postId)) {
+            changed = true;
+            return '';
+          }
+
+          return block;
+        });
+      }
+    }
+
+    if (action === 'add-like' || action === 'add-comment') {
+      var interactionBlock = buildFeedInteractionBlockFromMutation(data);
+
+      if (!interactionBlock) {
+        console.warn('[VVHOST][FEED_MUTATION] empty interaction block');
+        return false;
+      }
+
+      var deduped = dedupeInteractionBlocksForAppend(currentMes, [interactionBlock]);
+
+      if (deduped.length === 0) {
+        console.log('[VVHOST][FEED_MUTATION] duplicated interaction, skip append');
+        return false;
+      }
+
+      var resultAdd = mutateFeedHiddenDataInMessage(currentMes, postId, function (block) {
+        return block.replace(
+          /\[\/VV_FEED_HIDDEN_DATA\]/,
+          '\n' + deduped[0] + '\n[/VV_FEED_HIDDEN_DATA]'
+        );
+      });
+
+      nextMes = resultAdd.text;
+      changed = resultAdd.changed;
+    }
+
+    if (action === 'remove-like' || action === 'delete-comment') {
+      var targetKey = buildFeedInteractionKeyFromMutation(data);
+
+      if (!targetKey) {
+        console.warn('[VVHOST][FEED_MUTATION] empty target key for remove');
+        return false;
+      }
+
+      var resultRemove = mutateFeedHiddenDataInMessage(currentMes, postId, function (block) {
+        var before = block;
+
+        var after = block.replace(/\[互动\][\s\S]*?\[\/互动\]/g, function (ib) {
+          var key = buildInteractionKey(ib);
+
+          if (key === targetKey) {
+            console.log('[VVHOST][FEED_MUTATION] remove interaction:', targetKey);
+            return '';
+          }
+
+          return ib;
+        });
+
+        return after;
+      });
+
+      nextMes = resultRemove.text;
+      changed = resultRemove.changed && nextMes !== currentMes;
+    }
+
+    if (!changed || nextMes === currentMes) {
+      console.log('[VVHOST][FEED_MUTATION] no change');
+      return false;
+    }
+
+    ctx.chat[hostIdx].mes = nextMes;
+
+    try {
+      if (typeof ctx.saveChat === 'function') {
+        ctx.saveChat();
+      }
+    } catch (e) {
+      console.warn('[VVHOST][FEED_MUTATION] saveChat failed:', e);
+    }
+
+    console.log('[VVHOST][FEED_MUTATION] host hidden data updated:', action, postId);
+
+    pushFeedHiddenRawToPhone(nextMes, 'feed-local-mutation');
+
+    return true;
+  }
+
   function extractValidVVCallSyncBlock(text) {
     const raw = String(text || '');
     if (!raw.includes('[VV_CALL_SYNC]') || !raw.includes('[/VV_CALL_SYNC]')) return '';
@@ -1877,6 +2183,11 @@
     console.log('[VVHOST][SUMMON] got message:', data.type, 'keys:', Object.keys(data));
 
     try {
+      if (data.type === 'VV_FEED_LOCAL_MUTATION') {
+        handleFeedLocalMutation(data);
+        return;
+      }
+
       if (data.type === 'VVPHONE_READY') {
         console.log('[VVHOST][SUMMON] phone ready, scanning current floor for sync block...');
         try {
@@ -2084,25 +2395,25 @@
             viewId: lastViewId || ''
           });
 
-            if (feedMode) {
-              console.log('[VVHOST] feed mode, interceptor handles reply, skip normal polling');
+          if (feedMode) {
+            console.log('[VVHOST] feed mode, interceptor handles reply, skip normal polling');
 
-              // feed 模式必须在 /send 后主动触发生成，否则需要手动重 roll。
-              // 如果 command 已经自带 /trigger，就不要重复触发，避免双生成。
-              if (!commandHasTrigger) {
-                setTimeout(function () {
-                  console.log('[VVHOST][FEED] trigger generation after feed /send');
-                  triggerGenerationAfterSend();
-                }, 800);
-              } else {
-                console.log('[VVHOST][FEED] command already has /trigger, skip extra generation');
-              }
+            // feed 模式必须在 /send 后主动触发生成，否则需要手动重 roll。
+            // 如果 command 已经自带 /trigger，就不要重复触发，避免双生成。
+            if (!commandHasTrigger) {
+              setTimeout(function () {
+                console.log('[VVHOST][FEED] trigger generation after feed /send');
+                triggerGenerationAfterSend();
+              }, 800);
+            } else {
+              console.log('[VVHOST][FEED] command already has /trigger, skip extra generation');
+            }
 
-            } else if (callMode || (VV_CALL_INTERCEPTOR && VV_CALL_INTERCEPTOR.isActive && VV_CALL_INTERCEPTOR.isActive())) {
-              console.log('[VVHOST][SUMMON] call mode active, skip normal chat polling');
-              // 电话由 VV_CALL_INTERCEPTOR 接管，不走普通 VV_CHAT_SYNC
+          } else if (callMode || (VV_CALL_INTERCEPTOR && VV_CALL_INTERCEPTOR.isActive && VV_CALL_INTERCEPTOR.isActive())) {
+            console.log('[VVHOST][SUMMON] call mode active, skip normal chat polling');
+            // 电话由 VV_CALL_INTERCEPTOR 接管，不走普通 VV_CHAT_SYNC
 
-            } else if (diaryMode) {
+          } else if (diaryMode) {
             console.log('[VVHOST][DIARY] diary mode');
             // ★ 命令自带 /trigger 就不再补生成，避免双流掉字
             if (!commandHasTrigger) {
