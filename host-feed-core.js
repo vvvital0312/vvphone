@@ -276,6 +276,7 @@
     var callChatId = '';
     var callStartTime = '';
     var callTranscriptLines = [];
+    var callRawBlocks = [];
     var eventHandler = null;
     var onCallMessageCallback = null;
     var processedMessageIds = {};
@@ -283,66 +284,109 @@
 
     function findHostMessageIndex() {
       var ctx = getCtx();
-      if (!ctx) return -1;
+      if (!ctx || !Array.isArray(ctx.chat)) return -1;
+
       for (var i = ctx.chat.length - 1; i >= 0; i--) {
         var msg = ctx.chat[i];
         if (!msg) continue;
+
         var text = String(msg.mes || '');
-        if (text.includes('vv' + '手机') ||
-            text.includes('vv' + 'phone') ||
-            text.includes('vvvital0312.github.io/' + 'vvphone') ||
-            text.includes('phone' + 'Frame') ||
-            text.includes('VV' + 'HOST') ||
-            text.includes('VV_FEED_HIDDEN_DATA')) {
-          console.log('[FEED_INTERCEPT] found host msg, index:', i);
+
+        if (
+          text.includes('vv' + '手机') ||
+          text.includes('vv' + 'phone') ||
+          text.includes('vvvital0312.github.io/' + 'vvphone') ||
+          text.includes('vvvital0312.github.io') ||
+          text.includes('phone' + 'Frame') ||
+          text.includes('VV' + 'HOST') ||
+          text.includes('VV_CALL_HIDDEN' + '_DATA') ||
+          text.includes('VV_FEED_HIDDEN_DATA')
+        ) {
+          console.log('[CALL_INTERCEPT] found host msg, index:', i, 'snippet:', text.substring(0, 80));
           return i;
         }
       }
 
       for (var j = ctx.chat.length - 1; j >= 0; j--) {
         var m = ctx.chat[j];
+
         if (m && !m.is_user) {
           console.log('[CALL_INTERCEPT] fallback: using latest AI msg, index:', j);
           return j;
         }
       }
+
       return -1;
-    }
-
-    function appendCallDataToHostMessage(newContent) {
-      var ctx = getCtx();
-      if (!ctx || hostMessageIndex < 0) return;
-      var msg = ctx.chat[hostMessageIndex];
-      if (!msg) return;
-
-      var currentMes = String(msg.mes || '');
-
-      currentMes = currentMes.replace(/\[VV_CALL_HIDDEN_DATA\][\s\S]*?\[\/VV_CALL_HIDDEN_DATA\]/g, '');
-
-      var hiddenBlock = '\n';
-
-      msg.mes = currentMes.trimEnd() + hiddenBlock;
-
-      if (typeof ctx.saveChat === 'function') {
-        try { ctx.saveChat(); } catch (e) {}
-      }
-
-      console.log('[CALL_INTERCEPT] call data appended to host msg (index:' + hostMessageIndex + ')');
     }
 
     function buildTranscriptText() {
       var text = 'call target:' + callTargetName + '\n';
+      text += 'chatId:' + callChatId + '\n';
       text += 'call time:' + callStartTime + '\n';
       text += 'status:' + (isCallActive ? 'active' : 'ended') + '\n';
       text += '---\n';
+
       callTranscriptLines.forEach(function (line) {
         if (line.side === 'right') {
           text += 'user: ' + line.content + '\n';
         } else {
-          text += line.speaker + ': ' + line.content + '\n';
+          text += (line.speaker || callTargetName || '对方') + ': ' + line.content + '\n';
         }
       });
+
       return text;
+    }
+
+    function appendCallDataToHostMessage() {
+      var ctx = getCtx();
+      if (!ctx || !Array.isArray(ctx.chat) || hostMessageIndex < 0) return false;
+
+      var msg = ctx.chat[hostMessageIndex];
+      if (!msg) return false;
+
+      var currentMes = String(msg.mes || '');
+
+      // 清掉旧电话 hidden，避免重复膨胀
+      currentMes = currentMes.replace(
+        /<div class="vv-call-hidden"[\s\S]*?<\/div>/g,
+        ''
+      );
+
+      currentMes = currentMes.replace(
+        /\[VV_CALL_HIDDEN_DATA\][\s\S]*?\[\/VV_CALL_HIDDEN_DATA\]/g,
+        ''
+      );
+
+      var hiddenText =
+        '[VV_CALL_HIDDEN_DATA]\n' +
+        'chatId=' + (callChatId || '') + '\n' +
+        'target=' + (callTargetName || '') + '\n' +
+        'time=' + (callStartTime || '') + '\n\n' +
+        '[CALL_TRANSCRIPT]\n' +
+        buildTranscriptText().trim() + '\n' +
+        '[/CALL_TRANSCRIPT]\n\n';
+
+      if (callRawBlocks.length > 0) {
+        hiddenText += callRawBlocks.join('\n\n') + '\n';
+      }
+
+      hiddenText += '[/VV_CALL_HIDDEN_DATA]';
+
+      var hiddenBlock =
+        '\n<div class="vv-call-hidden" style="display:none">' +
+        hiddenText +
+        '</div>\n';
+
+      msg.mes = currentMes.trimEnd() + hiddenBlock;
+
+      try {
+        if (typeof ctx.saveChat === 'function') {
+          ctx.saveChat();
+        }
+      } catch (e) {}
+
+      console.log('[CALL_INTERCEPT] call data appended to host msg (index:' + hostMessageIndex + ')');
+      return true;
     }
 
     function startCallIntercept(options) {
@@ -350,6 +394,7 @@
         console.warn('[CALL_INTERCEPT] already in call');
         return false;
       }
+
       var ctx = getCtx();
       if (!ctx) {
         console.error('[CALL_INTERCEPT] cannot get ST context');
@@ -361,18 +406,22 @@
       callStartTime = options.storyTime || '';
       onCallMessageCallback = options.onMessage || null;
       callTranscriptLines = [];
+      callRawBlocks = [];
       processedMessageIds = {};
 
       hostMessageIndex = findHostMessageIndex();
+
       if (hostMessageIndex < 0) {
         console.error('[CALL_INTERCEPT] no available msg floor found');
         return false;
       }
+
       console.log('[CALL_INTERCEPT] host msg index:', hostMessageIndex);
 
       eventHandler = function (messageIndex) {
         handleInterceptedMessage(messageIndex);
       };
+
       ctx.eventSource.on(ctx.eventTypes.MESSAGE_RECEIVED, eventHandler);
       isCallActive = true;
 
@@ -381,193 +430,46 @@
         chatId: callChatId,
         hostIndex: hostMessageIndex
       });
+
       return true;
     }
 
     function endCallIntercept() {
       if (!isCallActive) return;
+
       var ctx = getCtx();
+
       if (ctx && eventHandler) {
         ctx.eventSource.removeListener(ctx.eventTypes.MESSAGE_RECEIVED, eventHandler);
       }
+
       eventHandler = null;
       isCallActive = false;
 
-      appendCallDataToHostMessage(buildTranscriptText());
+      appendCallDataToHostMessage();
 
       onCallMessageCallback = null;
       processedMessageIds = {};
+
       console.log('[CALL_INTERCEPT] call intercept stopped');
     }
 
     function addUserCallLines(userLines) {
       if (!isCallActive) return;
+
       if (!Array.isArray(userLines)) userLines = [userLines];
+
       userLines.forEach(function (line) {
         if (line && line.trim()) {
-          callTranscriptLines.push({ side: 'right', speaker: 'user', content: line.trim() });
-        }
-      });
-      appendCallDataToHostMessage(buildTranscriptText());
-    }
-
-    function parseCallSyncForHost(raw) {
-      raw = String(raw || '');
-
-      var blockMatch = raw.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
-      if (!blockMatch) return null;
-
-      var blockText = blockMatch[1];
-
-      function getField(name) {
-        var re = new RegExp('^\\s*' + name + '\\s*=\\s*(.+)', 'im');
-        var m = blockText.match(re);
-        return m ? String(m[1] || '').trim() : '';
-      }
-
-      var parsed = {
-        chatId: getField('chatId') || callChatId || '',
-        target: getField('target') || callTargetName || '',
-        callPhase: getField('callPhase') || 'reply',
-        time: getField('time') || '',
-        messages: [],
-        raw: raw
-      };
-
-      var callBlockRegex = /\[通话\]([\s\S]*?)(?=\[通话\]|\[\/VV_CALL_SYNC\]|$)/gi;
-      var match;
-
-      while ((match = callBlockRegex.exec(blockText)) !== null) {
-        var inner = match[1] || '';
-
-        var speakerMatch = inner.match(/^\s*speaker\s*=\s*(.+)/im);
-        var contentMatch = inner.match(/^\s*content\s*=\s*([\s\S]*?)(?=\n\s*[a-zA-Z\u4e00-\u9fa5_]+\s*=|\n\s*\[|$)/im);
-
-        var speaker = speakerMatch ? String(speakerMatch[1] || '').trim() : (parsed.target || callTargetName || '对方');
-        var content = contentMatch ? String(contentMatch[1] || '').trim() : '';
-
-        if (speaker && content) {
-          parsed.messages.push({
-            speaker: speaker,
-            text: content,
-            content: content
+          callTranscriptLines.push({
+            side: 'right',
+            speaker: 'user',
+            content: line.trim()
           });
         }
-      }
+      });
 
-      return parsed;
-    }
-
-    function appendCallSyncRawToHostMessage(raw) {
-      var ctx = getCtx();
-      if (!ctx || !Array.isArray(ctx.chat)) return false;
-
-      var hostMsg = ctx.chat[hostMessageIndex];
-      if (!hostMsg) {
-        console.warn('[CALL_INTERCEPT] host message not found for call raw append:', hostMessageIndex);
-        return false;
-      }
-
-      raw = String(raw || '').trim();
-      if (!raw) return false;
-
-      var currentMes = String(hostMsg.mes || '');
-
-      // 简单防重：同一段 VV_CALL_SYNC 已经写过就不重复写
-      if (currentMes.includes(raw)) {
-        console.log('[CALL_INTERCEPT] duplicated VV_CALL_SYNC raw, skip append');
-        return false;
-      }
-
-      var hiddenBlock =
-        '\n<div class="vv-call-hidden" style="display:none"></div>';
-
-      hostMsg.mes = currentMes.trimEnd() + hiddenBlock;
-
-      try {
-        if (typeof ctx.saveChat === 'function') {
-          ctx.saveChat();
-        }
-      } catch (e) {}
-
-      console.log('[CALL_INTERCEPT] VV_CALL_SYNC raw appended to host msg');
-      return true;
-    }
-
-    async function safeDeleteCallFloor(messageIndex) {
-      var ctx = getCtx();
-
-      if (!ctx || !Array.isArray(ctx.chat)) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: ctx/chat not available');
-        return false;
-      }
-
-      messageIndex = Number(messageIndex);
-
-      if (!Number.isFinite(messageIndex) || messageIndex < 0 || messageIndex >= ctx.chat.length) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: invalid index:', messageIndex);
-        return false;
-      }
-
-      if (messageIndex === hostMessageIndex) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: refuse to delete host floor:', messageIndex);
-        return false;
-      }
-
-      var msg = ctx.chat[messageIndex];
-
-      if (!msg) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: message not found:', messageIndex);
-        return false;
-      }
-
-      if (msg.is_user) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor: refuse to delete user message:', messageIndex);
-        return false;
-      }
-
-      try {
-        // 优先使用酒馆自己的删除函数
-        if (typeof window.deleteMessage === 'function') {
-          await window.deleteMessage(messageIndex);
-          console.log('[CALL_INTERCEPT] deleted AI call floor by window.deleteMessage:', messageIndex);
-          return true;
-        }
-
-        if (typeof deleteMessage === 'function') {
-          await deleteMessage(messageIndex);
-          console.log('[CALL_INTERCEPT] deleted AI call floor by deleteMessage:', messageIndex);
-          return true;
-        }
-      } catch (e) {
-        console.warn('[CALL_INTERCEPT] deleteMessage failed, fallback to splice:', e);
-      }
-
-      try {
-        // 兜底：直接从 chat 数组里移除
-        ctx.chat.splice(messageIndex, 1);
-
-        if (typeof ctx.saveChat === 'function') {
-          try {
-            ctx.saveChat();
-          } catch (e) {}
-        }
-
-        // 尝试刷新当前聊天显示
-        try {
-          if (typeof window.reloadCurrentChat === 'function') {
-            await window.reloadCurrentChat();
-          } else if (typeof reloadCurrentChat === 'function') {
-            await reloadCurrentChat();
-          }
-        } catch (e) {}
-
-        console.log('[CALL_INTERCEPT] deleted AI call floor by splice:', messageIndex);
-        return true;
-      } catch (e) {
-        console.warn('[CALL_INTERCEPT] safeDeleteCallFloor splice failed:', e);
-        return false;
-      }
+      appendCallDataToHostMessage();
     }
 
     async function handleInterceptedMessage(messageIndex) {
@@ -584,6 +486,12 @@
 
       var rawContent = String(msg.mes || '');
 
+      // 电话拦截器只处理电话同步
+      if (!rawContent.includes('[VV_CALL_SYNC]') || !rawContent.includes('[/VV_CALL_SYNC]')) {
+        console.log('[CALL_INTERCEPT] non-call AI reply ignored');
+        return;
+      }
+
       var msgKey = messageIndex + '_' + rawContent.length;
       if (processedMessageIds[msgKey]) {
         console.log('[CALL_INTERCEPT] already processed:', msgKey);
@@ -592,68 +500,60 @@
 
       processedMessageIds[msgKey] = true;
 
-      console.log('[CALL_INTERCEPT] intercepted AI reply, index:', messageIndex);
+      console.log('[CALL_INTERCEPT] intercepted call AI reply, index:', messageIndex);
 
-      // 电话拦截器只认 VV_CALL_SYNC
-      if (!/\[VV_CALL_SYNC\]/i.test(rawContent)) {
-        console.warn('[CALL_INTERCEPT] no VV_CALL_SYNC in reply, skipping');
-        return;
+      var parsed = parseCallResponse(rawContent);
+      parsed.raw = rawContent;
+
+      // 保存本轮原始 VV_CALL_SYNC 到一楼 hidden data
+      var callBlockMatch = rawContent.match(/\[VV_CALL_SYNC\][\s\S]*?\[\/VV_CALL_SYNC\]/i);
+      var callBlock = callBlockMatch ? String(callBlockMatch[0] || '').trim() : rawContent.trim();
+
+      if (callBlock && callRawBlocks.indexOf(callBlock) < 0) {
+        callRawBlocks.push(callBlock);
       }
 
-      var parsed = parseCallSyncForHost(rawContent);
+      if (parsed && parsed.messages && parsed.messages.length) {
+        parsed.messages.forEach(function (m) {
+          var text = String(m.content || m.text || '').trim();
+          if (!text) return;
 
-      if (!parsed) {
-        console.warn('[CALL_INTERCEPT] parse VV_CALL_SYNC failed');
-        return;
-      }
-
-      console.log('[CALL_INTERCEPT] parsed call sync:', parsed);
-
-      // 1. 把 AI 的通话内容加入 host 侧通话转录
-      parsed.messages.forEach(function (m) {
-        var text = String(m.text || m.content || '').trim();
-        if (!text) return;
-
-        callTranscriptLines.push({
-          side: 'left',
-          speaker: m.speaker || parsed.target || callTargetName || '对方',
-          content: text
+          callTranscriptLines.push({
+            side: 'left',
+            speaker: m.speaker || parsed.target || callTargetName,
+            content: text
+          });
         });
-      });
 
-      // 2. 把本轮 VV_CALL_SYNC 原文写回宿主楼层，保证“一楼有记忆”
-      appendCallSyncRawToHostMessage(rawContent);
+        appendCallDataToHostMessage();
+      } else {
+        appendCallDataToHostMessage();
+      }
 
-      // 3. 同时更新通话记录文本
-      appendCallDataToHostMessage(buildTranscriptText());
-
-      // 4. 回传手机页，让手机页更新通话 UI
       if (typeof onCallMessageCallback === 'function') {
         try {
-          onCallMessageCallback({
-            callPhase: parsed.callPhase,
-            messages: parsed.messages,
-            target: parsed.target || callTargetName,
-            chatId: parsed.chatId || callChatId,
-            raw: rawContent
-          });
+          onCallMessageCallback(parsed);
         } catch (e) {
           console.warn('[CALL_INTERCEPT] onMessage callback failed:', e);
         }
       }
 
-      // 5. 删除 AI 新开的楼层，实现“同层”
-      try {
-        await safeDeleteCallFloor(messageIndex);
-      } catch (e) {
-        console.warn('[CALL_INTERCEPT] delete AI call floor failed:', e);
-      }
+      // 延迟删除，避开酒馆 finalize
+      setTimeout(function () {
+        safeDeleteCallFloors(messageIndex);
+      }, 500);
+
+      setTimeout(function () {
+        safeDeleteCallFloors(messageIndex);
+      }, 1500);
     }
 
     async function safeDeleteCallFloors(aiMessageIndex) {
       var ctx = getCtx();
-      if (!ctx) return;
+      if (!ctx || !Array.isArray(ctx.chat)) return;
+
       var root = getRoot();
+      var doc = root && root.document ? root.document : document;
 
       console.log('[CALL_INTERCEPT] start deleting floors, aiIndex:', aiMessageIndex, 'total:', ctx.chat.length);
 
@@ -665,25 +565,40 @@
 
         if (i === hostMessageIndex) continue;
 
+        var mesText = String(m.mes || '');
+
+        // 删除 AI 回复楼层
         if (!m.is_user) {
-          var mesText = String(m.mes || '');
-          if (mesText.includes('[VV_CALL_SYNC]') || mesText.includes('[/VV_CALL_SYNC]')) {
-            toDelete.push(i);
-            continue;
+          if (
+            mesText.includes('[VV_CALL_SYNC]') ||
+            mesText.includes('[/VV_CALL_SYNC]')
+          ) {
+            // 避免误删宿主 hidden 楼层
+            if (!mesText.includes('VV_CALL_HIDDEN_DATA') && !mesText.includes('vv-call-hidden')) {
+              toDelete.push(i);
+              continue;
+            }
           }
         }
 
+        // 删除 slash 指令楼层，如果它还可见
         if (m.is_user) {
-          var userText = String(m.mes || '');
-          if (userText.includes('电话模式') || userText.includes('VV_CALL') ||
-              userText.includes('VV_EVENT') || userText.includes('通话阶段') ||
-              userText.includes('callPhase') || userText.includes('手机电话通话事件')) {
+          if (
+            mesText.includes('电话模式') ||
+            mesText.includes('VV_CALL') ||
+            mesText.includes('VV_EVENT') ||
+            mesText.includes('通话阶段') ||
+            mesText.includes('callPhase') ||
+            mesText.includes('手机电话通话事件') ||
+            mesText.includes('/inject id=vv_call')
+          ) {
             toDelete.push(i);
             continue;
           }
         }
 
-        if (ctx.chat.length - 1 - i > 8) break;
+        // 只看最近几层，避免误删历史
+        if (ctx.chat.length - 1 - i > 10) break;
       }
 
       console.log('[CALL_INTERCEPT] floors to delete:', toDelete);
@@ -697,14 +612,30 @@
 
       for (var j = 0; j < toDelete.length; j++) {
         var delIndex = toDelete[j];
-        try {
-          var domEl = root.document.querySelector('[mesid="' + delIndex + '"]');
-          if (domEl) {
-            domEl.style.display = 'none';
-            domEl.remove();
-            console.log('[CALL_INTERCEPT] DOM removed, mesid:', delIndex);
-          }
 
+        try {
+          // 先删 DOM
+          var selectors = [
+            '[mesid="' + delIndex + '"]',
+            '.mes[mesid="' + delIndex + '"]',
+            '#chat .mes[mesid="' + delIndex + '"]',
+            '[data-message-id="' + delIndex + '"]',
+            '.mes[data-message-id="' + delIndex + '"]'
+          ];
+
+          selectors.forEach(function (selector) {
+            try {
+              var nodes = doc.querySelectorAll(selector);
+              nodes.forEach(function (domEl) {
+                if (!domEl) return;
+                domEl.style.display = 'none';
+                domEl.remove();
+                console.log('[CALL_INTERCEPT] DOM removed:', selector);
+              });
+            } catch (e) {}
+          });
+
+          // 再删 chat 数组
           if (ctx.chat[delIndex]) {
             ctx.chat.splice(delIndex, 1);
             console.log('[CALL_INTERCEPT] chat array removed index:', delIndex);
@@ -714,8 +645,9 @@
         }
       }
 
+      // 重新编号 DOM mesid
       try {
-        var allMes = root.document.querySelectorAll('#chat .mes');
+        var allMes = doc.querySelectorAll('#chat .mes');
         allMes.forEach(function (el, idx) {
           el.setAttribute('mesid', idx);
         });
@@ -723,58 +655,96 @@
         console.warn('[CALL_INTERCEPT] re-index mesid failed:', e);
       }
 
+      // 重新定位宿主楼层
       hostMessageIndex = findHostMessageIndex();
       console.log('[CALL_INTERCEPT] re-located host msg floor:', hostMessageIndex);
 
-      if (typeof ctx.saveChat === 'function') {
-        try { ctx.saveChat(); } catch (e) {}
-      }
+      try {
+        if (typeof ctx.saveChat === 'function') {
+          ctx.saveChat();
+        }
+      } catch (e) {}
 
       console.log('[CALL_INTERCEPT] deletion done, remaining floors:', ctx.chat.length);
     }
 
     function parseCallResponse(raw) {
-      var result = { callPhase: '', chatId: '', target: '', messages: [] };
+      var result = {
+        callPhase: '',
+        chatId: '',
+        target: '',
+        messages: [],
+        raw: raw || ''
+      };
+
       if (!raw) return result;
 
-      var syncMatch = raw.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/);
+      var syncMatch = raw.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
+
       if (syncMatch) {
         var block = syncMatch[1];
-        var phaseMatch = block.match(/callPhase\s*=\s*(.+)/i);
-        var chatIdMatch = block.match(/chatId\s*=\s*(.+)/i);
-        var targetMatch = block.match(/target\s*=\s*(.+)/i);
+
+        var phaseMatch = block.match(/(?:^|\n)\s*callPhase\s*=\s*(.+)/i);
+        var chatIdMatch = block.match(/(?:^|\n)\s*chatId\s*=\s*(.+)/i);
+        var targetMatch = block.match(/(?:^|\n)\s*target\s*=\s*(.+)/i);
+        var timeMatch = block.match(/(?:^|\n)\s*time\s*=\s*(.+)/i);
 
         result.callPhase = phaseMatch ? phaseMatch[1].trim().toLowerCase() : '';
-        result.chatId = chatIdMatch ? chatIdMatch[1].trim() : '';
-        result.target = targetMatch ? targetMatch[1].trim() : '';
+        result.chatId = chatIdMatch ? chatIdMatch[1].trim() : callChatId || '';
+        result.target = targetMatch ? targetMatch[1].trim() : callTargetName || '';
+        result.time = timeMatch ? timeMatch[1].trim() : '';
 
-        var talkMatches = block.match(/\[通话\]([\s\S]*?)(?=\[通话\]|\[\/VV_CALL_SYNC\]|$)/g);
-        if (talkMatches) {
-          talkMatches.forEach(function (talkBlock) {
-            var speakerM = talkBlock.match(/speaker\s*=\s*(.+)/i);
-            var contentM = talkBlock.match(/content\s*=\s*([\s\S]*?)(?=speaker\s*=|$)/i);
-            if (contentM) {
-              var speaker = speakerM ? speakerM[1].trim() : result.target || callTargetName;
-              var content = contentM[1].trim();
-              if (content) result.messages.push({ speaker: speaker, content: content });
-            }
-          });
+        var talkRegex = /\[通话\]([\s\S]*?)(?=\[通话\]|\[\/VV_CALL_SYNC\]|$)/gi;
+        var m;
+
+        while ((m = talkRegex.exec(block)) !== null) {
+          var talkBlock = String(m[1] || '');
+
+          var speakerM = talkBlock.match(/(?:^|\n)\s*speaker\s*=\s*([^\n\r]+)/i);
+          var contentM = talkBlock.match(
+            /(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:speaker|callPhase|chatId|target|time)\s*=|\n\s*\[通话\]|\s*$)/i
+          );
+
+          var speaker = speakerM ? speakerM[1].trim() : result.target || callTargetName || '对方';
+          var content = contentM ? contentM[1].trim() : '';
+
+          if (content) {
+            result.messages.push({
+              speaker: speaker,
+              content: content,
+              text: content
+            });
+          }
         }
+
         return result;
       }
 
+      // 兜底：普通冒号对话
       var lines = raw.split('\n').filter(function (l) { return l.trim(); });
+
       lines.forEach(function (line) {
         var colonMatch = line.trim().match(/^(.{1,20})[：:]\s*(.+)$/);
         if (colonMatch) {
           var speaker = colonMatch[1].trim();
           var text = colonMatch[2].trim();
+
           if (speaker && text && speaker !== '用户' && speaker !== '我' && speaker !== '你') {
-            result.messages.push({ speaker: speaker, content: text });
+            result.messages.push({
+              speaker: speaker,
+              content: text,
+              text: text
+            });
           }
         }
       });
-      if (result.messages.length > 0) result.callPhase = 'reply';
+
+      if (result.messages.length > 0) {
+        result.callPhase = 'reply';
+        result.chatId = callChatId || '';
+        result.target = callTargetName || '';
+      }
+
       return result;
     }
 
@@ -787,7 +757,7 @@
       getHostIndex: function () { return hostMessageIndex; },
       parseResponse: parseCallResponse
     };
-  })();
+  })();  
 
   var VV_FEED_INTERCEPTOR = (function () {
     var isActive = false;
