@@ -22,6 +22,8 @@
   let lastVVDiarySyncRaw = '';
   let lastPushedFeedHiddenRaw = '';
   let lastPushedFeedHiddenSig = '';
+  let pendingFeedInteraction = null;
+  const processedAiFeedPostIds = {};
 
   function getFeedHiddenSig(raw) {
     raw = String(raw || '');
@@ -120,6 +122,15 @@
       console.warn('[VVHOST][SUMMON] postToPhone failed:', err);
       return false;
     }
+  }
+
+  function openFeedPageOnPhone(reason) {
+    console.log('[VVHOST][FEED] request phone open feed page, reason=', reason || '');
+
+    postToPhone({
+      type: 'VV_OPEN_FEED',
+      reason: reason || ''
+    });
   }
 
   function normalizeFeedTextForKey(text) {
@@ -669,6 +680,52 @@
     };
   })();
 
+  function convertWrongAiFeedPostToInteractionRaw(rawContent) {
+    rawContent = String(rawContent || '');
+
+    if (!pendingFeedInteraction) return rawContent;
+    if (!pendingFeedInteraction.postId) return rawContent;
+    if (Date.now() > pendingFeedInteraction.expiresAt) {
+      console.log('[VVHOST][FEED] pending interaction expired');
+      pendingFeedInteraction = null;
+      return rawContent;
+    }
+
+    if (!rawContent.includes('[VV_AI_FEED_POST]') || !rawContent.includes('[/VV_AI_FEED_POST]')) {
+      return rawContent;
+    }
+
+    var payload = extractAiFeedPostBlock(rawContent);
+    if (!payload || !payload.content) return rawContent;
+
+    var from = String(payload.from || payload.bridgeName || '').trim();
+    var content = String(payload.content || '').trim();
+
+    if (!from || !content) return rawContent;
+
+    var replyTo = pendingFeedInteraction.from || '';
+
+    var converted =
+      '[VV_FEED_SYNC]\n' +
+      'postId=' + pendingFeedInteraction.postId + '\n\n' +
+      '[互动]\n' +
+      'from=' + from + '\n' +
+      'action=comment\n' +
+      'content=' + content + '\n' +
+      (replyTo ? 'replyTo=' + replyTo + '\n' : '') +
+      '[/互动]\n' +
+      '[/VV_FEED_SYNC]';
+
+    console.log('[VVHOST][FEED] converted wrong VV_AI_FEED_POST to interaction:', {
+      postId: pendingFeedInteraction.postId,
+      from: from,
+      replyTo: replyTo,
+      content: content
+    });
+
+    return converted;
+  }
+
   var VV_FEED_INTERCEPTOR = (function () {
     var isActive = false;
     var hostMessageIndex = -1;
@@ -774,8 +831,13 @@
 
       stop();
 
+      // 如果评论/回复场景下，模型错误输出了 VV_AI_FEED_POST，
+      // 这里强制转成 VV_FEED_SYNC + [互动]
+      rawContent = convertWrongAiFeedPostToInteractionRaw(rawContent);
+
       if (!rawContent.includes('[VV_FEED_SYNC]')) {
         console.warn('[FEED_INTERCEPT] no VV_FEED_SYNC in reply, skipping');
+        await safeDeleteFeedFloor(messageIndex);
         return;
       }
 
@@ -854,8 +916,11 @@
 
             console.log('[FEED_INTERCEPT] appended feed sync for postId:', targetPostId);
 
+            pendingFeedInteraction = null;
+
             // 写入成功后，把完整 raw 发给手机页
-            pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');        
+            pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
+            openFeedPageOnPhone('feed-intercept-append');    
           } else {
             console.log('[FEED_INTERCEPT] no [互动] blocks found in AI reply');
           }
@@ -1830,7 +1895,11 @@
           if (feedBlock) {
             clearInterval(timer);
             console.log('[VVHOST][SUMMON] poll FOUND feed sync in index=', i);
-            postFeedSyncToPhone(feedBlock, viewId);
+
+            // feed 数据统一由 VV_FEED_INTERCEPTOR / hidden raw 写入手机。
+            // 这里不要直接 postFeedSyncToPhone，避免双来源重复。
+            openFeedPageOnPhone('poll-feed-sync');
+
             return;
           }
         }
@@ -2155,12 +2224,20 @@
             console.log('[VVHOST][AI_FEED] detected VV_AI_FEED_POST in AI msg at index', i);
 
             var aiPostBlock = extractAiFeedPostBlock(text);
+
             if (aiPostBlock) {
-              postToPhone({
-                type: 'VV_AI_FEED_POST',
-                payload: aiPostBlock
-              });
-              console.log('[VVHOST][AI_FEED] sent VV_AI_FEED_POST to phone:', aiPostBlock);
+              var aiPostId = String(aiPostBlock.postId || '').trim() || ('idx_' + i + '_' + text.length);
+
+              if (processedAiFeedPostIds[aiPostId]) {
+                console.log('[VVHOST][AI_FEED] duplicated postId, skip:', aiPostId);
+                continue;
+              }
+
+              processedAiFeedPostIds[aiPostId] = true;
+
+              appendAiFeedPostToHostHidden(aiPostBlock, 'ai-feed-poller');
+
+              console.log('[VVHOST][AI_FEED] appended AI feed post to hidden:', aiPostBlock);
             }
           }
         }
@@ -2260,6 +2337,22 @@
 
         const feedMeta = data.feedMeta || null;
         const userInteraction = data.userInteraction || null;
+
+        if (feedMode && userInteraction) {
+          pendingFeedInteraction = {
+            postId: String(userInteraction.postId || '').trim(),
+            from: String(userInteraction.from || '').trim(),
+            action: String(userInteraction.action || '').trim(),
+            content: String(userInteraction.content || '').trim(),
+            replyTo: String(userInteraction.replyTo || '').trim(),
+            startedAt: Date.now(),
+            expiresAt: Date.now() + 120000
+          };
+
+          console.log('[VVHOST][FEED] pending interaction set:', pendingFeedInteraction);
+        } else if (feedMode && feedMeta) {
+          pendingFeedInteraction = null;
+        }
 
         const diaryMode = isDiaryCommand(command);
         console.log('[VVHOST][MODE CHECK]', { diaryMode, annotationMode });
@@ -2492,8 +2585,9 @@
 
         const feedBlock = extractValidVVFeedSyncBlock(rawText);
         if (feedBlock) {
-          // 这里只作为兜底。正常 feedMode 仍由 VV_FEED_INTERCEPTOR 写入 hidden raw。
-          postFeedSyncToPhone(feedBlock, viewId);
+          // 正常 feedMode 由 VV_FEED_INTERCEPTOR 写入 hidden raw。
+          // 这里只作为提示打开 feed 页面，不再直接把 VVPHONE_FEED_SYNC 发给手机，避免双来源重复。
+          openFeedPageOnPhone('raw-llm-feed-sync');
           handled = true;
         }
 
@@ -2601,6 +2695,95 @@
 
     console.log('[VVHOST] feed hidden data watcher started');
   })();
+
+  function buildAiFeedHiddenBlock(payload) {
+    if (!payload) return '';
+
+    var postId = String(payload.postId || ('f' + Date.now())).trim();
+    var from = String(payload.from || '').trim();
+    var bridgeName = String(payload.bridgeName || from || '').trim();
+    var time = String(payload.time || '').trim();
+    var content = String(payload.content || '').trim();
+
+    if (!from || !content) return '';
+
+    var photoLine = '';
+
+    if (Array.isArray(payload.photos) && payload.photos.length) {
+      var photoText = payload.photos.map(function (p, idx) {
+        return '[图' + (idx + 1) + ':' + String((p && p.desc) || '图片').trim() + ']';
+      }).join('');
+      photoLine = '\nphoto=' + photoText;
+    }
+
+    return (
+      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+      'postId=' + postId + '\n\n' +
+      '[动态]\n' +
+      'from=' + from + '\n' +
+      'bridgeName=' + bridgeName + '\n' +
+      'time=' + time + '\n' +
+      'content=' + content +
+      photoLine + '\n' +
+      '[/动态]\n\n' +
+      '[/VV_FEED_HIDDEN_DATA]</div>\n'
+    );
+  }
+
+  function appendAiFeedPostToHostHidden(payload, reason) {
+    payload = payload || {};
+
+    var postId = String(payload.postId || '').trim();
+    if (!postId) return false;
+
+    var ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) {
+      console.warn('[VVHOST][AI_FEED] ctx/chat not available');
+      return false;
+    }
+
+    var hostIdx = findFeedHostMessageIndex();
+
+    if (hostIdx < 0 || !ctx.chat[hostIdx]) {
+      console.warn('[VVHOST][AI_FEED] host message not found');
+      return false;
+    }
+
+    var currentMes = String(ctx.chat[hostIdx].mes || '');
+
+    if (currentMes.includes('postId=' + postId)) {
+      console.log('[VVHOST][AI_FEED] duplicated postId, skip write:', postId);
+      return false;
+    }
+
+    var hiddenBlock = buildAiFeedHiddenBlock(payload);
+
+    if (!hiddenBlock) {
+      console.warn('[VVHOST][AI_FEED] empty hidden block');
+      return false;
+    }
+
+    currentMes = currentMes.trimEnd() + '\n' + hiddenBlock;
+
+    ctx.chat[hostIdx].mes = currentMes;
+
+    try {
+      if (typeof ctx.saveChat === 'function') {
+        ctx.saveChat();
+      }
+    } catch (e) {
+      console.warn('[VVHOST][AI_FEED] saveChat failed:', e);
+    }
+
+    console.log('[VVHOST][AI_FEED] written to hidden data:', postId, reason || '');
+
+    pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-post');
+
+    openFeedPageOnPhone(reason || 'ai-feed-post');
+
+    return true;
+  }
 
   function extractAiFeedPostBlock(text) {
     var match = text.match(/\[VV_AI_FEED_POST\]([\s\S]*?)\[\/VV_AI_FEED_POST\]/i);

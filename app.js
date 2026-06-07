@@ -10206,6 +10206,32 @@ function initVVHostNavigationBridge() {
         return;
       }
 
+      if (type === 'VV_OPEN_FEED') {
+        console.log('[VV][FEED] open feed page requested by host:', data.reason || '');
+
+        try {
+          if (typeof switchTab === 'function') {
+            switchTab('feed');
+          } else if (typeof openTab === 'function') {
+            openTab('feed');
+          } else if (typeof showPage === 'function') {
+            showPage('feedPage');
+          } else {
+            var feedTab =
+              document.querySelector('[data-tab="feed"]') ||
+              document.querySelector('[data-page="feed"]') ||
+              document.querySelector('#tabFeed') ||
+              document.querySelector('.tab-feed');
+
+            if (feedTab) feedTab.click();
+          }
+        } catch (err) {
+          console.warn('[VV][FEED] open feed page failed:', err);
+        }
+
+        return;
+      }
+
       if (type === 'VVPHONE_OPEN_CHAT') {
         const chatId = String(data.chatId || data.viewId || '').trim();
         const target = String(data.target || '').trim();
