@@ -118,6 +118,51 @@
     }
   }
 
+  function postFeedViewToPhone(reason, postId) {
+    reason = String(reason || 'feed').trim();
+    postId = String(postId || '').trim();
+
+    console.log('[VVHOST_FEED][NAV] postFeedViewToPhone:', {
+      reason: reason,
+      postId: postId
+    });
+
+    // 1. 仿照 chat 的 VVPHONE_SET_VIEW，明确告诉手机：切到 feed 视图
+    postToPhone({
+      type: 'VVPHONE_SET_VIEW',
+      view: 'feed',
+      page: 'feed',
+      tab: 'feed',
+      postId: postId,
+      reason: reason
+    });
+
+    // 2. 兼容旧监听
+    postToPhone({
+      type: 'VV_OPEN_FEED',
+      page: 'feed',
+      tab: 'feed',
+      postId: postId,
+      reason: reason
+    });
+
+    postToPhone({
+      type: 'VV_NAVIGATE',
+      page: 'feed',
+      tab: 'feed',
+      postId: postId,
+      reason: reason
+    });
+
+    postToPhone({
+      type: 'VV_SWITCH_TAB',
+      page: 'feed',
+      tab: 'feed',
+      postId: postId,
+      reason: reason
+    });
+  }
+
   function normalizeFeedTextForKey(text) {
     return String(text || '')
       .replace(/\s+/g, ' ')
@@ -1014,12 +1059,9 @@
           // 写入成功后，把完整 hidden raw 发给手机页
           pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
 
+          // AI 新动态生成后，仿照 chat 的 set view 逻辑，明确切到 feed
           if (postBlockMatch) {
-            postToPhone({
-              type: 'VV_OPEN_FEED',
-              reason: 'ai_feed_post',
-              postId: targetPostId || ''
-            });
+            postFeedViewToPhone('ai_feed_post', targetPostId || '');
           }
         } else {
           console.log('[FEED_INTERCEPT] no hidden data changed, skip save/post');
@@ -2046,25 +2088,6 @@
         console.log('[VVHOST][FEED_WATCHER] all hidden data changed, pushing to phone, length=', currentRaw.length);
 
         pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher-rescan');
-
-        postToPhone({
-          type: 'VV_OPEN_FEED',
-          reason: 'feed-watcher-rescan'
-        });
-
-        postToPhone({
-          type: 'VV_NAVIGATE',
-          page: 'feed',
-          tab: 'feed',
-          reason: 'feed-watcher-rescan'
-        });
-
-        postToPhone({
-          type: 'VV_SWITCH_TAB',
-          tab: 'feed',
-          page: 'feed',
-          reason: 'feed-watcher-rescan'
-        });
       } catch (err) {
         console.warn('[VVHOST][FEED_WATCHER] error:', err);
       }
@@ -2194,16 +2217,14 @@
 
     // 注意：不能用 currentMes.includes('postId=' + postId)
     // 因为 AI_FEED_POST 原文里本来就有 postId，会误判。
-    if (hasHiddenFeedPost(currentMes, postId)) {
-      console.log('[VVHOST_FEED][AI_FEED] duplicated hidden postId, skip write:', postId);
-      pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-duplicate-push');
+  if (hasHiddenFeedPost(currentMes, postId)) {
+    console.log('[VVHOST_FEED][AI_FEED] duplicated hidden postId, skip write:', postId);
+    pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-duplicate-push');
 
-      postToPhone({ type: 'VV_OPEN_FEED', reason: reason || 'ai-feed-duplicate-push' });
-      postToPhone({ type: 'VV_NAVIGATE', page: 'feed', tab: 'feed', reason: reason || 'ai-feed-duplicate-push' });
-      postToPhone({ type: 'VV_SWITCH_TAB', tab: 'feed', page: 'feed', reason: reason || 'ai-feed-duplicate-push' });
+    postFeedViewToPhone(reason || 'ai-feed-duplicate-push', postId);
 
-      return true;
-    }
+    return true;
+  }
 
     var hiddenBlock = buildAiFeedHiddenBlock(payload);
 
@@ -2227,9 +2248,7 @@
 
     pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-post');
 
-    postToPhone({ type: 'VV_OPEN_FEED', reason: reason || 'ai-feed-post' });
-    postToPhone({ type: 'VV_NAVIGATE', page: 'feed', tab: 'feed', reason: reason || 'ai-feed-post' });
-    postToPhone({ type: 'VV_SWITCH_TAB', tab: 'feed', page: 'feed', reason: reason || 'ai-feed-post' });
+    postFeedViewToPhone(reason || 'ai-feed-post', postId);
 
     return true;
   }

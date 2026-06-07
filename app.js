@@ -10236,31 +10236,90 @@ function initVVHostNavigationBridge() {
 
       // ========== 原有的导航处理 ==========
       if (type === 'VVPHONE_SET_VIEW') {
-        if (String(data.view || '') !== 'chat') return;
+        const view = String(data.view || '').trim();
+        const page = String(data.page || '').trim();
+        const tab = String(data.tab || '').trim();
 
-        const chatId = String(data.chatId || data.viewId || '').trim();
-        const target = String(data.target || '').trim();
-        const chatType = String(data.chatType || 'direct').trim() || 'direct';
+        // ========== chat 跳转：保留原逻辑 ==========
+        if (view === 'chat') {
+          const chatId = String(data.chatId || data.viewId || '').trim();
+          const target = String(data.target || '').trim();
+          const chatType = String(data.chatType || 'direct').trim() || 'direct';
 
-        console.log('[VV][NAV] VVPHONE_SET_VIEW -> chat', {
-          chatId,
-          target,
-          chatType
-        });
+          console.log('[VV][NAV] VVPHONE_SET_VIEW -> chat', {
+            chatId,
+            target,
+            chatType
+          });
 
-        if (!chatId) {
-          console.warn('[VV][NAV] VVPHONE_SET_VIEW ignored: empty chatId');
+          if (!chatId) {
+            console.warn('[VV][NAV] VVPHONE_SET_VIEW chat ignored: empty chatId');
+            return;
+          }
+
+          if (chatType === 'direct' && typeof openChatDetail === 'function') {
+            await openChatDetail(chatId, target || '');
+          } else if (typeof openChat === 'function') {
+            await openChat(chatId, chatType);
+          }
+
           return;
         }
 
-        if (chatType === 'direct' && typeof openChatDetail === 'function') {
-          await openChatDetail(chatId, target || '');
-        } else if (typeof openChat === 'function') {
-          await openChat(chatId, chatType);
+        // ========== feed 跳转：新增 ==========
+        if (view === 'feed' || page === 'feed' || tab === 'feed') {
+          console.log('[VV][NAV] VVPHONE_SET_VIEW -> feed', data);
+
+          try {
+            // 优先使用你现有的联系人 tab 切换函数
+            if (typeof switchContactTab === 'function') {
+              currentContactTab = 'feed';
+              switchContactTab('feed');
+            } else if (typeof switchTab === 'function') {
+              switchTab('feed');
+            } else if (typeof openTab === 'function') {
+              openTab('feed');
+            } else if (typeof showPage === 'function') {
+              showPage('feedPage');
+            }
+
+            // DOM 兜底：保证 feedPanel 显示
+            var feedPanel = document.getElementById('feedPanel');
+            if (feedPanel) {
+              ['directPanel', 'groupPanel', 'feedPanel', 'profilePage', 'profilePanel'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+
+                var active = id === 'feedPanel';
+                el.style.display = active ? '' : 'none';
+                el.classList.toggle('active', active);
+              });
+            }
+
+            // 重新渲染朋友圈
+            if (typeof renderFeedHeader === 'function') {
+              renderFeedHeader();
+            }
+
+            if (typeof renderFeedList === 'function') {
+              renderFeedList();
+            }
+
+            if (typeof hydrateMediaRefs === 'function') {
+              hydrateMediaRefs();
+            }
+
+            console.log('[VV][NAV] feed view opened by VVPHONE_SET_VIEW');
+          } catch (err) {
+            console.warn('[VV][NAV] VVPHONE_SET_VIEW feed failed:', err);
+          }
+
+          return;
         }
 
+        console.warn('[VV][NAV] VVPHONE_SET_VIEW unknown view:', data);
         return;
-      }     
+      }    
 
       if (type === 'VV_FEED_HIDDEN_RAW') {
         var raw = data.raw || '';
@@ -10293,55 +10352,31 @@ function initVVHostNavigationBridge() {
         (type === 'VV_NAVIGATE' && (data.page === 'feed' || data.tab === 'feed')) ||
         (type === 'VV_SWITCH_TAB' && (data.page === 'feed' || data.tab === 'feed'))
       ) {
-        console.log('[VV][FEED] open feed page requested by host:', data.reason || '', data);
+        console.log('[VV][FEED] legacy open feed requested by host:', data.reason || '', data);
 
         try {
-          // 你的真实动态页切换函数是这个
           if (typeof switchContactTab === 'function') {
             currentContactTab = 'feed';
             switchContactTab('feed');
-            return;
-          }
-
-          if (typeof switchTab === 'function') {
+          } else if (typeof switchTab === 'function') {
             switchTab('feed');
-            return;
-          }
-
-          if (typeof openTab === 'function') {
-            openTab('feed');
-            return;
-          }
-
-          if (typeof showPage === 'function') {
-            showPage('feedPage');
-            return;
-          }
-
-          var feedTab =
-            document.querySelector('[data-tab="feed"]') ||
-            document.querySelector('[data-page="feed"]') ||
-            document.querySelector('#tabFeed') ||
-            document.querySelector('.tab-feed') ||
-            document.querySelector('.contact-tab[data-tab="feed"]');
-
-          if (feedTab) {
-            feedTab.click();
-            return;
           }
 
           var feedPanel = document.getElementById('feedPanel');
           if (feedPanel) {
-            ['directPanel', 'groupPanel', 'feedPanel', 'profilePage'].forEach(function (id) {
+            ['directPanel', 'groupPanel', 'feedPanel', 'profilePage', 'profilePanel'].forEach(function (id) {
               var el = document.getElementById(id);
               if (!el) return;
-              el.style.display = id === 'feedPanel' ? 'block' : 'none';
-              el.classList.toggle('active', id === 'feedPanel');
-            });
 
-            renderFeedHeader?.();
-            renderFeedList?.();
+              var active = id === 'feedPanel';
+              el.style.display = active ? '' : 'none';
+              el.classList.toggle('active', active);
+            });
           }
+
+          if (typeof renderFeedHeader === 'function') renderFeedHeader();
+          if (typeof renderFeedList === 'function') renderFeedList();
+          if (typeof hydrateMediaRefs === 'function') hydrateMediaRefs();
         } catch (err) {
           console.warn('[VV][FEED] open feed page failed:', err);
         }
