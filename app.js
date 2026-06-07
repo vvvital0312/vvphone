@@ -2304,7 +2304,7 @@ function parseFeedSyncRaw(raw) {
   result.time = readFeedField(block, 'time');
 
   // =========================
-  // 解析 AI 主动动态
+  // 解析 AI 主动动态 / 动态主体
   // =========================
 
   const postBlocks = block.match(/\[动态\][\s\S]*?\[\/动态\]/gi) || [];
@@ -2329,25 +2329,35 @@ function parseFeedSyncRaw(raw) {
     const from = readFeedField(pb, 'from');
     const bridgeName = readFeedField(pb, 'bridgeName');
     const content = readFeedField(pb, 'content');
-    const photoText = readFeedField(pb, 'photo');
 
-    result.post = {
-      from,
-      bridgeName,
-      content,
-      photos: []
-    };
+    // 真实图片
+    const imagesText = readFeedField(pb, 'images');
+    const realImages = normalizeFeedImages(imagesText);
+
+    // 模拟图片
+    const photoText = readFeedField(pb, 'photo');
+    let simulatedPhotos = [];
 
     if (photoText) {
-      const imageMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
+      const imageMatches = Array.from(photoText.matchAll(/\[图\d+:(.*?)\]/g));
 
-      result.post.photos = imageMatches.map(function (m) {
+      simulatedPhotos = imageMatches.map(function (m) {
         return {
           simulated: true,
           desc: String(m[1] || '').trim()
         };
       });
     }
+
+    const finalImages = realImages.length ? realImages : simulatedPhotos;
+
+    result.post = {
+      from,
+      bridgeName,
+      content,
+      photos: finalImages,
+      images: finalImages
+    };
   }
 
   // =========================
@@ -2842,6 +2852,115 @@ function appendVVChatReplyToLocal(chatData, msgIndex) {
   }
 }
 
+function normalizeFeedImages(input) {
+  if (!input) return [];
+
+  var arr = [];
+
+  if (Array.isArray(input)) {
+    arr = input;
+  } else if (typeof input === 'string') {
+    arr = input.split(',');
+  } else {
+    arr = [input];
+  }
+
+  return arr.map(function (item) {
+    // 保留模拟图片对象
+    if (item && typeof item === 'object') {
+      if (item.simulated) return item;
+
+      var ref = String(
+        item.ref ||
+        item.idbRef ||
+        item.assetKey ||
+        item.id ||
+        item.src ||
+        item.url ||
+        ''
+      ).trim();
+
+      return ref;
+    }
+
+    return String(item || '').trim();
+  }).filter(function (item) {
+    if (!item) return false;
+    if (item === 'undefined' || item === 'null') return false;
+    return true;
+  });
+}
+
+function getFeedPostStableId(post) {
+  if (!post) return '';
+  return String(post.id || post.postId || '').trim();
+}
+
+function isSameFeedPostLoose(a, b) {
+  if (!a || !b) return false;
+
+  var aid = getFeedPostStableId(a);
+  var bid = getFeedPostStableId(b);
+
+  if (aid && bid && aid === bid) return true;
+
+  var aAuthor = normalizeFeedKeyText(a.author || a.from || '');
+  var bAuthor = normalizeFeedKeyText(b.author || b.from || '');
+
+  var aContent = normalizeFeedKeyText(a.content || '');
+  var bContent = normalizeFeedKeyText(b.content || '');
+
+  if (aAuthor && bAuthor && aContent && bContent && aAuthor === bAuthor && aContent === bContent) {
+    return true;
+  }
+
+  return false;
+}
+
+function mergeFeedPostKeepingImages(localPost, hostPost) {
+  localPost = localPost || {};
+  hostPost = hostPost || {};
+
+  var localImages = normalizeFeedImages(localPost.images || []);
+  var hostImages = normalizeFeedImages(hostPost.images || []);
+
+  var merged = Object.assign({}, localPost, hostPost);
+
+  var finalId = getFeedPostStableId(hostPost) || getFeedPostStableId(localPost);
+
+  merged.id = finalId;
+  merged.postId = finalId;
+
+  // host 如果解析到了 images=idb:xxx，就用 host；
+  // host 没解析到时，保留本地已有图片。
+  merged.images = hostImages.length ? hostImages : localImages;
+
+  merged.comments = dedupeFeedComments(
+    []
+      .concat(localPost.comments || [])
+      .concat(hostPost.comments || [])
+  );
+
+  merged.likes = dedupeFeedLikes(
+    []
+      .concat(localPost.likes || [])
+      .concat(hostPost.likes || [])
+  );
+
+  if (!merged.authorId) {
+    var myName = myProfile.nickname || appProfile.myName || '我';
+    if (merged.author === '我' || merged.author === myName) {
+      merged.authorId = 'me';
+    }
+  }
+
+  if (merged.authorId === 'me') {
+    merged.authorAvatar = getMyProfileAvatar() || DEFAULT_AVATAR;
+  }
+
+  return merged;
+}
+
 function rebuildFeedPostsFromRaw(fullRaw) {
   if (!fullRaw) return;
 
@@ -2852,36 +2971,11 @@ function rebuildFeedPostsFromRaw(fullRaw) {
   console.log('[VV][FEED] found hidden blocks:', blocks.length);
   if (blocks.length === 0) return;
 
-  // 本轮 hidden raw 里出现过的 postId。
-  // 这些 postId 以后以 hidden raw 为准，先清掉本地同 id/postId 的重复污染。
-  var incomingPostIds = [];
-
-  blocks.forEach(function (block) {
-    var pid = readFeedField(block, 'postId');
-    if (pid && incomingPostIds.indexOf(pid) < 0) {
-      incomingPostIds.push(pid);
-    }
-  });
-
-  if (incomingPostIds.length && Array.isArray(feedPosts)) {
-    var beforeLen = feedPosts.length;
-
-    feedPosts = feedPosts.filter(function (p) {
-      var id = String((p && p.id) || '');
-      var postId = String((p && p.postId) || '');
-      return incomingPostIds.indexOf(id) < 0 && incomingPostIds.indexOf(postId) < 0;
-    });
-
-    if (feedPosts.length !== beforeLen) {
-      console.log('[VV][FEED] removed local duplicated posts before rebuild:', beforeLen - feedPosts.length);
-    }
-  }
-
   var changed = false;
+  var hostPosts = [];
 
   blocks.forEach(function (block) {
     try {
-      // 提取 postId
       var postId = readFeedField(block, 'postId');
       if (!postId) return;
 
@@ -2909,19 +3003,27 @@ function rebuildFeedPostsFromRaw(fullRaw) {
       var bridgeName = readFeedField(latestInner, 'bridgeName');
       var time = readFeedField(latestInner, 'time');
       var content = readFeedField(latestInner, 'content');
-      var photoText = readFeedField(latestInner, 'photo');
 
-      // 提取模拟图片
-      var photos = [];
+      // 真实图片引用：images=idb:xxx,idb:xxx
+      var imagesText = readFeedField(latestInner, 'images');
+      var realImages = normalizeFeedImages(imagesText);
+
+      // 模拟图片：photo=[图1:xxx]
+      var photoText = readFeedField(latestInner, 'photo');
+      var simulatedPhotos = [];
+
       if (photoText) {
-        var imgMatches = [...photoText.matchAll(/\[图\d+:(.*?)\]/g)];
-        photos = imgMatches.map(function (m) {
+        var imgMatches = Array.from(photoText.matchAll(/\[图\d+:(.*?)\]/g));
+        simulatedPhotos = imgMatches.map(function (m) {
           return {
             simulated: true,
             desc: String(m[1] || '').trim()
           };
         });
       }
+
+      // 优先使用真实图片；没有真实图片时才用模拟图片
+      var finalImages = realImages.length ? realImages : simulatedPhotos;
 
       // 提取互动，并在 raw 层先去重
       var interactionBlocks = block.match(/\[互动\]([\s\S]*?)\[\/互动\]/gi) || [];
@@ -2983,129 +3085,104 @@ function rebuildFeedPostsFromRaw(fullRaw) {
         interactions.push(item);
       });
 
-      // 找现有动态，按 id 或 postId
-      var existing = feedPosts.find(function (p) {
-        return String(p.id || '') === postId || String(p.postId || '') === postId;
-      });
-
-      if (existing) {
-        // 更新动态主体
-        if (content) existing.content = content;
-        if (time) existing.time = time;
-        if (bridgeName) existing.bridgeName = bridgeName;
-        if (from) existing.author = from;
-
-        if (photos.length) {
-          existing.images = photos;
-        }
-
-        existing.id = postId;
-        existing.postId = postId;
-
-        existing.comments = Array.isArray(existing.comments) ? existing.comments : [];
-        existing.likes = Array.isArray(existing.likes) ? existing.likes : [];
-
-        // 先把已有的也去一次重，清理旧污染
-        existing.comments = dedupeFeedComments(existing.comments);
-        existing.likes = dedupeFeedLikes(existing.likes);
-
-        interactions.forEach(function (item) {
-          if (item.action === 'like') {
-            var likeKey = buildFeedLikeKey(item);
-
-            var hasLike = existing.likes.some(function (l) {
-              return buildFeedLikeKey(l) === likeKey;
-            });
-
-            if (!hasLike) {
-              existing.likes.push({
-                from: item.from
-              });
-              changed = true;
-            }
-          } else if (item.action === 'comment' && item.text) {
-            var commentItem = {
-              from: item.from,
-              text: item.text,
-              replyTo: item.replyTo || ''
-            };
-
-            var commentKey = buildFeedCommentKey(commentItem);
-
-            var hasComment = existing.comments.some(function (c) {
-              return buildFeedCommentKey(c) === commentKey;
-            });
-
-            if (!hasComment) {
-              existing.comments.push(commentItem);
-              changed = true;
-            }
-          }
+      var newComments = interactions
+        .filter(function (i) {
+          return i.action === 'comment' && i.text;
+        })
+        .map(function (i) {
+          return {
+            from: i.from,
+            text: i.text,
+            replyTo: i.replyTo || ''
+          };
         });
 
-        // 合并后再去重一次
-        var beforeCommentLen = existing.comments.length;
-        var beforeLikeLen = existing.likes.length;
-
-        existing.comments = dedupeFeedComments(existing.comments);
-        existing.likes = dedupeFeedLikes(existing.likes);
-
-        if (existing.comments.length !== beforeCommentLen || existing.likes.length !== beforeLikeLen) {
-          changed = true;
-        }
-
-        // 主体字段更新也算 changed
-        changed = true;
-      } else {
-        var newComments = interactions
-          .filter(function (i) {
-            return i.action === 'comment' && i.text;
-          })
-          .map(function (i) {
-            return {
-              from: i.from,
-              text: i.text,
-              replyTo: i.replyTo || ''
-            };
-          });
-
-        var newLikes = interactions
-          .filter(function (i) {
-            return i.action === 'like';
-          })
-          .map(function (i) {
-            return {
-              from: i.from
-            };
-          });
-
-        feedPosts.unshift({
-          id: postId,
-          postId: postId,
-          author: from,
-          bridgeName: bridgeName,
-          time: time,
-          content: content,
-          images: photos,
-          comments: dedupeFeedComments(newComments),
-          likes: dedupeFeedLikes(newLikes)
+      var newLikes = interactions
+        .filter(function (i) {
+          return i.action === 'like';
+        })
+        .map(function (i) {
+          return {
+            from: i.from
+          };
         });
 
-        changed = true;
+      var hostPost = {
+        id: postId,
+        postId: postId,
+        author: from || '我',
+        bridgeName: bridgeName || from || '',
+        time: time || getNowTime(),
+        content: content || '',
+        images: finalImages,
+        comments: dedupeFeedComments(newComments),
+        likes: dedupeFeedLikes(newLikes)
+      };
+
+      var myName = myProfile.nickname || appProfile.myName || '我';
+      if (hostPost.author === '我' || hostPost.author === myName) {
+        hostPost.authorId = 'me';
+        hostPost.authorAvatar = getMyProfileAvatar() || DEFAULT_AVATAR;
       }
+
+      hostPosts.push(hostPost);
     } catch (err) {
       console.warn('[VV][FEED] parse block failed:', err);
     }
   });
 
-  // 最后一层保险：所有动态全局清理重复评论/点赞
+  if (!hostPosts.length) return;
+
+  console.log('[VV][FEED] hostPosts parsed =', hostPosts);
+
+  hostPosts.forEach(function (hostPost) {
+    var existingIndex = -1;
+
+    for (var i = 0; i < feedPosts.length; i++) {
+      if (isSameFeedPostLoose(feedPosts[i], hostPost)) {
+        existingIndex = i;
+        break;
+      }
+    }
+
+    if (existingIndex >= 0) {
+      feedPosts[existingIndex] = mergeFeedPostKeepingImages(feedPosts[existingIndex], hostPost);
+    } else {
+      feedPosts.unshift(mergeFeedPostKeepingImages({}, hostPost));
+    }
+
+    changed = true;
+  });
+
+  // 最后一层保险：全局合并重复动态。
+  // 同 postId 或 同作者+同内容 的动态合并成一条，图片和互动都保留。
   if (Array.isArray(feedPosts)) {
+    var mergedList = [];
+
     feedPosts.forEach(function (post) {
       if (!post) return;
 
-      post.comments = dedupeFeedComments(post.comments || []);
-      post.likes = dedupeFeedLikes(post.likes || []);
+      var idx = -1;
+
+      for (var i = 0; i < mergedList.length; i++) {
+        if (isSameFeedPostLoose(mergedList[i], post)) {
+          idx = i;
+          break;
+        }
+      }
+
+      if (idx >= 0) {
+        mergedList[idx] = mergeFeedPostKeepingImages(mergedList[idx], post);
+        changed = true;
+      } else {
+        post.comments = dedupeFeedComments(post.comments || []);
+        post.likes = dedupeFeedLikes(post.likes || []);
+        post.images = normalizeFeedImages(post.images || []);
+        mergedList.push(post);
+      }
     });
+
+    feedPosts = mergedList;
   }
 
   if (changed) {
@@ -5632,25 +5709,7 @@ async function addFeedPost() {
     if (saved) storedImages.push(saved);
   }
 
-  const storedImageRefs = storedImages
-    .map(img => {
-      if (typeof img === 'string') return img.trim();
-
-      if (img && typeof img === 'object') {
-        return String(
-          img.ref ||
-          img.idbRef ||
-          img.assetKey ||
-          img.id ||
-          img.src ||
-          img.url ||
-          ''
-        ).trim();
-      }
-
-      return '';
-    })
-    .filter(Boolean);
+  const storedImageRefs = normalizeFeedImages(storedImages);
 
   const postId = 'f' + Date.now();
   const author = myProfile.nickname || appProfile.myName || '我';
