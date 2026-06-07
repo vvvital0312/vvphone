@@ -336,7 +336,7 @@
 
     async function handleInterceptedMessage(messageIndex) {
       var ctx = getCtx();
-      if (!ctx || !isActive) return;
+      if (!ctx || !isCallActive) return;
 
       var msg = ctx.chat[messageIndex];
       if (!msg || msg.is_user) return;
@@ -657,13 +657,15 @@
         var msg = ctx.chat[i];
         if (!msg) continue;
         var text = String(msg.mes || '');
-        if (text.includes('vv' + '手机') ||
+        if (
+            text.includes('VV_FEED_HIDDEN_DATA') ||
             text.includes('vv' + '手机') ||
             text.includes('vv' + 'phone') ||
-            text.includes('vv' + 'phone') ||
             text.includes('vvvital0312.github.io/' + 'vvphone') ||
+            text.includes('vvvital0312.github.io') ||
             text.includes('phone' + 'Frame') ||
-            text.includes('VV' + 'HOST')) {
+            text.includes('VV' + 'HOST')
+        ) {
           console.log('[FEED_INTERCEPT] found host msg, index:', i);
           return i;
         }
@@ -795,14 +797,32 @@
               var appendText = '';
 
               if (postBlockMatch) {
-                var alreadyHasPost =
-                  parts[p].includes('postId=' + targetPostId) &&
-                  parts[p].includes('[动态]');
+                var newPostBlock = postBlockMatch[0];
 
-                if (!alreadyHasPost) {
-                  appendText += '\n' + postBlockMatch[0] + '\n';
+                var existingDynamicMatch = parts[p].match(/\[动态\][\s\S]*?\[\/动态\]/);
+                var existingDynamicBlock = existingDynamicMatch ? existingDynamicMatch[0] : '';
+
+                function readDynamicContent(dynamicBlock) {
+                  dynamicBlock = String(dynamicBlock || '');
+                  var m = dynamicBlock.match(
+                    /(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:photo|images|location|bridgeName|time|from)\s*=|\n\s*\[\/动态\]|$)/i
+                  );
+                  return m ? String(m[1] || '').trim() : '';
+                }
+
+                var oldContent = readDynamicContent(existingDynamicBlock);
+                var newContent = readDynamicContent(newPostBlock);
+
+                if (!existingDynamicBlock) {
+                  appendText += '\n' + newPostBlock + '\n';
+                  console.log('[VVHOST_FEED_FIX] appended new [动态] for postId:', targetPostId);
+                } else if (!oldContent && newContent) {
+                  parts[p] = parts[p].replace(/\[动态\][\s\S]*?\[\/动态\]/, newPostBlock);
+                  inserted = true;
+                  changed = true;
+                  console.log('[VVHOST_FEED_FIX] replaced empty [动态] for postId:', targetPostId);
                 } else {
-                  console.log('[VVHOST_FEED_DEDUPE] skip duplicated [动态] for postId:', targetPostId);
+                  console.log('[VVHOST_FEED_DEDUPE] skip duplicated non-empty [动态] for postId:', targetPostId);
                 }
               }
 
@@ -1464,12 +1484,21 @@
           var postId = idMatch ? idMatch[1].trim() : ('idx_' + i + '_' + text.length);
 
           if (processedPostIds[postId]) continue;
-          processedPostIds[postId] = true;
 
           var payload = extractAiFeedPostBlock(text);
-          if (payload) {
-            appendAiFeedPostToHostHidden(payload, 'ai-feed-detector');
+
+          if (!payload) {
+            console.warn('[VVHOST][AI_FEED_DETECTOR] parse payload failed, will retry:', postId);
+            continue;
+          }
+
+          var ok = appendAiFeedPostToHostHidden(payload, 'ai-feed-detector');
+
+          if (ok) {
+            processedPostIds[postId] = true;
             console.log('[VVHOST][AI_FEED_DETECTOR] appended to hidden:', payload.postId, payload.from);
+          } else {
+            console.warn('[VVHOST][AI_FEED_DETECTOR] append failed, will retry:', payload.postId, payload.from);
           }
         }
       } catch (err) {
@@ -1569,6 +1598,12 @@
 
         // ── feed 模式：写入初始动态块 / 用户评论 ──
         if (feedMode) {
+          // feed/comment 场景绝对不允许电话拦截器继续占用 MESSAGE_RECEIVED
+          if (VV_CALL_INTERCEPTOR && VV_CALL_INTERCEPTOR.isActive && VV_CALL_INTERCEPTOR.isActive()) {
+            console.warn('[VVHOST_FEED][FEED] call interceptor active before feed, force end');
+            VV_CALL_INTERCEPTOR.end();
+          }
+
           try {
             var ctx = getCtx();
 
@@ -1607,7 +1642,31 @@
                 var hasExisting = currentMes.includes(postIdTag);
 
                 if (!hasExisting) {
-                  var initBlock = '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\npostId=' + feedMeta.postId + '\n\n[动态]\nfrom=' + feedMeta.author + '\ntime=' + feedMeta.time + '\ncontent=' + feedMeta.content + imagesLine + photoLine + locationLine + '\n[/动态]\n\n[/VV_FEED_HIDDEN_DATA]</div>';
+                  var feedContent = String(feedMeta.content || '').trim();
+
+                  var initBlock = '';
+
+                  // 普通用户发动态：有 content，正常写完整 [动态]
+                  if (feedContent) {
+                    initBlock =
+                      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                      'postId=' + feedMeta.postId + '\n\n' +
+                      '[动态]\n' +
+                      'from=' + feedMeta.author + '\n' +
+                      'time=' + feedMeta.time + '\n' +
+                      'content=' + feedContent +
+                      imagesLine + photoLine + locationLine + '\n' +
+                      '[/动态]\n\n' +
+                      '[/VV_FEED_HIDDEN_DATA]</div>';
+                  } else {
+                    // AI 主动发动态：此时 content 还没生成，不要写空 [动态]
+                    // 只写一个空容器，等 AI 回复里的 [动态] 再补进去
+                    initBlock =
+                      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                      'postId=' + feedMeta.postId + '\n\n' +
+                      '[/VV_FEED_HIDDEN_DATA]</div>';
+                  }
+
                   currentMes = currentMes.trimEnd() + initBlock;
                 }
 
@@ -1773,30 +1832,43 @@
     }
   }, false);
 
-  // ========== 监听一楼 hidden data 变化，自动推给手机页 ==========
+  // ========== 监听所有楼层 hidden data 变化，自动推给手机页 ==========
   (function initFeedHiddenDataWatcher() {
     var lastFeedRaw = '';
-    var watchInterval = 2000;
+    var watchInterval = 5000;
 
-    function findFeedHostMessage() {
+    function collectAllFeedHiddenRaw() {
       var ctx = getCtx();
 
-      if (!ctx || !Array.isArray(ctx.chat)) return null;
+      if (!ctx || !Array.isArray(ctx.chat)) return '';
+
+      var allBlocks = [];
 
       for (var i = 0; i < ctx.chat.length; i++) {
         var mes = String(ctx.chat[i].mes || '');
 
-        if (mes.includes('VV_FEED_HIDDEN_DATA')) {
-          return mes;
+        if (
+          !mes.includes('[VV_FEED_HIDDEN_DATA]') ||
+          !mes.includes('[/VV_FEED_HIDDEN_DATA]')
+        ) {
+          continue;
         }
+
+        var blocks = mes.match(/\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g) || [];
+
+        blocks.forEach(function (block) {
+          allBlocks.push(block);
+        });
       }
 
-      return null;
+      if (!allBlocks.length) return '';
+
+      return allBlocks.join('\n\n');
     }
 
     setInterval(function () {
       try {
-        var currentRaw = findFeedHostMessage();
+        var currentRaw = collectAllFeedHiddenRaw();
 
         if (!currentRaw) return;
 
@@ -1806,8 +1878,8 @@
 
         if (hiddenSig === lastFeedRaw) return;
 
-        // 如果这份 hidden raw 刚刚已经由 feed-interceptor 主动推过，
-        // watcher 不要再补发一次，否则手机会收到重复 VV_FEED_HIDDEN_RAW。
+        // 如果这份 hidden raw 刚刚已经由 feed-interceptor / append 主动推过，
+        // watcher 不要再补发一次。
         if (
           currentRaw === lastPushedFeedHiddenRaw ||
           hiddenSig === lastPushedFeedHiddenSig
@@ -1819,21 +1891,43 @@
 
         lastFeedRaw = hiddenSig;
 
-        console.log('[VVHOST][FEED_WATCHER] hidden data changed, pushing to phone, length=', currentRaw.length);
+        console.log('[VVHOST][FEED_WATCHER] all hidden data changed, pushing to phone, length=', currentRaw.length);
 
-        pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher');
+        pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher-rescan');
+
+        postToPhone({
+          type: 'VV_OPEN_FEED',
+          reason: 'feed-watcher-rescan'
+        });
+
+        postToPhone({
+          type: 'VV_NAVIGATE',
+          page: 'feed',
+          tab: 'feed',
+          reason: 'feed-watcher-rescan'
+        });
+
+        postToPhone({
+          type: 'VV_SWITCH_TAB',
+          tab: 'feed',
+          page: 'feed',
+          reason: 'feed-watcher-rescan'
+        });
       } catch (err) {
         console.warn('[VVHOST][FEED_WATCHER] error:', err);
       }
     }, watchInterval);
 
-    console.log('[VVHOST] feed hidden data watcher started');
+    console.log('[VVHOST] feed hidden data watcher started, aggregate mode, interval=' + watchInterval + 'ms');
   })();
 
-  function findFeedHostMessageIndex() {
+  function findFeedHostMessageIndex(postId) {
     var ctx = getCtx();
     if (!ctx || !Array.isArray(ctx.chat)) return -1;
 
+    postId = String(postId || '').trim();
+
+    // 1. 优先找已有 hidden data / 手机 host 楼层
     for (var i = ctx.chat.length - 1; i >= 0; i--) {
       var mes = String(ctx.chat[i].mes || '');
 
@@ -1845,6 +1939,31 @@
         mes.includes('VV' + 'HOST')
       ) {
         return i;
+      }
+    }
+
+    // 2. 找不到手机 host 时，找包含当前 AI_FEED_POST 的 AI 楼层
+    if (postId) {
+      for (var j = ctx.chat.length - 1; j >= 0; j--) {
+        var mes2 = String(ctx.chat[j].mes || '');
+
+        if (
+          mes2.includes('[VV_AI_FEED_POST]') &&
+          mes2.includes('postId=' + postId)
+        ) {
+          console.log('[VVHOST_FEED][AI_FEED] fallback host is AI_FEED_POST floor:', j);
+          return j;
+        }
+      }
+    }
+
+    // 3. 再兜底：找最近一个 AI_FEED_POST 楼层
+    for (var k = ctx.chat.length - 1; k >= 0; k--) {
+      var mes3 = String(ctx.chat[k].mes || '');
+
+      if (mes3.includes('[VV_AI_FEED_POST]')) {
+        console.log('[VVHOST_FEED][AI_FEED] fallback host is latest AI_FEED_POST floor:', k);
+        return k;
       }
     }
 
@@ -1887,6 +2006,18 @@
     );
   }
 
+  function hasHiddenFeedPost(currentMes, postId) {
+    currentMes = String(currentMes || '');
+    postId = String(postId || '').trim();
+    if (!postId) return false;
+
+    var blocks = currentMes.match(/\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g) || [];
+
+    return blocks.some(function (block) {
+      return block.includes('postId=' + postId);
+    });
+  }
+
   function appendAiFeedPostToHostHidden(payload, reason) {
     payload = payload || {};
 
@@ -1900,7 +2031,7 @@
       return false;
     }
 
-    var hostIdx = findFeedHostMessageIndex();
+    var hostIdx = findFeedHostMessageIndex(postId);
 
     if (hostIdx < 0 || !ctx.chat[hostIdx]) {
       console.warn('[VVHOST_FEED][AI_FEED] host message not found');
@@ -1909,9 +2040,17 @@
 
     var currentMes = String(ctx.chat[hostIdx].mes || '');
 
-    if (currentMes.includes('postId=' + postId)) {
-      console.log('[VVHOST_FEED][AI_FEED] duplicated postId, skip write:', postId);
-      return false;
+    // 注意：不能用 currentMes.includes('postId=' + postId)
+    // 因为 AI_FEED_POST 原文里本来就有 postId，会误判。
+    if (hasHiddenFeedPost(currentMes, postId)) {
+      console.log('[VVHOST_FEED][AI_FEED] duplicated hidden postId, skip write:', postId);
+      pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-duplicate-push');
+
+      postToPhone({ type: 'VV_OPEN_FEED', reason: reason || 'ai-feed-duplicate-push' });
+      postToPhone({ type: 'VV_NAVIGATE', page: 'feed', tab: 'feed', reason: reason || 'ai-feed-duplicate-push' });
+      postToPhone({ type: 'VV_SWITCH_TAB', tab: 'feed', page: 'feed', reason: reason || 'ai-feed-duplicate-push' });
+
+      return true;
     }
 
     var hiddenBlock = buildAiFeedHiddenBlock(payload);
@@ -1932,7 +2071,7 @@
       console.warn('[VVHOST_FEED][AI_FEED] saveChat failed:', e);
     }
 
-    console.log('[VVHOST_FEED][AI_FEED] written to hidden data:', postId, reason || '');
+    console.log('[VVHOST_FEED][AI_FEED] written to hidden data:', postId, reason || '', 'hostIdx=', hostIdx);
 
     pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-post');
 

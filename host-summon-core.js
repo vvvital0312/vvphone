@@ -759,6 +759,7 @@
           var interactionBlocks = dedupeInteractionBlocksForAppend(currentMes, rawInteractionBlocks);
 
           if (postBlockMatch || interactionBlocks.length > 0) {
+            var changed = false;
             // 从 AI 回复里提取 postId
             var postIdMatch = rawContent.match(/postId=([^\s\n]+)/);
             var targetPostId = postIdMatch ? postIdMatch[1] : '';
@@ -772,12 +773,25 @@
                   var appendText = '';
 
                   if (postBlockMatch) {
-                    var postKey = targetPostId ? ('postId=' + targetPostId) : '';
-                    var alreadyHasPost = postKey && currentMes.includes(postKey) && currentMes.includes('[动态]');
-                    if (!alreadyHasPost) {
+                    var existingDynamicMatch = parts[p].match(/\[动态\][\s\S]*?\[\/动态\]/);
+                    var existingDynamicBlock = existingDynamicMatch ? existingDynamicMatch[0] : '';
+
+                    var existingContentMatch = existingDynamicBlock.match(/(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:photo|images|location|bridgeName|time|from)\s*=|\n\s*\[\/动态\]|$)/i);
+                    var existingContent = existingContentMatch ? String(existingContentMatch[1] || '').trim() : '';
+
+                    var newContentMatch = postBlockMatch[0].match(/(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:photo|images|location|bridgeName|time|from)\s*=|\n\s*\[\/动态\]|$)/i);
+                    var newContent = newContentMatch ? String(newContentMatch[1] || '').trim() : '';
+
+                    if (!existingDynamicBlock) {
                       appendText += '\n' + postBlockMatch[0] + '\n';
+                    } else if (!existingContent && newContent) {
+                      // 已有的是空壳动态，用 AI 返回的真实动态替换
+                      parts[p] = parts[p].replace(/\[动态\][\s\S]*?\[\/动态\]/, postBlockMatch[0]);
+                      inserted = true;
+                      changed = true;
+                      console.log('[VVHOST_FEED_FIX] replaced empty [动态] for postId:', targetPostId);
                     } else {
-                      console.log('[VVHOST_FEED_DEDUPE] skip duplicated [动态] for postId:', targetPostId);
+                      console.log('[VVHOST_FEED_DEDUPE] skip duplicated non-empty [动态] for postId:', targetPostId);
                     }
                   }
 
@@ -2134,11 +2148,14 @@
                 continue;
               }
 
-              processedAiFeedPostIds[aiPostId] = true;
+              var ok = appendAiFeedPostToHostHidden(aiPostBlock, 'ai-feed-poller');
 
-              appendAiFeedPostToHostHidden(aiPostBlock, 'ai-feed-poller');
-
-              console.log('[VVHOST][AI_FEED] appended AI feed post to hidden:', aiPostBlock);
+              if (ok) {
+                processedAiFeedPostIds[aiPostId] = true;
+                console.log('[VVHOST][AI_FEED] appended AI feed post to hidden:', aiPostBlock);
+              } else {
+                console.warn('[VVHOST][AI_FEED] append failed, will retry:', aiPostBlock);
+              }
             }
           }
         }
@@ -2321,7 +2338,31 @@
                 var hasExisting = currentMes.includes(postIdTag);
 
                 if (!hasExisting) {
-                  var initBlock = '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\npostId=' + feedMeta.postId + '\n\n[动态]\nfrom=' + feedMeta.author + '\ntime=' + feedMeta.time + '\ncontent=' + feedMeta.content + imagesLine + photoLine + locationLine + '\n[/动态]\n\n[/VV_FEED_HIDDEN_DATA]</div>';
+                  var feedContent = String(feedMeta.content || '').trim();
+
+                  var initBlock = '';
+
+                  // 普通用户发动态：有 content，正常写完整 [动态]
+                  if (feedContent) {
+                    initBlock =
+                      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                      'postId=' + feedMeta.postId + '\n\n' +
+                      '[动态]\n' +
+                      'from=' + feedMeta.author + '\n' +
+                      'time=' + feedMeta.time + '\n' +
+                      'content=' + feedContent +
+                      imagesLine + photoLine + locationLine + '\n' +
+                      '[/动态]\n\n' +
+                      '[/VV_FEED_HIDDEN_DATA]</div>';
+                  } else {
+                    // AI 主动发动态：此时 content 还没生成，不要写空 [动态]
+                    // 只写一个空容器，等 AI 回复里的 [动态] 再补进去
+                    initBlock =
+                      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+                      'postId=' + feedMeta.postId + '\n\n' +
+                      '[/VV_FEED_HIDDEN_DATA]</div>';
+                  }
+
                   currentMes = currentMes.trimEnd() + initBlock;
                 }
 
@@ -2546,30 +2587,60 @@
   }, false);
 
 
-  // ========== 监听一楼 hidden data 变化，自动推给手机页 ==========
+  // ========== 监听所有楼层 hidden data 变化，自动推给手机页 ==========
   (function initFeedHiddenDataWatcher() {
     var lastFeedRaw = '';
-    var watchInterval = 2000;
+    var watchInterval = 5000;
 
-    function findFeedHostMessage() {
+    function collectAllFeedHiddenRaw() {
       var ctx = getCtx();
 
-      if (!ctx || !Array.isArray(ctx.chat)) return null;
+      if (!ctx || !Array.isArray(ctx.chat)) return '';
+
+      var allBlocks = [];
+      var seen = {};
 
       for (var i = 0; i < ctx.chat.length; i++) {
         var mes = String(ctx.chat[i].mes || '');
 
-        if (mes.includes('VV_FEED_HIDDEN_DATA')) {
-          return mes;
+        if (
+          !mes.includes('[VV_FEED_HIDDEN_DATA]') ||
+          !mes.includes('[/VV_FEED_HIDDEN_DATA]')
+        ) {
+          continue;
         }
+
+        var blocks = mes.match(/\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g) || [];
+
+        blocks.forEach(function (block) {
+          block = String(block || '').trim();
+          if (!block) return;
+
+          // 用 postId 优先去重，避免同一条动态在多个楼层重复出现。
+          var postIdMatch = block.match(/(?:^|\n)\s*postId\s*=\s*([^\n\r]+)/i);
+          var postId = postIdMatch ? String(postIdMatch[1] || '').trim() : '';
+
+          var key = postId ? ('postId:' + postId) : ('raw:' + block);
+
+          // 如果同 postId 出现多次，用后扫到的覆盖前面的。
+          // 这样后面的更新版本可以替换前面的旧版本。
+          if (seen[key] !== undefined) {
+            allBlocks[seen[key]] = block;
+          } else {
+            seen[key] = allBlocks.length;
+            allBlocks.push(block);
+          }
+        });
       }
 
-      return null;
+      if (!allBlocks.length) return '';
+
+      return allBlocks.join('\n\n');
     }
 
     setInterval(function () {
       try {
-        var currentRaw = findFeedHostMessage();
+        var currentRaw = collectAllFeedHiddenRaw();
 
         if (!currentRaw) return;
 
@@ -2579,8 +2650,8 @@
 
         if (hiddenSig === lastFeedRaw) return;
 
-        // 如果这份 hidden raw 刚刚已经由 feed-interceptor 主动推过，
-        // watcher 不要再补发一次，否则手机会收到重复 VV_FEED_HIDDEN_RAW。
+        // 如果这份 hidden raw 刚刚已经由 feed-interceptor / append 主动推过，
+        // watcher 不要再补发一次。
         if (
           currentRaw === lastPushedFeedHiddenRaw ||
           hiddenSig === lastPushedFeedHiddenSig
@@ -2592,15 +2663,21 @@
 
         lastFeedRaw = hiddenSig;
 
-        console.log('[VVHOST][FEED_WATCHER] hidden data changed, pushing to phone, length=', currentRaw.length);
+        console.log(
+          '[VVHOST][FEED_WATCHER] all hidden data changed, pushing to phone, length=',
+          currentRaw.length
+        );
 
-        pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher');
+        pushFeedHiddenRawToPhone(currentRaw, 'feed-watcher-rescan');
+
+        // 顺便请求手机切到动态页。手机端如果不需要，会自己忽略。
+        openFeedPageOnPhone('feed-watcher-rescan');
       } catch (err) {
         console.warn('[VVHOST][FEED_WATCHER] error:', err);
       }
     }, watchInterval);
 
-    console.log('[VVHOST] feed hidden data watcher started');
+    console.log('[VVHOST] feed hidden data watcher started, aggregate mode, interval=' + watchInterval + 'ms');
   })();
 
   function buildAiFeedHiddenBlock(payload) {
@@ -2659,9 +2736,11 @@
 
     var currentMes = String(ctx.chat[hostIdx].mes || '');
 
-    if (currentMes.includes('postId=' + postId)) {
-      console.log('[VVHOST][AI_FEED] duplicated postId, skip write:', postId);
-      return false;
+    if (hasHiddenFeedPost(currentMes, postId)) {
+      console.log('[VVHOST][AI_FEED] duplicated hidden postId, skip write:', postId);
+      pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-duplicate-push');
+      openFeedPageOnPhone(reason || 'ai-feed-duplicate-push');
+      return true;
     }
 
     var hiddenBlock = buildAiFeedHiddenBlock(payload);
@@ -2760,5 +2839,17 @@
       photos: photos,
       photoRaw: photoRaw
     };
+  }
+
+  function hasHiddenFeedPost(currentMes, postId) {
+    currentMes = String(currentMes || '');
+    postId = String(postId || '').trim();
+    if (!postId) return false;
+
+    var blocks = currentMes.match(/\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g) || [];
+
+    return blocks.some(function (block) {
+      return block.includes('postId=' + postId);
+    });
   }
 })();

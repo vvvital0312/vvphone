@@ -2852,6 +2852,31 @@ function rebuildFeedPostsFromRaw(fullRaw) {
   console.log('[VV][FEED] found hidden blocks:', blocks.length);
   if (blocks.length === 0) return;
 
+  // 本轮 hidden raw 里出现过的 postId。
+  // 这些 postId 以后以 hidden raw 为准，先清掉本地同 id/postId 的重复污染。
+  var incomingPostIds = [];
+
+  blocks.forEach(function (block) {
+    var pid = readFeedField(block, 'postId');
+    if (pid && incomingPostIds.indexOf(pid) < 0) {
+      incomingPostIds.push(pid);
+    }
+  });
+
+  if (incomingPostIds.length && Array.isArray(feedPosts)) {
+    var beforeLen = feedPosts.length;
+
+    feedPosts = feedPosts.filter(function (p) {
+      var id = String((p && p.id) || '');
+      var postId = String((p && p.postId) || '');
+      return incomingPostIds.indexOf(id) < 0 && incomingPostIds.indexOf(postId) < 0;
+    });
+
+    if (feedPosts.length !== beforeLen) {
+      console.log('[VV][FEED] removed local duplicated posts before rebuild:', beforeLen - feedPosts.length);
+    }
+  }
+
   var changed = false;
 
   blocks.forEach(function (block) {
@@ -4632,6 +4657,8 @@ function closeCallPage() {
 }
 
 function switchContactTab(tab) {
+  currentContactTab = tab;
+  
   const directPanel = document.getElementById('directPanel');
   const groupPanel = document.getElementById('groupPanel');
   const feedPanel = document.getElementById('feedPanel');
@@ -10206,24 +10233,59 @@ function initVVHostNavigationBridge() {
         return;
       }
 
-      if (type === 'VV_OPEN_FEED') {
-        console.log('[VV][FEED] open feed page requested by host:', data.reason || '');
+      if (
+        type === 'VV_OPEN_FEED' ||
+        (type === 'VV_NAVIGATE' && (data.page === 'feed' || data.tab === 'feed')) ||
+        (type === 'VV_SWITCH_TAB' && (data.page === 'feed' || data.tab === 'feed'))
+      ) {
+        console.log('[VV][FEED] open feed page requested by host:', data.reason || '', data);
 
         try {
+          // 你的真实动态页切换函数是这个
+          if (typeof switchContactTab === 'function') {
+            currentContactTab = 'feed';
+            switchContactTab('feed');
+            return;
+          }
+
           if (typeof switchTab === 'function') {
             switchTab('feed');
-          } else if (typeof openTab === 'function') {
-            openTab('feed');
-          } else if (typeof showPage === 'function') {
-            showPage('feedPage');
-          } else {
-            var feedTab =
-              document.querySelector('[data-tab="feed"]') ||
-              document.querySelector('[data-page="feed"]') ||
-              document.querySelector('#tabFeed') ||
-              document.querySelector('.tab-feed');
+            return;
+          }
 
-            if (feedTab) feedTab.click();
+          if (typeof openTab === 'function') {
+            openTab('feed');
+            return;
+          }
+
+          if (typeof showPage === 'function') {
+            showPage('feedPage');
+            return;
+          }
+
+          var feedTab =
+            document.querySelector('[data-tab="feed"]') ||
+            document.querySelector('[data-page="feed"]') ||
+            document.querySelector('#tabFeed') ||
+            document.querySelector('.tab-feed') ||
+            document.querySelector('.contact-tab[data-tab="feed"]');
+
+          if (feedTab) {
+            feedTab.click();
+            return;
+          }
+
+          var feedPanel = document.getElementById('feedPanel');
+          if (feedPanel) {
+            ['directPanel', 'groupPanel', 'feedPanel', 'profilePage'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (!el) return;
+              el.style.display = id === 'feedPanel' ? 'block' : 'none';
+              el.classList.toggle('active', id === 'feedPanel');
+            });
+
+            renderFeedHeader?.();
+            renderFeedList?.();
           }
         } catch (err) {
           console.warn('[VV][FEED] open feed page failed:', err);
