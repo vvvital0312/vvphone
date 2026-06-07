@@ -682,6 +682,78 @@
     return converted;
   }
 
+  function convertWrongCallSyncToFeedInteractionRaw(rawContent) {
+    rawContent = String(rawContent || '');
+
+    // 没有电话同步块就原样返回
+    if (!rawContent.includes('[VV_CALL_SYNC]') && !rawContent.includes('[/VV_CALL_SYNC]')) {
+      return rawContent;
+    }
+
+    // 没有 pendingFeedInteraction 时，不知道要转给哪条动态，原样返回
+    if (!pendingFeedInteraction || !pendingFeedInteraction.postId) {
+      console.warn('[VVHOST][FEED] got wrong VV_CALL_SYNC in feed mode, but no pendingFeedInteraction');
+      return rawContent;
+    }
+
+    if (Date.now() > pendingFeedInteraction.expiresAt) {
+      console.warn('[VVHOST][FEED] pendingFeedInteraction expired, cannot convert call sync');
+      pendingFeedInteraction = null;
+      return rawContent;
+    }
+
+    var blockMatch = rawContent.match(/\[VV_CALL_SYNC\]([\s\S]*?)\[\/VV_CALL_SYNC\]/i);
+    var block = blockMatch ? String(blockMatch[1] || '') : rawContent;
+
+    var speaker = '';
+    var content = '';
+
+    var speakerMatch = block.match(/(?:^|\n)\s*speaker\s*=\s*([^\n\r]+)/i);
+    if (speakerMatch) {
+      speaker = String(speakerMatch[1] || '').trim();
+    }
+
+    var contentMatch = block.match(/(?:^|\n)\s*content\s*=\s*([\s\S]*?)(?=\n\s*(?:speaker|callPhase|chatId|target|time)\s*=|\n\s*\[通话\]|\s*$)/i);
+    if (contentMatch) {
+      content = String(contentMatch[1] || '').trim();
+    }
+
+    if (!speaker) {
+      var targetMatch = block.match(/(?:^|\n)\s*target\s*=\s*([^\n\r]+)/i);
+      speaker = targetMatch ? String(targetMatch[1] || '').trim() : '';
+    }
+
+    if (!content) {
+      var lineMatch = block.match(/(?:^|\n)\s*(?:content|内容)\s*[=:：]\s*([^\n\r]+)/i);
+      content = lineMatch ? String(lineMatch[1] || '').trim() : '';
+    }
+
+    if (!speaker) speaker = pendingFeedInteraction.from || '西西';
+    if (!content) content = '我看到啦。';
+
+    var replyTo = pendingFeedInteraction.from || '';
+
+    var converted =
+      '[VV_FEED_SYNC]\n' +
+      'postId=' + pendingFeedInteraction.postId + '\n\n' +
+      '[互动]\n' +
+      'from=' + speaker + '\n' +
+      'action=comment\n' +
+      'content=' + content + '\n' +
+      (replyTo ? 'replyTo=' + replyTo + '\n' : '') +
+      '[/互动]\n' +
+      '[/VV_FEED_SYNC]';
+
+    console.log('[VVHOST][FEED] converted wrong VV_CALL_SYNC to feed interaction:', {
+      postId: pendingFeedInteraction.postId,
+      from: speaker,
+      content: content,
+      replyTo: replyTo
+    });
+
+    return converted;
+  }
+
   var VV_FEED_INTERCEPTOR = (function () {
     var isActive = false;
     var hostMessageIndex = -1;
@@ -787,8 +859,23 @@
 
       stop();
 
-      // feed 评论场景下，如果模型错误输出了电话同步，强制转成朋友圈互动
-      rawContent = convertWrongCallSyncToFeedInteractionRaw(rawContent);
+      // feed 场景下，如果模型错误输出了电话同步，尝试转成朋友圈互动。
+      // 注意：这里必须防炸，否则会导致 pendingFeedPostIds 永远不清、同层不回一楼。
+      try {
+        if (typeof convertWrongCallSyncToFeedInteractionRaw === 'function') {
+          rawContent = convertWrongCallSyncToFeedInteractionRaw(rawContent);
+        }
+      } catch (e) {
+        console.warn('[VVHOST][FEED] convertWrongCallSyncToFeedInteractionRaw failed:', e);
+      }
+
+      try {
+        if (typeof convertWrongAiFeedPostToInteractionRaw === 'function') {
+          rawContent = convertWrongAiFeedPostToInteractionRaw(rawContent);
+        }
+      } catch (e) {
+        console.warn('[VVHOST][FEED] convertWrongAiFeedPostToInteractionRaw failed:', e);
+      }
 
       if (!rawContent.includes('[VV_FEED_SYNC]')) {
         console.warn('[FEED_INTERCEPT] no VV_FEED_SYNC in reply, skipping');
