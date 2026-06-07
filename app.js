@@ -13300,6 +13300,39 @@ function getContactAvatarByBridge(bridgeName) {
   return getContactAvatarById(contact.id);
 }
 
+(function exposeVVFeedFunctionsToWindow() {
+  try {
+    var names = [
+      'renderFeedList',
+      'feedQuickLike',
+      'feedQuickComment',
+      'replyFeedComment',
+      'deleteFeedComment',
+      'deleteFeedPost',
+      'openFeedCommentInput',
+      'submitFeedComment',
+      'triggerFeedCommentAI',
+      'triggerFeedReplyAI'
+    ];
+
+    names.forEach(function (name) {
+      try {
+        if (typeof window[name] === 'function') {
+          return;
+        }
+
+        if (typeof eval(name) === 'function') {
+          window[name] = eval(name);
+        }
+      } catch (e) {}
+    });
+
+    console.log('[VV][FEED] feed functions exposed to window');
+  } catch (err) {
+    console.warn('[VV][FEED] expose feed functions failed:', err);
+  }
+})();
+
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
 });

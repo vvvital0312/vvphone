@@ -1678,14 +1678,20 @@
     try {
       const doc = root.document;
       const selectors = [
+        '#option_continue',
+        '#option_regenerate',
         '#send_but',
         '#send-button',
         '.send-button',
         '.st-send-button',
         'button[title*="Send"]',
         'button[aria-label*="Send"]',
-        '#option_regenerate',
-        '#option_continue'
+        'button[title*="发送"]',
+        'button[aria-label*="发送"]',
+        'button[title*="Generate"]',
+        'button[aria-label*="Generate"]',
+        'button[title*="生成"]',
+        'button[aria-label*="生成"]'
       ];
 
       for (const selector of selectors) {
@@ -2079,7 +2085,18 @@
           });
 
             if (feedMode) {
-              console.log('[VVHOST] feed mode, skip polling');
+              console.log('[VVHOST] feed mode, interceptor handles reply, skip normal polling');
+
+              // feed 模式必须在 /send 后主动触发生成，否则需要手动重 roll。
+              // 如果 command 已经自带 /trigger，就不要重复触发，避免双生成。
+              if (!commandHasTrigger) {
+                setTimeout(function () {
+                  console.log('[VVHOST][FEED] trigger generation after feed /send');
+                  triggerGenerationAfterSend();
+                }, 800);
+              } else {
+                console.log('[VVHOST][FEED] command already has /trigger, skip extra generation');
+              }
 
             } else if (callMode || (VV_CALL_INTERCEPTOR && VV_CALL_INTERCEPTOR.isActive && VV_CALL_INTERCEPTOR.isActive())) {
               console.log('[VVHOST][SUMMON] call mode active, skip normal chat polling');
