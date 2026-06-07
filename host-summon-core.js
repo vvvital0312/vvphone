@@ -24,6 +24,7 @@
   let lastPushedFeedHiddenSig = '';
   let pendingFeedInteraction = null;
   const processedAiFeedPostIds = {};
+  const pendingFeedPostIds = {};
 
   function getFeedHiddenSig(raw) {
     raw = String(raw || '');
@@ -33,6 +34,42 @@
     );
 
     return hiddenMatch ? hiddenMatch.join('') : raw;
+  }
+
+  function extractFeedPostIdsFromRaw(raw) {
+    raw = String(raw || '');
+
+    var ids = [];
+    var blocks = raw.match(/\[VV_FEED_HIDDEN_DATA\][\s\S]*?\[\/VV_FEED_HIDDEN_DATA\]/g) || [];
+
+    blocks.forEach(function (block) {
+      var m = block.match(/(?:^|\n)\s*postId\s*=\s*([^\n\r]+)/i);
+      var id = m ? String(m[1] || '').trim() : '';
+
+      // 防御旧解析污染：postId 后面如果混进 [动态]，强制截断。
+      id = id
+        .split(/\s+/)[0]
+        .replace(/\[动态\].*$/i, '')
+        .trim();
+
+      if (id && ids.indexOf(id) < 0) {
+        ids.push(id);
+      }
+    });
+
+    return ids;
+  }
+
+  function rawContainsPendingFeedPost(raw) {
+    var ids = extractFeedPostIdsFromRaw(raw);
+
+    for (var i = 0; i < ids.length; i++) {
+      if (pendingFeedPostIds[ids[i]]) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   function pushFeedHiddenRawToPhone(raw, reason) {
@@ -732,12 +769,13 @@
 
       stop();
 
-      // 如果评论/回复场景下，模型错误输出了 VV_AI_FEED_POST，
-      // 这里强制转成 VV_FEED_SYNC + [互动]
-      rawContent = convertWrongAiFeedPostToInteractionRaw(rawContent);
+      // feed 评论场景下，如果模型错误输出了电话同步，强制转成朋友圈互动
+      rawContent = convertWrongCallSyncToFeedInteractionRaw(rawContent);
 
       if (!rawContent.includes('[VV_FEED_SYNC]')) {
         console.warn('[FEED_INTERCEPT] no VV_FEED_SYNC in reply, skipping');
+
+        // 即使模型输出错了，也删除这次临时楼层，避免污染聊天楼层
         await safeDeleteFeedFloor(messageIndex);
         return;
       }
@@ -833,9 +871,14 @@
 
             pendingFeedInteraction = null;
 
+            if (targetPostId && pendingFeedPostIds[targetPostId]) {
+              delete pendingFeedPostIds[targetPostId];
+              console.log('[VVHOST][FEED] pending feed post cleared:', targetPostId);
+            }
+
             // 写入成功后，把完整 raw 发给手机页
             pushFeedHiddenRawToPhone(currentMes, 'feed-intercept-append');
-            openFeedPageOnPhone('feed-intercept-append');    
+            openFeedPageOnPhone('feed-intercept-append'); 
           } else {
             console.log('[FEED_INTERCEPT] no [互动] blocks found in AI reply');
           }
@@ -2330,6 +2373,17 @@
               var currentMes = String(chat[hostIdx].mes || '');
 
               if (feedMeta) {
+                var pendingPostId = String(feedMeta.postId || '').trim();
+
+                if (pendingPostId) {
+                  pendingFeedPostIds[pendingPostId] = {
+                    startedAt: Date.now(),
+                    expiresAt: Date.now() + 120000
+                  };
+
+                  console.log('[VVHOST][FEED] pending feed post set:', pendingPostId);
+                }
+
                 var imagesLine = (feedMeta.images && feedMeta.images.length) ? '\nimages=' + feedMeta.images.join(',') : '';
                 var locationLine = feedMeta.location ? '\nlocation=' + feedMeta.location : '';
                 var photoLine = feedMeta.photoDesc ? '\nphoto=' + feedMeta.photoDesc : '';
@@ -2640,6 +2694,17 @@
 
     setInterval(function () {
       try {
+        var now = Date.now();
+
+        Object.keys(pendingFeedPostIds).forEach(function (id) {
+          var item = pendingFeedPostIds[id];
+
+          if (!item || item.expiresAt < now) {
+            delete pendingFeedPostIds[id];
+            console.log('[VVHOST][FEED] pending feed post expired:', id);
+          }
+        });
+
         var currentRaw = collectAllFeedHiddenRaw();
 
         if (!currentRaw) return;
@@ -2649,6 +2714,13 @@
         if (!hiddenSig) return;
 
         if (hiddenSig === lastFeedRaw) return;
+
+        // 如果某条用户新动态正在等待 AI 互动回复，watcher 不要提前把半成品动态推给手机。
+        // 否则手机会先渲染一条“无 AI 回复”的动态，稍后又收到完整版本。
+        if (rawContainsPendingFeedPost(currentRaw)) {
+          console.log('[VVHOST][FEED_WATCHER] skip pending feed post raw before AI reply');
+          return;
+        }
 
         // 如果这份 hidden raw 刚刚已经由 feed-interceptor / append 主动推过，
         // watcher 不要再补发一次。
