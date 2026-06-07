@@ -1,3 +1,4 @@
+console.log('[VV][APP_JS_VERSION] feed-button-fix-001 loaded');
 var phoneThemes = {
   default: {
     name: '默认主题',
@@ -4936,8 +4937,8 @@ function renderFeedList() {
       return `
         <div class="feed-comment">
           <strong>${escapeHTML(c.from)}</strong>${c.replyTo ? ` 回复 <strong>${escapeHTML(c.replyTo)}</strong>` : ''}：${escapeHTML(cleanText)}
-          <span style="color:#999;cursor:pointer;margin-left:8px;" onclick="replyFeedComment('${post.id}',${idx})">回复</span>
-          <span style="color:#d9534f;cursor:pointer;margin-left:8px;" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>
+          <span style="color:#999;cursor:pointer;margin-left:8px;" data-feed-action="reply-comment" data-post-id="${escapeHTML(post.id)}" data-comment-index="${idx}" onclick="replyFeedComment('${post.id}',${idx})">回复</span>
+          <span style="color:#d9534f;cursor:pointer;margin-left:8px;" data-feed-action="delete-comment" data-post-id="${escapeHTML(post.id)}" data-comment-index="${idx}" onclick="deleteFeedComment('${post.id}',${idx})">删除</span>
         </div>
       `;
     }).join('');
@@ -4948,15 +4949,15 @@ function renderFeedList() {
         <div class="feed-main">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div class="feed-author">${escapeHTML(post.author)}</div>
-            <button class="feed-delete-btn" onclick="deleteFeedPost('${post.id}')">删除</button>
+            <button class="feed-delete-btn" data-feed-action="delete-post" data-post-id="${escapeHTML(post.id)}" onclick="deleteFeedPost('${post.id}')">删除</button>
           </div>
           <div class="feed-content">${escapeHTML(post.content)}</div>
           ${images}
           <div class="feed-meta-row">
             <div class="feed-meta">${escapeHTML(post.time)}</div>
             <div>
-              <button class="feed-op-btn" onclick="toggleFeedLike('${post.id}')">点赞</button>
-              <button class="feed-op-btn" onclick="feedQuickComment('${post.id}')">评论</button>
+              <button class="feed-op-btn" data-feed-action="like" data-post-id="${escapeHTML(post.id)}" onclick="toggleFeedLike('${post.id}')">点赞</button>
+              <button class="feed-op-btn" data-feed-action="comment" data-post-id="${escapeHTML(post.id)}" onclick="feedQuickComment('${post.id}')">评论</button>
             </div>
           </div>
           <div class="feed-comment-box">
@@ -5000,33 +5001,66 @@ function closeFeedImageViewer() {
   }, 200);
 }
 
+window.__VV_LAST_LOCAL_FEED_OPERATION_AT__ = window.__VV_LAST_LOCAL_FEED_OPERATION_AT__ || 0;
+
+function markLocalFeedOperation(reason) {
+  window.__VV_LAST_LOCAL_FEED_OPERATION_AT__ = Date.now();
+  console.log('[VV][FEED] local operation:', reason || '');
+}
+
 function toggleFeedLike(postId) {
-  const post = feedPosts.find(i => i.id === postId);
-  if (!post) return;
-  const myName = appProfile.myName || '我';
+  markLocalFeedOperation('like');
+
+  const post = feedPosts.find(i => String(i.id) === String(postId) || String(i.postId) === String(postId));
+  if (!post) {
+    console.warn('[VV][FEED] toggleFeedLike: post not found', postId);
+    return;
+  }
+
+  const myName = myProfile.nickname || appProfile.myName || '我';
+
   post.likes = post.likes || [];
-  const idx = post.likes.findIndex(i => i.from === myName);
+
+  const idx = post.likes.findIndex(function (i) {
+    return i && i.from === myName;
+  });
+
   if (idx >= 0) {
     post.likes.splice(idx, 1);
   } else {
     post.likes.push({ from: myName });
   }
+
+  post.likes = dedupeFeedLikes ? dedupeFeedLikes(post.likes) : post.likes;
+
   saveAll();
   renderFeedList();
+
+  console.log('[VV][FEED] like toggled:', postId);
 }
 
 async function feedQuickComment(postId) {
-  const post = feedPosts.find(i => i.id === postId);
-  if (!post) return;
+  markLocalFeedOperation('comment');
+
+  const post = feedPosts.find(i => String(i.id) === String(postId) || String(i.postId) === String(postId));
+  if (!post) {
+    console.warn('[VV][FEED] feedQuickComment: post not found', postId);
+    return;
+  }
 
   const text = prompt('输入评论内容');
   if (!text) return;
 
   post.comments = post.comments || [];
   post.comments.push({
-    from: appProfile.myName || '我',
-    text
+    from: myProfile.nickname || appProfile.myName || '我',
+    text: text
   });
+
+  post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
+
+  saveAll();
+  renderFeedList();
 
   const triggerAI = confirm('是否让AI角色回复这条评论？');
   if (triggerAI) {
@@ -5047,7 +5081,7 @@ async function feedQuickComment(postId) {
         feedMode: true,
         userInteraction: {
           postId: postId,
-          from: appProfile.myName || '我',
+          from: myProfile.nickname || appProfile.myName || '我',
           time: timeStr,
           action: 'comment',
           content: text,
@@ -5057,30 +5091,53 @@ async function feedQuickComment(postId) {
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
+      markLocalFeedOperation('local-ai-comment-fallback');
+
       post.comments.push({
         from: '角色',
         text: '我看到了你的评论。'
       });
+
+      post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
+
+      saveAll();
+      renderFeedList();
     }
   }
 
-  saveAll();
-  renderFeedList();
+  console.log('[VV][FEED] comment added:', postId);
 }
 
 async function replyFeedComment(postId, commentIndex) {
-  const post = feedPosts.find(i => i.id === postId);
-  if (!post || !post.comments?.[commentIndex]) return;
+  markLocalFeedOperation('reply-comment');
 
-  const target = post.comments[commentIndex];
+  const post = feedPosts.find(i => String(i.id) === String(postId) || String(i.postId) === String(postId));
+  if (!post) {
+    console.warn('[VV][FEED] replyFeedComment: post not found', postId);
+    return;
+  }
+
+  post.comments = post.comments || [];
+
+  const target = post.comments[Number(commentIndex)];
+  if (!target) {
+    console.warn('[VV][FEED] replyFeedComment: comment not found', postId, commentIndex);
+    return;
+  }
+
   const text = prompt(`回复 ${target.from}`);
   if (!text) return;
 
   post.comments.push({
-    from: appProfile.myName || '我',
+    from: myProfile.nickname || appProfile.myName || '我',
     replyTo: target.from,
-    text
+    text: text
   });
+
+  post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
+
+  saveAll();
+  renderFeedList();
 
   const triggerAI = confirm('是否让AI角色回复你的这条评论？');
   if (triggerAI) {
@@ -5101,7 +5158,7 @@ async function replyFeedComment(postId, commentIndex) {
         feedMode: true,
         userInteraction: {
           postId: postId,
-          from: appProfile.myName || '我',
+          from: myProfile.nickname || appProfile.myName || '我',
           time: timeStr,
           action: 'comment',
           content: text,
@@ -5111,21 +5168,32 @@ async function replyFeedComment(postId, commentIndex) {
     }
 
     if (!slashOk || VV_BRIDGE_CONFIG.feedMode === 'local') {
+      markLocalFeedOperation('local-ai-reply-fallback');
+
       post.comments.push({
         from: '角色',
-        replyTo: appProfile.myName || '我',
+        replyTo: myProfile.nickname || appProfile.myName || '我',
         text: '我来接一句。'
       });
+
+      post.comments = dedupeFeedComments ? dedupeFeedComments(post.comments) : post.comments;
+
+      saveAll();
+      renderFeedList();
     }
   }
 
-  saveAll();
-  renderFeedList();
+  console.log('[VV][FEED] reply comment added:', postId, commentIndex);
 }
 
 function deleteFeedPost(postId) {
-  const index = feedPosts.findIndex(post => post.id === postId);
-  if (index === -1) return;
+  markLocalFeedOperation('delete-post');
+
+  const index = feedPosts.findIndex(post => String(post.id) === String(postId) || String(post.postId) === String(postId));
+  if (index === -1) {
+    console.warn('[VV][FEED] deleteFeedPost: post not found', postId);
+    return;
+  }
 
   const ok = confirm('确定删除这条动态吗？');
   if (!ok) return;
@@ -5134,19 +5202,37 @@ function deleteFeedPost(postId) {
 
   saveAll();
   renderFeedList();
+
+  console.log('[VV][FEED] post deleted:', postId);
 }
 
 function deleteFeedComment(postId, commentIndex) {
-  const post = feedPosts.find(i => i.id === postId);
-  if (!post || !post.comments?.[commentIndex]) return;
+  markLocalFeedOperation('delete-comment');
+
+  const post = feedPosts.find(i => String(i.id) === String(postId) || String(i.postId) === String(postId));
+  if (!post) {
+    console.warn('[VV][FEED] deleteFeedComment: post not found', postId);
+    return;
+  }
+
+  post.comments = post.comments || [];
+
+  const index = Number(commentIndex);
+
+  if (!post.comments[index]) {
+    console.warn('[VV][FEED] deleteFeedComment: comment not found', postId, commentIndex);
+    return;
+  }
 
   const ok = confirm('确定删除这条评论吗？');
   if (!ok) return;
 
-  post.comments.splice(commentIndex, 1);
+  post.comments.splice(index, 1);
 
   saveAll();
   renderFeedList();
+
+  console.log('[VV][FEED] comment deleted:', postId, commentIndex);
 }
 
 // ===== 获取所有不重复的已绑定角色列表 =====
@@ -10017,9 +10103,17 @@ function initVVHostNavigationBridge() {
       }     
 
       if (type === 'VV_FEED_HIDDEN_RAW') {
-        if (shouldSkipDuplicateFeedHiddenRaw(data.raw || '')) return;
-        console.log('[VV][FEED] received raw from host, length =', (data.raw || '').length);
-        rebuildFeedPostsFromRaw(data.raw || '');
+        var raw = data.raw || '';
+
+        if (Date.now() - (window.__VV_LAST_LOCAL_FEED_OPERATION_AT__ || 0) < 5000) {
+          console.log('[VV][FEED] skip hidden raw because local feed operation just happened, length =', String(raw).length);
+          return;
+        }
+
+        if (shouldSkipDuplicateFeedHiddenRaw(raw)) return;
+
+        console.log('[VV][FEED] received raw from host, length =', String(raw).length);
+        rebuildFeedPostsFromRaw(raw);
         return;
       }
 
@@ -13300,34 +13394,85 @@ function getContactAvatarByBridge(bridgeName) {
   return getContactAvatarById(contact.id);
 }
 
+(function initVVFeedClickDelegate() {
+  if (window.__VV_FEED_CLICK_DELEGATE_INSTALLED__) return;
+  window.__VV_FEED_CLICK_DELEGATE_INSTALLED__ = true;
+
+  document.addEventListener('click', function (event) {
+    var btn = event.target && event.target.closest
+      ? event.target.closest('[data-feed-action]')
+      : null;
+
+    if (!btn) return;
+
+    var action = btn.getAttribute('data-feed-action') || '';
+    var postId = btn.getAttribute('data-post-id') || '';
+    var commentIndex = btn.getAttribute('data-comment-index') || '';
+
+    console.log('[VV][FEED] delegated click:', action, postId, commentIndex);
+
+    try {
+      if (action === 'like') {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFeedLike(postId);
+        return;
+      }
+
+      if (action === 'comment') {
+        event.preventDefault();
+        event.stopPropagation();
+        feedQuickComment(postId);
+        return;
+      }
+
+      if (action === 'reply-comment') {
+        event.preventDefault();
+        event.stopPropagation();
+        replyFeedComment(postId, commentIndex);
+        return;
+      }
+
+      if (action === 'delete-comment') {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteFeedComment(postId, commentIndex);
+        return;
+      }
+
+      if (action === 'delete-post') {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteFeedPost(postId);
+        return;
+      }
+    } catch (err) {
+      console.warn('[VV][FEED] delegated click failed:', err);
+    }
+  }, true);
+
+  console.log('[VV][FEED] click delegate installed');
+})();
+
 (function exposeVVFeedFunctionsToWindow() {
   try {
-    var names = [
-      'renderFeedList',
-      'feedQuickLike',
-      'feedQuickComment',
-      'replyFeedComment',
-      'deleteFeedComment',
-      'deleteFeedPost',
-      'openFeedCommentInput',
-      'submitFeedComment',
-      'triggerFeedCommentAI',
-      'triggerFeedReplyAI'
-    ];
+    window.toggleFeedLike = toggleFeedLike;
+    window.feedQuickComment = feedQuickComment;
+    window.replyFeedComment = replyFeedComment;
+    window.deleteFeedComment = deleteFeedComment;
+    window.deleteFeedPost = deleteFeedPost;
+    window.renderFeedList = renderFeedList;
 
-    names.forEach(function (name) {
-      try {
-        if (typeof window[name] === 'function') {
-          return;
-        }
+    // 兼容旧名字，避免旧HTML或旧缓存还在找 feedQuickLike
+    window.feedQuickLike = toggleFeedLike;
 
-        if (typeof eval(name) === 'function') {
-          window[name] = eval(name);
-        }
-      } catch (e) {}
+    console.log('[VV][FEED] feed functions exposed to window', {
+      toggleFeedLike: typeof window.toggleFeedLike,
+      feedQuickComment: typeof window.feedQuickComment,
+      replyFeedComment: typeof window.replyFeedComment,
+      deleteFeedComment: typeof window.deleteFeedComment,
+      deleteFeedPost: typeof window.deleteFeedPost
     });
-
-    console.log('[VV][FEED] feed functions exposed to window');
   } catch (err) {
     console.warn('[VV][FEED] expose feed functions failed:', err);
   }
