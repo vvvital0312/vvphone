@@ -1417,18 +1417,18 @@
           }
 
           // ── AI 消息：检测主动发动态 ──
-          if (!msg.is_user && text.includes('[VV_AI_FEED_POST]') && text.includes('[/VV_AI_FEED_POST]')) {
-            console.log('[VVHOST][AI_FEED] detected VV_AI_FEED_POST in AI msg at index', i);
+          //if (!msg.is_user && text.includes('[VV_AI_FEED_POST]') && text.includes('[/VV_AI_FEED_POST]')) {
+            //console.log('[VVHOST][AI_FEED] detected VV_AI_FEED_POST in AI msg at index', i);
 
-            var aiPostBlock = extractAiFeedPostBlock(text);
-            if (aiPostBlock) {
-              postToPhone({
-                type: 'VV_AI_FEED_POST',
-                payload: aiPostBlock
-              });
-              console.log('[VVHOST][AI_FEED] sent VV_AI_FEED_POST to phone:', aiPostBlock);
-            }
-          }
+            //var aiPostBlock = extractAiFeedPostBlock(text);
+            //if (aiPostBlock) {
+              //postToPhone({
+                //type: 'VV_AI_FEED_POST',
+                //payload: aiPostBlock
+              //});
+              //console.log('[VVHOST][AI_FEED] sent VV_AI_FEED_POST to phone:', aiPostBlock);
+            //}
+          //}
         }
 
         lastCheckedIndex = chat.length - 1;
@@ -1468,8 +1468,8 @@
 
           var payload = extractAiFeedPostBlock(text);
           if (payload) {
-            postToPhone({ type: 'VV_AI_FEED_POST', payload: payload });
-            console.log('[VVHOST][AI_FEED_DETECTOR] sent to phone:', payload.postId, payload.from);
+            appendAiFeedPostToHostHidden(payload, 'ai-feed-detector');
+            console.log('[VVHOST][AI_FEED_DETECTOR] appended to hidden:', payload.postId, payload.from);
           }
         }
       } catch (err) {
@@ -1830,35 +1830,186 @@
     console.log('[VVHOST] feed hidden data watcher started');
   })();
 
-  function extractAiFeedPostBlock(text) {
-    var match = text.match(/\[VV_AI_FEED_POST\]([\s\S]*?)\[\/VV_AI_FEED_POST\]/i);
-    if (!match) return null;
+  function findFeedHostMessageIndex() {
+    var ctx = getCtx();
+    if (!ctx || !Array.isArray(ctx.chat)) return -1;
 
-    var block = match[1];
+    for (var i = ctx.chat.length - 1; i >= 0; i--) {
+      var mes = String(ctx.chat[i].mes || '');
 
-    function getField(key) {
-      var m = block.match(new RegExp(key + '\\s*=\\s*([^\\n]+)', 'i'));
-      return m ? m[1].trim() : '';
+      if (
+        mes.includes('VV_FEED_HIDDEN_DATA') ||
+        mes.includes('vv' + '手机') ||
+        mes.includes('vv' + 'phone') ||
+        mes.includes('phone' + 'Frame') ||
+        mes.includes('VV' + 'HOST')
+      ) {
+        return i;
+      }
     }
 
-    var from        = getField('from');
-    var bridgeName  = getField('bridgeName') || from;
-    var postId      = getField('postId') || ('f' + Date.now());
-    var time        = getField('time');
-    var content     = getField('content');
-    var photoRaw    = getField('photo');
+    return -1;
+  }
 
-    if (!from || !content) return null;
+  function buildAiFeedHiddenBlock(payload) {
+    if (!payload) return '';
 
-    // 解析模拟图片 [图1:描述]
+    var postId = String(payload.postId || ('f' + Date.now())).trim();
+    var from = String(payload.from || '').trim();
+    var bridgeName = String(payload.bridgeName || from || '').trim();
+    var time = String(payload.time || '').trim();
+    var content = String(payload.content || '').trim();
+
+    if (!from || !content) return '';
+
+    var photoLine = '';
+
+    if (Array.isArray(payload.photos) && payload.photos.length) {
+      var photoText = payload.photos.map(function (p, idx) {
+        return '[图' + (idx + 1) + ':' + String((p && p.desc) || '图片').trim() + ']';
+      }).join('');
+      photoLine = '\nphoto=' + photoText;
+    } else if (payload.photoRaw) {
+      photoLine = '\nphoto=' + String(payload.photoRaw || '').trim();
+    }
+
+    return (
+      '\n<div class="vv-feed-hidden" style="display:none">[VV_FEED_HIDDEN_DATA]\n' +
+      'postId=' + postId + '\n\n' +
+      '[动态]\n' +
+      'from=' + from + '\n' +
+      'bridgeName=' + bridgeName + '\n' +
+      'time=' + time + '\n' +
+      'content=' + content +
+      photoLine + '\n' +
+      '[/动态]\n\n' +
+      '[/VV_FEED_HIDDEN_DATA]</div>\n'
+    );
+  }
+
+  function appendAiFeedPostToHostHidden(payload, reason) {
+    payload = payload || {};
+
+    var postId = String(payload.postId || '').trim();
+    if (!postId) return false;
+
+    var ctx = getCtx();
+
+    if (!ctx || !Array.isArray(ctx.chat)) {
+      console.warn('[VVHOST_FEED][AI_FEED] ctx/chat not available');
+      return false;
+    }
+
+    var hostIdx = findFeedHostMessageIndex();
+
+    if (hostIdx < 0 || !ctx.chat[hostIdx]) {
+      console.warn('[VVHOST_FEED][AI_FEED] host message not found');
+      return false;
+    }
+
+    var currentMes = String(ctx.chat[hostIdx].mes || '');
+
+    if (currentMes.includes('postId=' + postId)) {
+      console.log('[VVHOST_FEED][AI_FEED] duplicated postId, skip write:', postId);
+      return false;
+    }
+
+    var hiddenBlock = buildAiFeedHiddenBlock(payload);
+
+    if (!hiddenBlock) {
+      console.warn('[VVHOST_FEED][AI_FEED] empty hidden block');
+      return false;
+    }
+
+    currentMes = currentMes.trimEnd() + '\n' + hiddenBlock;
+    ctx.chat[hostIdx].mes = currentMes;
+
+    try {
+      if (typeof ctx.saveChat === 'function') {
+        ctx.saveChat();
+      }
+    } catch (e) {
+      console.warn('[VVHOST_FEED][AI_FEED] saveChat failed:', e);
+    }
+
+    console.log('[VVHOST_FEED][AI_FEED] written to hidden data:', postId, reason || '');
+
+    pushFeedHiddenRawToPhone(currentMes, reason || 'ai-feed-post');
+
+    postToPhone({ type: 'VV_OPEN_FEED', reason: reason || 'ai-feed-post' });
+    postToPhone({ type: 'VV_NAVIGATE', page: 'feed', tab: 'feed', reason: reason || 'ai-feed-post' });
+    postToPhone({ type: 'VV_SWITCH_TAB', tab: 'feed', page: 'feed', reason: reason || 'ai-feed-post' });
+
+    return true;
+  }
+
+  function extractAiFeedPostBlock(text) {
+    var raw = String(text || '');
+
+    var match = raw.match(/\[VV_AI_FEED_POST\]([\s\S]*?)\[\/VV_AI_FEED_POST\]/i);
+    if (!match) return null;
+
+    var block = String(match[1] || '');
+
+    function getField(key) {
+      key = String(key || '');
+
+      // 支持：
+      // key=value
+      // value 可以跨行，直到下一个 字段= 或结束
+      var re = new RegExp(
+        '(?:^|\\n)\\s*' + key + '\\s*=\\s*([\\s\\S]*?)(?=\\n\\s*(?:from|bridgeName|postId|time|content|photo|images|location)\\s*=|$)',
+        'i'
+      );
+
+      var m = block.match(re);
+      return m ? String(m[1] || '').trim() : '';
+    }
+
+    var from = getField('from');
+    var bridgeName = getField('bridgeName') || from;
+    var postId = getField('postId') || ('f' + Date.now());
+    var time = getField('time');
+    var content = getField('content');
+    var photoRaw = getField('photo');
+
+    // 兜底：如果 content 被解析空，但原文里有 content=，用单行兜底再抓一次
+    if (!content) {
+      var cm = block.match(/(?:^|\n)\s*content\s*=\s*([^\n\r]*)/i);
+      if (cm) content = String(cm[1] || '').trim();
+    }
+
+    // 再兜底：如果 content 仍然空，不要让它写入空动态
+    if (!from || !content) {
+      console.warn('[VVHOST][AI_FEED] invalid AI feed post, missing from/content:', {
+        from: from,
+        postId: postId,
+        content: content,
+        block: block
+      });
+      return null;
+    }
+
     var photos = [];
+
     if (photoRaw) {
-      var photoMatches = [...photoRaw.matchAll(/\[图\d+:(.*?)\]/g)];
-      photos = photoMatches.map(function(m) {
-        return { simulated: true, desc: m[1].trim() };
+      var photoMatches = Array.from(photoRaw.matchAll(/\[图\d+:(.*?)\]/g));
+      photos = photoMatches.map(function (m) {
+        return {
+          simulated: true,
+          desc: String(m[1] || '').trim()
+        };
       });
     }
 
-    return { from, bridgeName, postId, time, content, photos };
+    return {
+      from: from,
+      bridgeName: bridgeName,
+      postId: postId,
+      time: time,
+      content: content,
+      photos: photos,
+      photoRaw: photoRaw
+    };
   }
 })();
