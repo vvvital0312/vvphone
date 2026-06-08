@@ -4885,53 +4885,6 @@ function switchContactTab(tab) {
   }
 }
 
-function forceOpenFeedTab(postId) {
-  console.log('[VV][NAV][FEED] forceOpenFeedTab start, postId =', postId);
-
-  // 第一步：关闭所有全屏层（聊天详情页、日记页等）
-  var fullScreenIds = ['chatDetailPage', 'diaryPage', 'callPage', 'incomingCallPage'];
-  fullScreenIds.forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) {
-      el.style.display = 'none';
-      el.classList.remove('active');
-    }
-  });
-
-  // 第二步：隐藏所有 .page
-  document.querySelectorAll('.page').forEach(function(p) {
-    p.style.display = 'none';
-    p.classList.remove('active');
-  });
-
-  // 第三步：显式显示 contactPage
-  var cp = document.getElementById('contactPage');
-  if (cp) {
-    cp.style.display = 'block';
-    cp.classList.add('active');
-    console.log('[VV][NAV][FEED] contactPage forced display = block');
-  }
-
-  // 第四步：切到 feed Tab
-  switchContactTab('feed');
-  console.log('[VV][NAV][FEED] switchContactTab(feed) called');
-
-  // 第五步：如果指定了 postId，滚动到对应动态
-  if (postId) {
-    setTimeout(function() {
-      var card = document.querySelector('[data-post-id="' + postId + '"]');
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        console.log('[VV][NAV][FEED] scrolled to post', postId);
-      } else {
-        console.log('[VV][NAV][FEED] post card not found:', postId);
-      }
-    }, 200);
-  }
-
-  console.log('[VV][NAV][FEED] forceOpenFeedTab done');
-}
-
 function handleTopAdd() {
   if (currentContactTab === 'direct') showDialog('addContactDialog');
   if (currentContactTab === 'group') showDialog('addGroupDialog');
@@ -13833,6 +13786,55 @@ function getContactAvatarByBridge(bridgeName) {
     console.warn('[VV][FEED] expose feed functions failed:', err);
   }
 })();
+
+function forceOpenFeedTab(postId) {
+  console.log('[VV][NAV][FEED] forceOpenFeedTab start, postId =', postId);
+
+  // 第一步：关闭所有全屏层（聊天详情页、日记页等）
+  var fullScreenIds = ['chatDetailPage', 'diaryPage', 'callPage', 'incomingCallPage'];
+  fullScreenIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.classList.remove('active');
+    }
+  });
+
+  // 第二步：隐藏所有 .page
+  document.querySelectorAll('.page').forEach(function(p) {
+    p.style.display = 'none';
+    p.classList.remove('active');
+  });
+
+  // 第三步：显式显示 contactPage
+  var cp = document.getElementById('contactPage');
+  if (cp) {
+    cp.style.display = 'block';
+    cp.classList.add('active');
+    console.log('[VV][NAV][FEED] contactPage forced display = block');
+  }
+
+  // 第四步：切到 feed Tab
+  switchContactTab('feed');
+  console.log('[VV][NAV][FEED] switchContactTab(feed) called');
+
+  // 第五步：如果指定了 postId，滚动到对应动态
+  if (postId) {
+    setTimeout(function() {
+      var card = document.querySelector('[data-post-id="' + postId + '"]');
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        console.log('[VV][NAV][FEED] scrolled to post', postId);
+      } else {
+        console.log('[VV][NAV][FEED] post card not found:', postId);
+      }
+    }, 200);
+  }
+
+  console.log('[VV][NAV][FEED] forceOpenFeedTab done');
+}
+
+window.forceOpenFeedTab = forceOpenFeedTab;
 
 window.addEventListener('beforeunload', () => {
   releaseAllAssetObjectUrls();
