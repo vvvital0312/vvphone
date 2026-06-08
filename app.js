@@ -10468,46 +10468,51 @@ function initVVHostNavigationBridge() {
 function forceBackToContactMainPage() {
   console.log('[VV][NAV] forceBackToContactMainPage');
 
-  // 关闭首页
-  const homePage = document.getElementById('homePage');
-  if (homePage) {
-    homePage.classList.remove('active', 'show', 'open');
-    homePage.style.display = 'none';
-  }
-
-  // 打开消息/联系人主页面
-  const contactPage = document.getElementById('contactPage');
-  if (contactPage) {
-    contactPage.style.display = '';
-    contactPage.classList.add('active', 'show');
-  }
-
-  // 关闭聊天详情页/其他详情页，但不要误关 contactPage
-  const possibleDetailSelectors = [
-    '#chatPage',
-    '#chatDetailPage',
-    '#chatSettingPage',
-    '#contactDetailPage',
-    '.chat-page',
-    '.chat-detail-page',
-    '.detail-page',
-    '.sub-page'
+  const pageIds = [
+    'homePage',
+    'contactPage',
+    'chatDetailPage',
+    'chatSettingPage',
+    'callPage',
+    'incomingCallPage',
+    'diaryPage'
   ];
 
-  possibleDetailSelectors.forEach(function (sel) {
-    document.querySelectorAll(sel).forEach(function (el) {
-      if (el && el.id !== 'contactPage') {
-        el.classList.remove('active', 'show', 'open');
-        el.style.display = 'none';
-      }
-    });
+  pageIds.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    if (id === 'contactPage') {
+      el.style.display = '';
+      el.classList.add('active', 'show', 'open');
+    } else {
+      el.classList.remove('active', 'show', 'open');
+      el.style.display = 'none';
+    }
   });
+
+  // 额外兜底：不要让 phoneContainer 或背景层被误隐藏
+  const phoneContainer = document.getElementById('phoneContainer');
+  if (phoneContainer) {
+    phoneContainer.style.display = '';
+  }
+
+  const overlay = document.querySelector('.screen-bg-overlay');
+  if (overlay) {
+    overlay.style.display = '';
+  }
 }
 
 function forceOpenFeedTab(postId) {
   console.log('[VV][NAV] forceOpenFeedTab', { postId });
 
   forceBackToContactMainPage();
+
+  const contactPage = document.getElementById('contactPage');
+  if (contactPage) {
+    contactPage.style.display = '';
+    contactPage.classList.add('active', 'show', 'open');
+  }
 
   // 如果原本函数存在，先用原函数切一次
   if (typeof switchContactTab === 'function') {
@@ -10518,7 +10523,7 @@ function forceOpenFeedTab(postId) {
     }
   }
 
-  // 兜底：手动处理底部 tab active
+  // 手动处理 tab active
   document.querySelectorAll('.contact-tab').forEach(function (tab) {
     tab.classList.remove('active');
   });
@@ -10528,22 +10533,38 @@ function forceOpenFeedTab(postId) {
     feedTab.classList.add('active');
   }
 
-  // 兜底：手动处理 panel
-  const panelIds = ['directPanel', 'groupPanel', 'feedPanel', 'profilePage'];
+  // 手动处理 panel
+  const directPanel = document.getElementById('directPanel');
+  const groupPanel = document.getElementById('groupPanel');
+  const feedPanel = document.getElementById('feedPanel');
+  const profilePage = document.getElementById('profilePage');
 
-  panelIds.forEach(function (id) {
-    const el = document.getElementById(id);
+  [
+    directPanel,
+    groupPanel,
+    feedPanel,
+    profilePage
+  ].forEach(function (el) {
     if (!el) return;
-
-    el.classList.remove('active');
-
-    if (id === 'feedPanel') {
-      el.style.display = '';
-      el.classList.add('active');
-    } else {
-      el.style.display = 'none';
-    }
+    el.classList.remove('active', 'show', 'open');
+    el.style.display = 'none';
   });
+
+  if (feedPanel) {
+    feedPanel.style.display = '';
+    feedPanel.classList.add('active', 'show', 'open');
+  }
+
+  // 确保联系人底部 tab 容器没有被隐藏
+  const contactTabs = document.querySelector('.contact-tabs');
+  if (contactTabs) {
+    contactTabs.style.display = '';
+  }
+
+  const contactBody = document.querySelector('.contact-body');
+  if (contactBody) {
+    contactBody.style.display = '';
+  }
 
   // 强制刷新动态
   if (typeof renderFeedList === 'function') {
@@ -10554,7 +10575,6 @@ function forceOpenFeedTab(postId) {
     }
   }
 
-  // 如果之后要定位某条动态，可以在这里做
   if (postId) {
     setTimeout(function () {
       const target =
@@ -10570,10 +10590,11 @@ function forceOpenFeedTab(postId) {
     }, 300);
   }
 
-  // 检查实际 DOM 状态
   setTimeout(function () {
     const homePage = document.getElementById('homePage');
     const contactPage = document.getElementById('contactPage');
+    const contactBody = document.querySelector('.contact-body');
+    const contactTabs = document.querySelector('.contact-tabs');
     const directPanel = document.getElementById('directPanel');
     const groupPanel = document.getElementById('groupPanel');
     const feedPanel = document.getElementById('feedPanel');
@@ -10582,21 +10603,35 @@ function forceOpenFeedTab(postId) {
 
     console.log('[VV][NAV][CHECK] after forceOpenFeedTab', {
       homePageDisplay: homePage && homePage.style.display,
+      homePageComputedDisplay: homePage && getComputedStyle(homePage).display,
       homePageClass: homePage && homePage.className,
 
       contactPageDisplay: contactPage && contactPage.style.display,
+      contactPageComputedDisplay: contactPage && getComputedStyle(contactPage).display,
       contactPageClass: contactPage && contactPage.className,
 
+      contactBodyDisplay: contactBody && contactBody.style.display,
+      contactBodyComputedDisplay: contactBody && getComputedStyle(contactBody).display,
+      contactBodyClass: contactBody && contactBody.className,
+
+      contactTabsDisplay: contactTabs && contactTabs.style.display,
+      contactTabsComputedDisplay: contactTabs && getComputedStyle(contactTabs).display,
+      contactTabsClass: contactTabs && contactTabs.className,
+
       directPanelDisplay: directPanel && directPanel.style.display,
+      directPanelComputedDisplay: directPanel && getComputedStyle(directPanel).display,
       directPanelClass: directPanel && directPanel.className,
 
       groupPanelDisplay: groupPanel && groupPanel.style.display,
+      groupPanelComputedDisplay: groupPanel && getComputedStyle(groupPanel).display,
       groupPanelClass: groupPanel && groupPanel.className,
 
       feedPanelDisplay: feedPanel && feedPanel.style.display,
+      feedPanelComputedDisplay: feedPanel && getComputedStyle(feedPanel).display,
       feedPanelClass: feedPanel && feedPanel.className,
 
       profilePageDisplay: profilePage && profilePage.style.display,
+      profilePageComputedDisplay: profilePage && getComputedStyle(profilePage).display,
       profilePageClass: profilePage && profilePage.className,
 
       feedTabClass: feedTab && feedTab.className
