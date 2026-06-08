@@ -4885,6 +4885,53 @@ function switchContactTab(tab) {
   }
 }
 
+function forceOpenFeedTab(postId) {
+  console.log('[VV][NAV][FEED] forceOpenFeedTab start, postId =', postId);
+
+  // 第一步：关闭所有全屏层（聊天详情页、日记页等）
+  var fullScreenIds = ['chatDetailPage', 'diaryPage', 'callPage', 'incomingCallPage'];
+  fullScreenIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.classList.remove('active');
+    }
+  });
+
+  // 第二步：隐藏所有 .page
+  document.querySelectorAll('.page').forEach(function(p) {
+    p.style.display = 'none';
+    p.classList.remove('active');
+  });
+
+  // 第三步：显式显示 contactPage
+  var cp = document.getElementById('contactPage');
+  if (cp) {
+    cp.style.display = 'block';
+    cp.classList.add('active');
+    console.log('[VV][NAV][FEED] contactPage forced display = block');
+  }
+
+  // 第四步：切到 feed Tab
+  switchContactTab('feed');
+  console.log('[VV][NAV][FEED] switchContactTab(feed) called');
+
+  // 第五步：如果指定了 postId，滚动到对应动态
+  if (postId) {
+    setTimeout(function() {
+      var card = document.querySelector('[data-post-id="' + postId + '"]');
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        console.log('[VV][NAV][FEED] scrolled to post', postId);
+      } else {
+        console.log('[VV][NAV][FEED] post card not found:', postId);
+      }
+    }, 200);
+  }
+
+  console.log('[VV][NAV][FEED] forceOpenFeedTab done');
+}
+
 function handleTopAdd() {
   if (currentContactTab === 'direct') showDialog('addContactDialog');
   if (currentContactTab === 'group') showDialog('addGroupDialog');
@@ -10349,58 +10396,10 @@ function initVVHostNavigationBridge() {
           console.log('[VV][NAV] VVPHONE_SET_VIEW -> feed', data);
 
           try {
-            // 确保 contactPage 可见
-            document.querySelectorAll('.page').forEach(function(p) {
-              p.style.display = 'none';
-              p.classList.remove('active');
-            });
-            var contactPage = document.getElementById('contactPage');
-            if (contactPage) {
-              contactPage.style.display = '';
-              contactPage.classList.add('active');
-            }
-
-            // 切到 feed tab
-            if (typeof switchContactTab === 'function') {
-              currentContactTab = 'feed';
-              switchContactTab('feed');
-            } else if (typeof switchTab === 'function') {
-              switchTab('feed');
-            } else if (typeof openTab === 'function') {
-              openTab('feed');
-            } else if (typeof showPage === 'function') {
-              showPage('feedPage');
-            }
-
-            // DOM 兜底：保证 feedPanel 显示
-            var feedPanel = document.getElementById('feedPanel');
-            if (feedPanel) {
-              ['directPanel', 'groupPanel', 'feedPanel', 'profilePage', 'profilePanel'].forEach(function (id) {
-                var el = document.getElementById(id);
-                if (!el) return;
-
-                var active = id === 'feedPanel';
-                el.style.display = active ? '' : 'none';
-                el.classList.toggle('active', active);
-              });
-            }
-
-            // 重新渲染朋友圈
-            if (typeof renderFeedHeader === 'function') {
-              renderFeedHeader();
-            }
-
-            if (typeof renderFeedList === 'function') {
-              renderFeedList();
-            }
-
-            if (typeof hydrateMediaRefs === 'function') {
-              hydrateMediaRefs();
-            }
-
-            console.log('[VV][NAV] feed view opened by VVPHONE_SET_VIEW');
+            forceOpenFeedTab(data.postId || null);
+            console.log('[VV][NAV] feed view opened by forceOpenFeedTab');
           } catch (err) {
-            console.warn('[VV][NAV] VVPHONE_SET_VIEW feed failed:', err);
+            console.warn('[VV][NAV] forceOpenFeedTab failed:', err);
           }
 
           return;
