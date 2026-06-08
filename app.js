@@ -2547,36 +2547,114 @@ function handleAiFeedPost(payload) {
     return;
   }
 
-  var contact = contactList.find(function(c) {
-    return c.bridgeName === payload.bridgeName || c.name === payload.from;
-  });
-  var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
+  var postId = String(payload.postId || '').trim() || ('f' + Date.now());
 
-  var images = [];
-  if (payload.photos && payload.photos.length > 0) {
-    images = payload.photos.map(function(p) {
-      return { simulated: true, desc: p.desc || p };
-    });
+  // 检查是否已被删除
+  if (typeof deletedFeedPostIds !== 'undefined' && Array.isArray(deletedFeedPostIds) && deletedFeedPostIds.indexOf(postId) >= 0) {
+    console.log('[VVPHONE] AI feed post skipped (deleted):', postId);
+    return;
   }
 
-  var post = {
-    id: payload.postId || ('f' + Date.now()),
-    postId: payload.postId || ('f' + Date.now()),
-    author: payload.from,
-    authorId: authorId,
-    bridgeName: payload.bridgeName || payload.from,
-    time: payload.time || new Date().toLocaleString(),
-    content: payload.content,
-    images: images,
-    likes: [],
-    comments: []
-  };
+  // 检查是否已存在
+  var exists = feedPosts.some(function(p) {
+    return String(p.id || p.postId || '') === postId;
+  });
 
-  feedPosts.unshift(post);
-  saveAll();
-  renderFeedList();
+  if (!exists) {
+    var contact = contactList.find(function(c) {
+      return c.bridgeName === payload.bridgeName || c.name === payload.from;
+    });
+    var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
 
-  console.log('[VVPHONE] AI feed post created:', post.postId, 'by', post.author);
+    var images = [];
+    if (payload.photos && payload.photos.length > 0) {
+      images = payload.photos.map(function(p) {
+        return { simulated: true, desc: p.desc || p };
+      });
+    }
+
+    var post = {
+      id: postId,
+      postId: postId,
+      author: payload.from,
+      authorId: authorId,
+      bridgeName: payload.bridgeName || payload.from,
+      time: payload.time || new Date().toLocaleString(),
+      content: payload.content,
+      images: images,
+      likes: [],
+      comments: []
+    };
+
+    feedPosts.unshift(post);
+    saveAll();
+    console.log('[VVPHONE] AI feed post created:', postId, 'by', post.author);
+  } else {
+    console.log('[VVPHONE] AI feed post already exists:', postId);
+  }
+
+  // ====== 导航跳转 ======
+
+  // 1. 确保 contactPage 可见（从 homePage 或任何其他页面跳过来）
+  try {
+    var homePage = document.getElementById('homePage');
+    var contactPage = document.getElementById('contactPage');
+
+    if (contactPage) {
+      // 隐藏所有 page
+      document.querySelectorAll('.page').forEach(function(p) {
+        p.style.display = 'none';
+        p.classList.remove('active');
+      });
+
+      // 显示 contactPage
+      contactPage.style.display = '';
+      contactPage.classList.add('active');
+    }
+  } catch (e) {
+    console.warn('[VVPHONE] navigate to contactPage error:', e);
+  }
+
+  // 2. 切到 feed tab
+  try {
+    if (typeof switchContactTab === 'function') {
+      currentContactTab = 'feed';
+      switchContactTab('feed');
+    }
+  } catch (e) {
+    console.warn('[VVPHONE] switchContactTab feed error:', e);
+  }
+
+  // 3. 渲染
+  try {
+    if (typeof renderFeedHeader === 'function') renderFeedHeader();
+    if (typeof renderFeedList === 'function') renderFeedList();
+    if (typeof hydrateMediaRefs === 'function') hydrateMediaRefs();
+  } catch (e) {
+    console.warn('[VVPHONE] render feed error:', e);
+  }
+
+  // 4. 滚动到该动态并高亮
+  setTimeout(function() {
+    try {
+      var card = document.querySelector('[data-post-id="' + postId + '"]');
+      if (!card) {
+        // 也试试 data-feed-id
+        card = document.querySelector('[data-feed-id="' + postId + '"]');
+      }
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.transition = 'background-color 0.3s';
+        card.style.backgroundColor = 'rgba(255, 200, 0, 0.15)';
+        setTimeout(function() { card.style.backgroundColor = ''; }, 1500);
+        console.log('[VVPHONE] scrolled to feed post:', postId);
+      } else {
+        console.warn('[VVPHONE] post card not found for scroll:', postId);
+      }
+    } catch (e) {
+      console.warn('[VVPHONE] scroll to post error:', e);
+    }
+  }, 500);
 }
 
 function appendVVChatReplyToLocal(chatData, msgIndex) {
@@ -10271,7 +10349,18 @@ function initVVHostNavigationBridge() {
           console.log('[VV][NAV] VVPHONE_SET_VIEW -> feed', data);
 
           try {
-            // 优先使用你现有的联系人 tab 切换函数
+            // 确保 contactPage 可见
+            document.querySelectorAll('.page').forEach(function(p) {
+              p.style.display = 'none';
+              p.classList.remove('active');
+            });
+            var contactPage = document.getElementById('contactPage');
+            if (contactPage) {
+              contactPage.style.display = '';
+              contactPage.classList.add('active');
+            }
+
+            // 切到 feed tab
             if (typeof switchContactTab === 'function') {
               currentContactTab = 'feed';
               switchContactTab('feed');
@@ -10337,15 +10426,15 @@ function initVVHostNavigationBridge() {
       }
 
       // ========== AI 角色主动发布动态 ==========
-      if (type === 'VV_AI_FEED_POST') {
-        const p = data.payload;
-        if (!p || !p.from || !p.content) {
-          console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
-          return;
-        }
-        handleAiFeedPost(p);
-        return;
-      }
+      //if (type === 'VV_AI_FEED_POST') {
+        //const p = data.payload;
+        //if (!p || !p.from || !p.content) {
+          //console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
+          //return;
+        //}
+        //handleAiFeedPost(p);
+        //return;
+      //}
 
       if (
         type === 'VV_OPEN_FEED' ||
@@ -10355,6 +10444,18 @@ function initVVHostNavigationBridge() {
         console.log('[VV][FEED] legacy open feed requested by host:', data.reason || '', data);
 
         try {
+          // 确保 contactPage 可见
+          document.querySelectorAll('.page').forEach(function(p) {
+            p.style.display = 'none';
+            p.classList.remove('active');
+          });
+          var contactPage = document.getElementById('contactPage');
+          if (contactPage) {
+            contactPage.style.display = '';
+            contactPage.classList.add('active');
+          }
+
+          // 切到 feed tab
           if (typeof switchContactTab === 'function') {
             currentContactTab = 'feed';
             switchContactTab('feed');
