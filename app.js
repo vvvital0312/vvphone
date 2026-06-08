@@ -2692,36 +2692,86 @@ function handleAiFeedPost(payload) {
     return;
   }
 
-  var contact = contactList.find(function(c) {
-    return c.bridgeName === payload.bridgeName || c.name === payload.from;
-  });
-  var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
+  var postId = String(payload.postId || '').trim() || ('f' + Date.now());
 
-  var images = [];
-  if (payload.photos && payload.photos.length > 0) {
-    images = payload.photos.map(function(p) {
-      return { simulated: true, desc: p.desc || p };
-    });
+  // 检查是否已被删除
+  if (Array.isArray(deletedFeedPostIds) && deletedFeedPostIds.includes(postId)) {
+    console.log('[VVPHONE] AI feed post skipped (deleted):', postId);
+    return;
   }
 
-  var post = {
-    id: payload.postId || ('f' + Date.now()),
-    postId: payload.postId || ('f' + Date.now()),
-    author: payload.from,
-    authorId: authorId,
-    bridgeName: payload.bridgeName || payload.from,
-    time: payload.time || new Date().toLocaleString(),
-    content: payload.content,
-    images: images,
-    likes: [],
-    comments: []
-  };
+  // 检查是否已存在
+  var exists = feedPosts.some(function(p) {
+    return String(p.id || p.postId || '') === postId;
+  });
 
-  feedPosts.unshift(post);
-  saveAll();
+  if (exists) {
+    console.log('[VVPHONE] AI feed post already exists:', postId);
+  } else {
+    var contact = contactList.find(function(c) {
+      return c.bridgeName === payload.bridgeName || c.name === payload.from;
+    });
+    var authorId = contact ? contact.id : (payload.bridgeName || payload.from);
+
+    var images = [];
+    if (payload.photos && payload.photos.length > 0) {
+      images = payload.photos.map(function(p) {
+        return { simulated: true, desc: p.desc || p };
+      });
+    }
+
+    var post = {
+      id: postId,
+      postId: postId,
+      author: payload.from,
+      authorId: authorId,
+      bridgeName: payload.bridgeName || payload.from,
+      time: payload.time || new Date().toLocaleString(),
+      content: payload.content,
+      images: images,
+      likes: [],
+      comments: []
+    };
+
+    feedPosts.unshift(post);
+    saveAll();
+    console.log('[VVPHONE] AI feed post created:', postId, 'by', post.author);
+  }
+
+  // 渲染朋友圈列表
   renderFeedList();
 
-  console.log('[VVPHONE] AI feed post created:', post.postId, 'by', post.author);
+  // 跳转到朋友圈页面
+  try {
+    forceBackToContactMainPage();
+  } catch (e) {
+    console.warn('[VVPHONE] forceBackToContactMainPage error:', e);
+  }
+
+  try {
+    switchContactTab('feed');
+  } catch (e) {
+    console.warn('[VVPHONE] switchContactTab feed error:', e);
+  }
+
+  // 滚动到该动态
+  setTimeout(function() {
+    try {
+      var card = document.querySelector('[data-post-id="' + postId + '"]');
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 高亮闪烁效果
+        card.style.transition = 'background-color 0.3s';
+        card.style.backgroundColor = 'rgba(255, 200, 0, 0.15)';
+        setTimeout(function() { card.style.backgroundColor = ''; }, 1500);
+        console.log('[VVPHONE] scrolled to feed post:', postId);
+      } else {
+        console.warn('[VVPHONE] post card not found for scroll:', postId);
+      }
+    } catch (e) {
+      console.warn('[VVPHONE] scroll error:', e);
+    }
+  }, 400);
 }
 
 function appendVVChatReplyToLocal(chatData, msgIndex) {
@@ -10447,15 +10497,15 @@ function initVVHostNavigationBridge() {
       }
 
       // ========== AI 角色主动发布动态 ==========
-      if (type === 'VV_AI_FEED_POST') {
-        const p = data.payload;
-        if (!p || !p.from || !p.content) {
-          console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
-          return;
-        }
-        handleAiFeedPost(p);
-        return;
-      }
+      //if (type === 'VV_AI_FEED_POST') {
+        //const p = data.payload;
+        //if (!p || !p.from || !p.content) {
+          //console.warn('[VV][NAV] VV_AI_FEED_POST: missing required fields');
+          //return;
+        //}
+        //handleAiFeedPost(p);
+        //return;
+      //}
 
       if (
         type === 'VV_OPEN_FEED' ||
