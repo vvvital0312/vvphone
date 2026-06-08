@@ -978,6 +978,7 @@ let vvBridgeListenerInited = false;
 
 window.__VV_PENDING_FEED_NAV__ = null;
 window.__VV_FEED_NAV_RETRY_TIMER__ = null;
+window.__VV_FEED_NAV_READY__ = false;
 
 function isVVFeedNavMessage(data) {
   if (!data || typeof data !== 'object') return false;
@@ -1032,12 +1033,15 @@ function consumeVVFeedNav(reason) {
   const feedPanel = document.getElementById('feedPanel');
 
   if (
+    !window.__VV_FEED_NAV_READY__ ||
     typeof forceOpenFeedTab !== 'function' ||
     !contactPage ||
     !feedPanel
   ) {
     console.warn('[VV][NAV][QUEUE] feed nav not ready, retry later:', {
       reason,
+      navReady: !!window.__VV_FEED_NAV_READY__,
+      vvAppReady: !!window.vvAppReady,
       hasForceOpenFeedTab: typeof forceOpenFeedTab,
       hasContactPage: !!contactPage,
       hasFeedPanel: !!feedPanel
@@ -10550,7 +10554,7 @@ function forceOpenFeedTab(postId) {
     }
   }
 
-  // 可选：如果之后要定位某条动态，可以在这里做
+  // 如果之后要定位某条动态，可以在这里做
   if (postId) {
     setTimeout(function () {
       const target =
@@ -10565,6 +10569,39 @@ function forceOpenFeedTab(postId) {
       }
     }, 300);
   }
+
+  // 检查实际 DOM 状态
+  setTimeout(function () {
+    const homePage = document.getElementById('homePage');
+    const contactPage = document.getElementById('contactPage');
+    const directPanel = document.getElementById('directPanel');
+    const groupPanel = document.getElementById('groupPanel');
+    const feedPanel = document.getElementById('feedPanel');
+    const profilePage = document.getElementById('profilePage');
+    const feedTab = document.querySelector('.contact-tab[data-tab="feed"]');
+
+    console.log('[VV][NAV][CHECK] after forceOpenFeedTab', {
+      homePageDisplay: homePage && homePage.style.display,
+      homePageClass: homePage && homePage.className,
+
+      contactPageDisplay: contactPage && contactPage.style.display,
+      contactPageClass: contactPage && contactPage.className,
+
+      directPanelDisplay: directPanel && directPanel.style.display,
+      directPanelClass: directPanel && directPanel.className,
+
+      groupPanelDisplay: groupPanel && groupPanel.style.display,
+      groupPanelClass: groupPanel && groupPanel.className,
+
+      feedPanelDisplay: feedPanel && feedPanel.style.display,
+      feedPanelClass: feedPanel && feedPanel.className,
+
+      profilePageDisplay: profilePage && profilePage.style.display,
+      profilePageClass: profilePage && profilePage.className,
+
+      feedTabClass: feedTab && feedTab.className
+    });
+  }, 50);
 }
 
 window.forceOpenFeedTab = forceOpenFeedTab;
@@ -13947,13 +13984,22 @@ window.onload = async function () {
 
   setTimeout(async () => {
     const openedByRoute = await openChatByRoute();
-    if (!openedByRoute) {
-      await restoreLastChatSession();
-    }
+
+    // 先临时关闭自动恢复会话，避免覆盖 feed 跳转
+    // if (!openedByRoute) {
+    //   await restoreLastChatSession();
+    // }
 
     if (!window.__vvHostReadyPosted) {
       window.__vvHostReadyPosted = true;
       notifyVVHostReady();
+    }
+
+    window.__VV_FEED_NAV_READY__ = true;
+    console.log('[VV][NAV][QUEUE] feed nav ready after route restore');
+
+    if (typeof consumeVVFeedNav === 'function') {
+      consumeVVFeedNav('after-route-restore');
     }
   }, 80);
 
@@ -13977,8 +14023,11 @@ window.onload = async function () {
   }, 500);
 
   setTimeout(function () {
+    window.__VV_FEED_NAV_READY__ = true;
+    console.log('[VV][NAV][QUEUE] feed nav ready by window-onload-final');
+
     if (typeof consumeVVFeedNav === 'function') {
       consumeVVFeedNav('window-onload-final');
     }
-  }, 300);
+  }, 600);
 };
