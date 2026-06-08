@@ -10373,7 +10373,42 @@ function initVVHostNavigationBridge() {
         if (shouldSkipDuplicateFeedHiddenRaw(raw)) return;
 
         console.log('[VV][FEED] received raw from host, length =', String(raw).length);
+
+        // ===== 跳转前：记录当前已有的 postId 集合 =====
+        var knownPostIds = {};
+        if (Array.isArray(feedPosts)) {
+          feedPosts.forEach(function(p) {
+            if (p && p.postId) knownPostIds[p.postId] = true;
+          });
+        }
+
         rebuildFeedPostsFromRaw(raw);
+
+        // ===== 跳转判断：raw 中提取 postId，只有新 postId 才跳转 =====
+        try {
+          var postIdMatch = raw.match(/postId\s*=\s*(\S+)/);
+          var postId = postIdMatch ? postIdMatch[1].trim() : null;
+
+          if (postId && !knownPostIds[postId]) {
+            // 初始化跳转记录
+            if (!window.__VV_FEED_NAV_DONE__) {
+              window.__VV_FEED_NAV_DONE__ = {};
+            }
+
+            if (!window.__VV_FEED_NAV_DONE__[postId]) {
+              window.__VV_FEED_NAV_DONE__[postId] = true;
+              forceOpenFeedTab(postId);
+              console.log('[VV][FEED] first-time nav to feed for new postId =', postId);
+            } else {
+              console.log('[VV][FEED] postId already navigated, skip:', postId);
+            }
+          } else {
+            console.log('[VV][FEED] no new postId found or already known, skip nav');
+          }
+        } catch (feedNavErr) {
+          console.warn('[VV][FEED] auto-navigate to feed failed:', feedNavErr);
+        }
+
         return;
       }
 
