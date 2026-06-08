@@ -10240,17 +10240,13 @@ function initVVHostNavigationBridge() {
         const page = String(data.page || '').trim();
         const tab = String(data.tab || '').trim();
 
-        // ========== chat 跳转：保留原逻辑 ==========
+        console.log('[VV][NAV] receive VVPHONE_SET_VIEW:', data);
+
+        // ========== chat 跳转 ==========
         if (view === 'chat') {
           const chatId = String(data.chatId || data.viewId || '').trim();
           const target = String(data.target || '').trim();
           const chatType = String(data.chatType || 'direct').trim() || 'direct';
-
-          console.log('[VV][NAV] VVPHONE_SET_VIEW -> chat', {
-            chatId,
-            target,
-            chatType
-          });
 
           if (!chatId) {
             console.warn('[VV][NAV] VVPHONE_SET_VIEW chat ignored: empty chatId');
@@ -10270,10 +10266,11 @@ function initVVHostNavigationBridge() {
         if (view === 'feed' || page === 'feed' || tab === 'feed') {
           console.log('[VV][NAV] VVPHONE_SET_VIEW -> feed', data);
 
-          try {
-            forceOpenFeedTab();
-          } catch (err) {
-            console.warn('[VV][NAV] feed switch failed:', err);
+          if (typeof forceOpenFeedTab === 'function') {
+            forceOpenFeedTab(data.postId || '');
+          } else {
+            console.warn('[VV][NAV] forceOpenFeedTab not ready, cache pending view');
+            window.__VV_PENDING_VIEW__ = data;
           }
 
           return;
@@ -10281,7 +10278,7 @@ function initVVHostNavigationBridge() {
 
         console.warn('[VV][NAV] VVPHONE_SET_VIEW unknown view:', data);
         return;
-      }  
+      }
 
       if (type === 'VV_FEED_HIDDEN_RAW') {
         var raw = data.raw || '';
@@ -10379,86 +10376,106 @@ function initVVHostNavigationBridge() {
 function forceBackToContactMainPage() {
   console.log('[VV][NAV] forceBackToContactMainPage');
 
-  // 关闭聊天详情页
-  var chatPage =
-    document.getElementById('chatPage') ||
-    document.getElementById('chatDetailPage') ||
-    document.querySelector('.chat-page.active') ||
-    document.querySelector('.chat-detail-page.active');
-
-  if (chatPage) {
-    chatPage.classList.remove('active', 'show', 'open');
-    chatPage.style.display = 'none';
+  // 关闭首页
+  const homePage = document.getElementById('homePage');
+  if (homePage) {
+    homePage.classList.remove('active', 'show', 'open');
+    homePage.style.display = 'none';
   }
 
-  // 关闭其他全屏页
-  document.querySelectorAll('.page.active, .sub-page.active, .detail-page.active, .overlay.active')
-    .forEach(function (el) {
-      el.classList.remove('active', 'show', 'open');
-      el.style.display = 'none';
+  // 打开消息/联系人主页面
+  const contactPage = document.getElementById('contactPage');
+  if (contactPage) {
+    contactPage.style.display = '';
+    contactPage.classList.add('active', 'show');
+  }
+
+  // 关闭聊天详情页/其他详情页，但不要误关 contactPage
+  const possibleDetailSelectors = [
+    '#chatPage',
+    '#chatDetailPage',
+    '#chatSettingPage',
+    '#contactDetailPage',
+    '.chat-page',
+    '.chat-detail-page',
+    '.detail-page',
+    '.sub-page'
+  ];
+
+  possibleDetailSelectors.forEach(function (sel) {
+    document.querySelectorAll(sel).forEach(function (el) {
+      if (el && el.id !== 'contactPage') {
+        el.classList.remove('active', 'show', 'open');
+        el.style.display = 'none';
+      }
     });
-
-  // 打开联系人主容器
-  var contactRoot =
-    document.getElementById('contactsPage') ||
-    document.getElementById('contactPage') ||
-    document.querySelector('.contacts-page') ||
-    document.querySelector('.contact-page');
-
-  if (contactRoot) {
-    contactRoot.style.display = '';
-    contactRoot.classList.add('active', 'show');
-  }
+  });
 }
 
-function forceOpenFeedTab() {
-  console.log('[VV][NAV] forceOpenFeedTab');
+function forceOpenFeedTab(postId) {
+  console.log('[VV][NAV] forceOpenFeedTab', { postId });
 
   forceBackToContactMainPage();
 
-  // 先优先走你原本的函数
+  // 如果原本函数存在，先用原函数切一次
   if (typeof switchContactTab === 'function') {
     try {
       switchContactTab('feed');
     } catch (err) {
-      console.warn('[VV][NAV] switchContactTab(feed) error:', err);
+      console.warn('[VV][NAV] switchContactTab(feed) failed:', err);
     }
   }
 
-  // 再兜底修 active
-  document.querySelectorAll('.contact-tab').forEach(function (el) {
-    el.classList.remove('active');
+  // 兜底：手动处理底部 tab active
+  document.querySelectorAll('.contact-tab').forEach(function (tab) {
+    tab.classList.remove('active');
   });
 
-  var feedTab =
-    document.querySelector('.contact-tab[data-tab="feed"]') ||
-    document.querySelector('[onclick*="switchContactTab"][onclick*="feed"]');
-
+  const feedTab = document.querySelector('.contact-tab[data-tab="feed"]');
   if (feedTab) {
     feedTab.classList.add('active');
   }
 
-  // 这里不要依赖 feedPanel
-  // 直接用 feedList 往上找它所在的面板
-  var feedList = document.getElementById('feedList');
+  // 兜底：手动处理 panel
+  const panelIds = ['directPanel', 'groupPanel', 'feedPanel', 'profilePage'];
 
-  var feedContainer =
-    feedList?.closest('.contact-panel') ||
-    feedList?.closest('.tab-panel') ||
-    feedList?.parentElement;
+  panelIds.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (!el) return;
 
-  if (feedContainer) {
-    document.querySelectorAll('.contact-panel, .tab-panel').forEach(function (el) {
-      el.classList.remove('active');
+    el.classList.remove('active');
+
+    if (id === 'feedPanel') {
+      el.style.display = '';
+      el.classList.add('active');
+    } else {
       el.style.display = 'none';
-    });
+    }
+  });
 
-    feedContainer.style.display = '';
-    feedContainer.classList.add('active');
+  // 强制刷新动态
+  if (typeof renderFeedList === 'function') {
+    try {
+      renderFeedList();
+    } catch (err) {
+      console.warn('[VV][NAV] renderFeedList failed:', err);
+    }
   }
 
-  if (typeof renderFeedList === 'function') {
-    renderFeedList();
+  // 可选：如果之后要定位某条动态，可以在这里做
+  if (postId) {
+    setTimeout(function () {
+      const target =
+        document.querySelector('[data-post-id="' + postId + '"]') ||
+        document.getElementById(postId);
+
+      if (target && typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    }, 300);
   }
 }
 
@@ -13848,4 +13865,23 @@ window.onload = async function () {
       notifyVVHostReady();
     }
   }, 80);
+
+  setTimeout(function () {
+    if (window.__VV_PENDING_VIEW__) {
+      const data = window.__VV_PENDING_VIEW__;
+      window.__VV_PENDING_VIEW__ = null;
+
+      console.log('[VV][NAV] consume pending view after init:', data);
+
+      const view = String(data.view || '').trim();
+      const page = String(data.page || '').trim();
+      const tab = String(data.tab || '').trim();
+
+      if (view === 'feed' || page === 'feed' || tab === 'feed') {
+        if (typeof forceOpenFeedTab === 'function') {
+          forceOpenFeedTab(data.postId || '');
+        }
+      }
+    }
+  }, 500);
 };
