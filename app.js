@@ -423,6 +423,7 @@ let currentFeedImages = [];
 let contactList = [];
 let groupList = [];
 let feedPosts = [];
+var deletedFeedPostIds = [];
 let messages = {};
 let callLogs = {};
 let chatSettings = {};
@@ -2404,13 +2405,29 @@ function readFeedField(block, key) {
   block = String(block || '');
   key = String(key || '');
 
-  const re = new RegExp(
-    '(?:^|\\n)\\s*' + key + '\\s*=\\s*([\\s\\S]*?)(?=\\n[a-zA-Z\\u4e00-\\u9fa5]+\\s*=|\\n\\[\\/|\\[\\/|$)',
-    'i'
-  );
+  if (!block || !key) return '';
 
-  const m = block.match(re);
-  return m ? String(m[1] || '').trim() : '';
+  // 可能包含多行内容的字段
+  var multiLineKeys = ['content', 'images', 'photo', 'text'];
+  var isMultiLine = multiLineKeys.indexOf(key.toLowerCase()) >= 0;
+
+  if (isMultiLine) {
+    // 跨行匹配：从 key= 开始，到下一个已知字段名= 或 [/ 或块结束
+    var re = new RegExp(
+      '(?:^|\\n)\\s*' + key + '\\s*=\\s*([\\s\\S]*?)(?=\\n\\s*(?:postId|from|bridgeName|time|content|images|photo|action|replyTo|sender|state|side|transferAction|transferAmount|transferNote|text)\\s*=|\\n\\s*\\[\\/?|\\[\\/?[a-zA-Z\\u4e00-\\u9fa5]|$)',
+      'i'
+    );
+    var m = block.match(re);
+    return m ? String(m[1] || '').trim() : '';
+  } else {
+    // 单行匹配：只取 key= 后面到行末的内容
+    var reSingle = new RegExp(
+      '(?:^|\\n)\\s*' + key + '\\s*=\\s*(.*)',
+      'i'
+    );
+    var ms = block.match(reSingle);
+    return ms ? String(ms[1] || '').trim() : '';
+  }
 }
 
 function parseFeedSyncRaw(raw) {
@@ -3106,6 +3123,12 @@ function rebuildFeedPostsFromRaw(fullRaw) {
     try {
       var postId = readFeedField(block, 'postId');
       if (!postId) return;
+
+      // ★ 跳过已删除的动态
+      if (deletedFeedPostIds.includes(String(postId))) {
+        console.log('[VV][FEED] skip deleted post:', postId);
+        return;
+      }
 
       // 提取所有 [动态] 块，取最后一个有 content 的
       var dynBlocks = block.match(/\[动态\]([\s\S]*?)\[\/动态\]/gi) || [];
@@ -4345,7 +4368,8 @@ function saveAll(retryMode = 'normal') {
     safeSetItemJSON('st_pending_reply_targets', pendingReplyTargets),
     safeSetItemJSON('st_my_profile', myProfile),
     safeSetItemJSON('st_wallet_data', walletData),
-    safeSetItemJSON('st_diary_data', diaryData)
+    safeSetItemJSON('st_diary_data', diaryData),
+    safeSetItemJSON('st_deleted_feed_post_ids', deletedFeedPostIds),
   ];
 
   const success = okList.every(Boolean);
@@ -4434,6 +4458,7 @@ function loadAll() {
     localStorage.getItem('st_diary_data') || '{"diaries":[]}',
     { diaries: [] }
   );
+  deletedFeedPostIds = safeJSONParse(localStorage.getItem('st_deleted_feed_post_ids') || '[]', []);
 
   if (!diaryData.diaries) {
     diaryData.diaries = [];
@@ -5488,6 +5513,11 @@ function deleteFeedPost(postId) {
   if (!ok) return;
 
   feedPosts.splice(index, 1);
+
+  // ★ 记录已删除的 postId，防止 rebuild 时复活
+  if (!deletedFeedPostIds.includes(String(postId))) {
+    deletedFeedPostIds.push(String(postId));
+  }
 
   saveAll();
   renderFeedList();
@@ -10616,6 +10646,27 @@ function forceOpenFeedTab(postId) {
   console.log('[VV][NAV][FEED] forceOpenFeedTab start, postId =', postId);
 
   try {
+    // ★ 0. 从 homePage 切到 contactPage（核心修复）
+    //    先隐藏所有顶级 page，再只显示 contactPage
+    var allPages = document.querySelectorAll('.page');
+    allPages.forEach(function (p) {
+      p.classList.remove('active');
+      p.style.display = 'none';
+    });
+    var contactPage = document.getElementById('contactPage');
+    if (contactPage) {
+      contactPage.classList.add('active');
+      contactPage.style.display = '';
+      console.log('[VV][NAV][FEED] contactPage forced visible');
+    } else {
+      console.warn('[VV][NAV][FEED] contactPage not found!');
+    }
+
+    // ★ 0.5 关掉可能打开的聊天详情等全屏子页面
+    if (typeof forceBackToContactMainPage === 'function') {
+      try { forceBackToContactMainPage(); } catch (e) {}
+    }
+
     // 1. 先把当前 tab 状态置成 feed
     if (typeof currentContactTab !== 'undefined') {
       currentContactTab = 'feed';
@@ -10633,7 +10684,7 @@ function forceOpenFeedTab(postId) {
       console.warn('[VV][NAV][FEED] switchContactTab not a function');
     }
 
-    // 3. 强制显示 feedPanel，隐藏同级其它 panel（兜底，防止函数没穿透）
+    // 3. 强制显示 feedPanel，隐藏同级其它 panel（兜底）
     var panelIds = ['directPanel', 'groupPanel', 'feedPanel', 'profilePanel', 'profilePage'];
     var feedPanelFound = false;
 
