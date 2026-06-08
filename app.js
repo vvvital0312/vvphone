@@ -976,6 +976,96 @@ const VV_BRIDGE_CONFIG = {
 
 let vvBridgeListenerInited = false;
 
+window.__VV_PENDING_FEED_NAV__ = null;
+window.__VV_FEED_NAV_RETRY_TIMER__ = null;
+
+function isVVFeedNavMessage(data) {
+  if (!data || typeof data !== 'object') return false;
+
+  const type = String(data.type || '').trim();
+  const view = String(data.view || '').trim();
+  const page = String(data.page || '').trim();
+  const tab = String(data.tab || '').trim();
+
+  if (type === 'VVPHONE_SET_VIEW' && (view === 'feed' || page === 'feed' || tab === 'feed')) {
+    return true;
+  }
+
+  if (type === 'VV_OPEN_FEED') return true;
+
+  if (type === 'VV_NAVIGATE' && (view === 'feed' || page === 'feed' || tab === 'feed')) {
+    return true;
+  }
+
+  if (type === 'VV_SWITCH_TAB' && (page === 'feed' || tab === 'feed')) {
+    return true;
+  }
+
+  return false;
+}
+
+function queueVVFeedNav(data, reason) {
+  console.log('[VV][NAV][QUEUE] feed nav queued:', reason, data);
+
+  window.__VV_PENDING_FEED_NAV__ = {
+    type: data.type || 'VVPHONE_SET_VIEW',
+    view: data.view || 'feed',
+    page: data.page || 'feed',
+    tab: data.tab || 'feed',
+    postId: data.postId || '',
+    reason: reason || data.reason || 'unknown'
+  };
+
+  consumeVVFeedNav('queue:' + reason);
+}
+
+function consumeVVFeedNav(reason) {
+  const pending = window.__VV_PENDING_FEED_NAV__;
+  if (!pending) return;
+
+  if (window.__VV_FEED_NAV_RETRY_TIMER__) {
+    clearTimeout(window.__VV_FEED_NAV_RETRY_TIMER__);
+    window.__VV_FEED_NAV_RETRY_TIMER__ = null;
+  }
+
+  const contactPage = document.getElementById('contactPage');
+  const feedPanel = document.getElementById('feedPanel');
+
+  if (
+    typeof forceOpenFeedTab !== 'function' ||
+    !contactPage ||
+    !feedPanel
+  ) {
+    console.warn('[VV][NAV][QUEUE] feed nav not ready, retry later:', {
+      reason,
+      hasForceOpenFeedTab: typeof forceOpenFeedTab,
+      hasContactPage: !!contactPage,
+      hasFeedPanel: !!feedPanel
+    });
+
+    window.__VV_FEED_NAV_RETRY_TIMER__ = setTimeout(function () {
+      consumeVVFeedNav('retry-after-not-ready');
+    }, 300);
+
+    return;
+  }
+
+  window.__VV_PENDING_FEED_NAV__ = null;
+
+  console.log('[VV][NAV][QUEUE] consuming feed nav:', reason, pending);
+
+  try {
+    forceOpenFeedTab(pending.postId || '');
+  } catch (err) {
+    console.warn('[VV][NAV][QUEUE] forceOpenFeedTab failed, retry:', err);
+
+    window.__VV_PENDING_FEED_NAV__ = pending;
+    window.__VV_FEED_NAV_RETRY_TIMER__ = setTimeout(function () {
+      consumeVVFeedNav('retry-after-error');
+    }, 500);
+  }
+}
+
 function initSTBridgeListener() {
   if (vvBridgeListenerInited) {
     console.log('[VV] initSTBridgeListener skipped: already inited');
@@ -990,6 +1080,11 @@ function initSTBridgeListener() {
     if (!data || typeof data !== 'object') return;
 
     console.log('[VV][listener] message event type =', data.type, 'full data =', data);
+
+    if (typeof isVVFeedNavMessage === 'function' && isVVFeedNavMessage(data)) {
+      queueVVFeedNav(data, 'early-listener');
+      return;
+    }
 
     try {
       //if (data.type === 'VVPHONE_SET_VIEW') {
@@ -10265,14 +10360,7 @@ function initVVHostNavigationBridge() {
         // ========== feed 跳转 ==========
         if (view === 'feed' || page === 'feed' || tab === 'feed') {
           console.log('[VV][NAV] VVPHONE_SET_VIEW -> feed', data);
-
-          if (typeof forceOpenFeedTab === 'function') {
-            forceOpenFeedTab(data.postId || '');
-          } else {
-            console.warn('[VV][NAV] forceOpenFeedTab not ready, cache pending view');
-            window.__VV_PENDING_VIEW__ = data;
-          }
-
+          queueVVFeedNav(data, 'nav-listener');
           return;
         }
 
@@ -10478,6 +10566,9 @@ function forceOpenFeedTab(postId) {
     }, 300);
   }
 }
+
+window.forceOpenFeedTab = forceOpenFeedTab;
+window.forceBackToContactMainPage = forceBackToContactMainPage;
 
 function notifyVVHostReady() {
   try {
@@ -13884,4 +13975,10 @@ window.onload = async function () {
       }
     }
   }, 500);
+
+  setTimeout(function () {
+    if (typeof consumeVVFeedNav === 'function') {
+      consumeVVFeedNav('window-onload-final');
+    }
+  }, 300);
 };
