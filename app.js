@@ -988,85 +988,107 @@ function isVVFeedNavMessage(data) {
   const page = String(data.page || '').trim();
   const tab = String(data.tab || '').trim();
 
+  let hit = false;
+
   if (type === 'VVPHONE_SET_VIEW' && (view === 'feed' || page === 'feed' || tab === 'feed')) {
-    return true;
+    hit = true;
   }
 
-  if (type === 'VV_OPEN_FEED') return true;
+  if (type === 'VV_OPEN_FEED') {
+    hit = true;
+  }
 
   if (type === 'VV_NAVIGATE' && (view === 'feed' || page === 'feed' || tab === 'feed')) {
-    return true;
+    hit = true;
   }
 
-  if (type === 'VV_SWITCH_TAB' && (page === 'feed' || tab === 'feed')) {
-    return true;
+  if (type === 'VV_SWITCH_TAB' && (view === 'feed' || page === 'feed' || tab === 'feed')) {
+    hit = true;
   }
 
-  return false;
+  if (hit) {
+    console.log('[VV][NAV][MATCH] isVVFeedNavMessage = true:', {
+      type: type,
+      view: view,
+      page: page,
+      tab: tab,
+      postId: data.postId || '',
+      reason: data.reason || ''
+    });
+  }
+
+  return hit;
 }
 
-function queueVVFeedNav(data, reason) {
-  console.log('[VV][NAV][QUEUE] feed nav queued:', reason, data);
+function queueVVFeedNav(data, source) {
+  source = String(source || 'unknown').trim();
 
-  window.__VV_PENDING_FEED_NAV__ = {
-    type: data.type || 'VVPHONE_SET_VIEW',
-    view: data.view || 'feed',
-    page: data.page || 'feed',
-    tab: data.tab || 'feed',
-    postId: data.postId || '',
-    reason: reason || data.reason || 'unknown'
+  var navObj = {
+    postId: String((data && data.postId) || '').trim(),
+    reason: String((data && data.reason) || '').trim(),
+    source: source,
+    queuedAt: Date.now()
   };
 
-  consumeVVFeedNav('queue:' + reason);
+  console.log('[VV][NAV][QUEUE] feed nav queued:', navObj);
+
+  // 总是覆盖为最新一次（feed 跳转只关心"去最新那条/最新意图"）
+  window.__VV_PENDING_FEED_NAV__ = navObj;
+
+  if (window.__VV_FEED_NAV_READY__ === true) {
+    console.log('[VV][NAV][QUEUE] nav ready, consume immediately, source =', source);
+    try {
+      consumeVVFeedNav();
+    } catch (e) {
+      console.error('[VV][NAV][QUEUE] immediate consume error:', e);
+    }
+  } else {
+    console.log('[VV][NAV][QUEUE] nav NOT ready yet, will consume on ready, source =', source);
+  }
 }
 
-function consumeVVFeedNav(reason) {
-  const pending = window.__VV_PENDING_FEED_NAV__;
-  if (!pending) return;
+function consumeVVFeedNav() {
+  var nav = window.__VV_PENDING_FEED_NAV__;
 
-  if (window.__VV_FEED_NAV_RETRY_TIMER__) {
-    clearTimeout(window.__VV_FEED_NAV_RETRY_TIMER__);
-    window.__VV_FEED_NAV_RETRY_TIMER__ = null;
-  }
-
-  const contactPage = document.getElementById('contactPage');
-  const feedPanel = document.getElementById('feedPanel');
-
-  if (
-    !window.__VV_FEED_NAV_READY__ ||
-    typeof forceOpenFeedTab !== 'function' ||
-    !contactPage ||
-    !feedPanel
-  ) {
-    console.warn('[VV][NAV][QUEUE] feed nav not ready, retry later:', {
-      reason,
-      navReady: !!window.__VV_FEED_NAV_READY__,
-      vvAppReady: !!window.vvAppReady,
-      hasForceOpenFeedTab: typeof forceOpenFeedTab,
-      hasContactPage: !!contactPage,
-      hasFeedPanel: !!feedPanel
-    });
-
-    window.__VV_FEED_NAV_RETRY_TIMER__ = setTimeout(function () {
-      consumeVVFeedNav('retry-after-not-ready');
-    }, 300);
-
+  if (!nav) {
+    console.log('[VV][NAV][CONSUME] no pending feed nav');
     return;
   }
 
+  // 防止重复消费：消费前先清掉
   window.__VV_PENDING_FEED_NAV__ = null;
 
-  console.log('[VV][NAV][QUEUE] consuming feed nav:', reason, pending);
+  var postId = String(nav.postId || '').trim();
+  var reason = String(nav.reason || '').trim();
+
+  console.log('[VV][NAV][CONSUME] consuming feed nav:', {
+    postId: postId,
+    reason: reason
+  });
 
   try {
-    forceOpenFeedTab(pending.postId || '');
-  } catch (err) {
-    console.warn('[VV][NAV][QUEUE] forceOpenFeedTab failed, retry:', err);
+    // 第一步：复位外壳，回到联系人主页（保留 homePage）
+    if (typeof forceBackToContactMainPage === 'function') {
+      forceBackToContactMainPage();
+    } else {
+      console.warn('[VV][NAV][CONSUME] forceBackToContactMainPage not found');
+    }
 
-    window.__VV_PENDING_FEED_NAV__ = pending;
-    window.__VV_FEED_NAV_RETRY_TIMER__ = setTimeout(function () {
-      consumeVVFeedNav('retry-after-error');
-    }, 500);
+    // 第二步：稍微等一帧，让上面的 display 改动生效，再切 feed tab
+    setTimeout(function () {
+      try {
+        if (typeof forceOpenFeedTab === 'function') {
+          forceOpenFeedTab(postId);
+        } else {
+          console.warn('[VV][NAV][CONSUME] forceOpenFeedTab not found');
+        }
+      } catch (e) {
+        console.error('[VV][NAV][CONSUME] forceOpenFeedTab error:', e);
+      }
+    }, 50);
+
+  } catch (err) {
+    console.error('[VV][NAV][CONSUME] consume error:', err);
   }
 }
 
@@ -1083,9 +1105,16 @@ function initSTBridgeListener() {
     const data = event.data || {};
     if (!data || typeof data !== 'object') return;
 
+    const __rawType = String(data.type || '').trim();
+
+    if (__rawType && __rawType.indexOf('VV') === 0) {
+      console.log('[VV][RAW_MSG]', __rawType, data);
+    }
+
     console.log('[VV][listener] message event type =', data.type, 'full data =', data);
 
     if (typeof isVVFeedNavMessage === 'function' && isVVFeedNavMessage(data)) {
+      console.log('[VV][NAV][EARLY] feed nav captured by initSTBridgeListener:', data);
       queueVVFeedNav(data, 'early-listener');
       return;
     }
@@ -10466,177 +10495,205 @@ function initVVHostNavigationBridge() {
 }
 
 function forceBackToContactMainPage() {
-  console.log('[VV][NAV] forceBackToContactMainPage');
+  console.log('[VV][NAV][BACK] forceBackToContactMainPage start');
 
-  const pageIds = [
-    'homePage',
-    'contactPage',
+  // === 1. 需要关闭的"全屏覆盖层 / 详情页"，注意：绝不包含 homePage ===
+  var overlayIds = [
     'chatDetailPage',
+    'chatPage',
     'chatSettingPage',
+    'contactProfilePage',
+    'userProfilePage',
+    'profileDetailPage',
+    'profilePage',
+    'diaryPage',
+    'diaryDetailPage',
+    'diaryEditorPage',
+    'feedDetailPage',
     'callPage',
     'incomingCallPage',
-    'diaryPage'
+    'callScreen',
+    'walletPage',
+    'imagePreviewOverlay',
+    'cropDialog',
+    'transferDialog',
+    'emojiManageDialog'
   ];
 
-  pageIds.forEach(function (id) {
-    const el = document.getElementById(id);
-    if (!el) return;
-
-    if (id === 'contactPage') {
-      el.style.display = '';
-      el.classList.add('active', 'show', 'open');
-    } else {
-      el.classList.remove('active', 'show', 'open');
-      el.style.display = 'none';
-    }
-  });
-
-  // 额外兜底：不要让 phoneContainer 或背景层被误隐藏
-  const phoneContainer = document.getElementById('phoneContainer');
-  if (phoneContainer) {
-    phoneContainer.style.display = '';
-  }
-
-  const overlay = document.querySelector('.screen-bg-overlay');
-  if (overlay) {
-    overlay.style.display = '';
-  }
-}
-
-function forceOpenFeedTab(postId) {
-  console.log('[VV][NAV] forceOpenFeedTab', { postId });
-
-  forceBackToContactMainPage();
-
-  const contactPage = document.getElementById('contactPage');
-  if (contactPage) {
-    contactPage.style.display = '';
-    contactPage.classList.add('active', 'show', 'open');
-  }
-
-  // 如果原本函数存在，先用原函数切一次
-  if (typeof switchContactTab === 'function') {
-    try {
-      switchContactTab('feed');
-    } catch (err) {
-      console.warn('[VV][NAV] switchContactTab(feed) failed:', err);
-    }
-  }
-
-  // 手动处理 tab active
-  document.querySelectorAll('.contact-tab').forEach(function (tab) {
-    tab.classList.remove('active');
-  });
-
-  const feedTab = document.querySelector('.contact-tab[data-tab="feed"]');
-  if (feedTab) {
-    feedTab.classList.add('active');
-  }
-
-  // 手动处理 panel
-  const directPanel = document.getElementById('directPanel');
-  const groupPanel = document.getElementById('groupPanel');
-  const feedPanel = document.getElementById('feedPanel');
-  const profilePage = document.getElementById('profilePage');
-
-  [
-    directPanel,
-    groupPanel,
-    feedPanel,
-    profilePage
-  ].forEach(function (el) {
+  overlayIds.forEach(function (id) {
+    var el = document.getElementById(id);
     if (!el) return;
     el.classList.remove('active', 'show', 'open');
     el.style.display = 'none';
   });
 
-  if (feedPanel) {
-    feedPanel.style.display = '';
-    feedPanel.classList.add('active', 'show', 'open');
+  // class 兜底关闭（有些详情页没固定 id）
+  var overlayClasses = [
+    '.chat-detail-page',
+    '.chat-page',
+    '.setting-page',
+    '.profile-detail-page',
+    '.diary-detail-page',
+    '.diary-editor-page',
+    '.feed-detail-page',
+    '.call-page',
+    '.fullscreen-overlay'
+  ];
+
+  overlayClasses.forEach(function (sel) {
+    document.querySelectorAll(sel).forEach(function (el) {
+      el.classList.remove('active', 'show', 'open');
+      el.style.display = 'none';
+    });
+  });
+
+  // === 2. homePage 必须保持显示（它是外壳，图标/状态栏/底部栏都在里面）===
+  var homePage = document.getElementById('homePage');
+  if (homePage) {
+    homePage.style.display = '';
+    homePage.classList.add('active');
+    console.log('[VV][NAV][BACK] homePage kept visible');
+  } else {
+    console.log('[VV][NAV][BACK] no #homePage found (maybe different shell id)');
   }
 
-  // 确保联系人底部 tab 容器没有被隐藏
-  const contactTabs = document.querySelector('.contact-tabs');
-  if (contactTabs) {
-    contactTabs.style.display = '';
-  }
+  // === 3. 显示联系人主区：多重兜底，谁存在用谁 ===
+  var mainCandidates = [
+    'contactPage',
+    'contactMainPage',
+    'messagePage',
+    'mainPage',
+    'contactsPage'
+  ];
 
-  const contactBody = document.querySelector('.contact-body');
-  if (contactBody) {
-    contactBody.style.display = '';
-  }
+  var shownMain = false;
 
-  // 强制刷新动态
-  if (typeof renderFeedList === 'function') {
-    try {
-      renderFeedList();
-    } catch (err) {
-      console.warn('[VV][NAV] renderFeedList failed:', err);
+  mainCandidates.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = '';
+    el.classList.add('active', 'show', 'open');
+    shownMain = true;
+    console.log('[VV][NAV][BACK] main page shown by id:', id);
+  });
+
+  if (!shownMain) {
+    // class 兜底
+    var mainEl =
+      document.querySelector('.contact-page') ||
+      document.querySelector('.contact-main') ||
+      document.querySelector('.message-page') ||
+           document.querySelector('.contacts-page');
+
+    if (mainEl) {
+      mainEl.style.display = '';
+      mainEl.classList.add('active', 'show', 'open');
+      shownMain = true;
+      console.log('[VV][NAV][BACK] main page shown by class fallback');
     }
   }
 
-  if (postId) {
-    setTimeout(function () {
-      const target =
-        document.querySelector('[data-post-id="' + postId + '"]') ||
-        document.getElementById(postId);
-
-      if (target && typeof target.scrollIntoView === 'function') {
-        target.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center'
-        });
-      }
-    }, 300);
+  if (!shownMain) {
+    console.warn('[VV][NAV][BACK] WARNING: no main contact page container found by any candidate');
   }
 
-  setTimeout(function () {
-    const homePage = document.getElementById('homePage');
-    const contactPage = document.getElementById('contactPage');
-    const contactBody = document.querySelector('.contact-body');
-    const contactTabs = document.querySelector('.contact-tabs');
-    const directPanel = document.getElementById('directPanel');
-    const groupPanel = document.getElementById('groupPanel');
-    const feedPanel = document.getElementById('feedPanel');
-    const profilePage = document.getElementById('profilePage');
-    const feedTab = document.querySelector('.contact-tab[data-tab="feed"]');
+  // === 4. 不要动 phoneContainer / 背景层 ===
+  var phoneContainer = document.getElementById('phoneContainer');
+  if (phoneContainer) {
+    phoneContainer.style.display = '';
+  }
 
-    console.log('[VV][NAV][CHECK] after forceOpenFeedTab', {
-      homePageDisplay: homePage && homePage.style.display,
-      homePageComputedDisplay: homePage && getComputedStyle(homePage).display,
-      homePageClass: homePage && homePage.className,
+  var overlayBg = document.querySelector('.screen-bg-overlay');
+  if (overlayBg) {
+    overlayBg.style.display = '';
+  }
 
-      contactPageDisplay: contactPage && contactPage.style.display,
-      contactPageComputedDisplay: contactPage && getComputedStyle(contactPage).display,
-      contactPageClass: contactPage && contactPage.className,
+  console.log('[VV][NAV][BACK] forceBackToContactMainPage done, shownMain =', shownMain);
+}
 
-      contactBodyDisplay: contactBody && contactBody.style.display,
-      contactBodyComputedDisplay: contactBody && getComputedStyle(contactBody).display,
-      contactBodyClass: contactBody && contactBody.className,
+function forceOpenFeedTab(postId) {
+  postId = String(postId || '').trim();
+  console.log('[VV][NAV][FEED] forceOpenFeedTab start, postId =', postId);
 
-      contactTabsDisplay: contactTabs && contactTabs.style.display,
-      contactTabsComputedDisplay: contactTabs && getComputedStyle(contactTabs).display,
-      contactTabsClass: contactTabs && contactTabs.className,
+  try {
+    // 1. 先把当前 tab 状态置成 feed
+    if (typeof currentContactTab !== 'undefined') {
+      currentContactTab = 'feed';
+    }
 
-      directPanelDisplay: directPanel && directPanel.style.display,
-      directPanelComputedDisplay: directPanel && getComputedStyle(directPanel).display,
-      directPanelClass: directPanel && directPanel.className,
+    // 2. 调用真实切换函数
+    if (typeof switchContactTab === 'function') {
+      try {
+        switchContactTab('feed');
+        console.log('[VV][NAV][FEED] switchContactTab(feed) called');
+      } catch (e) {
+        console.warn('[VV][NAV][FEED] switchContactTab error:', e);
+      }
+    } else {
+      console.warn('[VV][NAV][FEED] switchContactTab not a function');
+    }
 
-      groupPanelDisplay: groupPanel && groupPanel.style.display,
-      groupPanelComputedDisplay: groupPanel && getComputedStyle(groupPanel).display,
-      groupPanelClass: groupPanel && groupPanel.className,
+    // 3. 强制显示 feedPanel，隐藏同级其它 panel（兜底，防止函数没穿透）
+    var panelIds = ['directPanel', 'groupPanel', 'feedPanel', 'profilePanel', 'profilePage'];
+    var feedPanelFound = false;
 
-      feedPanelDisplay: feedPanel && feedPanel.style.display,
-      feedPanelComputedDisplay: feedPanel && getComputedStyle(feedPanel).display,
-      feedPanelClass: feedPanel && feedPanel.className,
+    panelIds.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
 
-      profilePageDisplay: profilePage && profilePage.style.display,
-      profilePageComputedDisplay: profilePage && getComputedStyle(profilePage).display,
-      profilePageClass: profilePage && profilePage.className,
+      var isFeed = (id === 'feedPanel');
+      el.style.display = isFeed ? '' : 'none';
+      el.classList.toggle('active', isFeed);
 
-      feedTabClass: feedTab && feedTab.className
+      if (isFeed) feedPanelFound = true;
     });
-  }, 50);
+
+    console.log('[VV][NAV][FEED] feedPanel forced visible =', feedPanelFound);
+
+    // 4. 同步底部/顶部 tab 的高亮状态
+    var tabBtns = document.querySelectorAll('.contact-tab');
+    tabBtns.forEach(function (btn) {
+      var t = btn.getAttribute('data-tab');
+      var isFeed = (t === 'feed');
+      btn.classList.toggle('active', isFeed);
+    });
+
+    // 5. 重新渲染朋友圈
+    if (typeof renderFeedHeader === 'function') {
+      try { renderFeedHeader(); } catch (e) {}
+    }
+    if (typeof renderFeedList === 'function') {
+      try { renderFeedList(); } catch (e) {}
+    }
+    if (typeof hydrateMediaRefs === 'function') {
+      try { hydrateMediaRefs(); } catch (e) {}
+    }
+
+    // 6. 如果带了 postId，尝试滚动定位到那条动态
+    if (postId) {
+      setTimeout(function () {
+        try {
+          var card =
+            document.querySelector('[data-post-id="' + postId + '"]') ||
+            document.querySelector('[data-postid="' + postId + '"]') ||
+            document.getElementById('feedPost_' + postId);
+
+          if (card && typeof card.scrollIntoView === 'function') {
+            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            console.log('[VV][NAV][FEED] scrolled to post:', postId);
+          } else {
+            console.log('[VV][NAV][FEED] post card not found for scroll:', postId);
+          }
+        } catch (e) {
+          console.warn('[VV][NAV][FEED] scroll to post error:', e);
+        }
+      }, 200);
+    }
+
+    console.log('[VV][NAV][FEED] forceOpenFeedTab done');
+  } catch (err) {
+    console.error('[VV][NAV][FEED] forceOpenFeedTab fatal error:', err);
+  }
 }
 
 window.forceOpenFeedTab = forceOpenFeedTab;
@@ -13993,6 +14050,11 @@ window.onload = async function () {
     initVVHostNavigationBridge();
   }
 
+  // 确保 ST bridge 监听器也起来（feed 导航的 early 捕获在这里）
+  if (typeof initSTBridgeListener === 'function') {
+    initSTBridgeListener();
+  }
+
   renderAllPanels();
   await renderFeedHeader();
   renderEmojiPanel();
@@ -14002,12 +14064,12 @@ window.onload = async function () {
 
   migrateFeedPostsAuthorId();
   initFontSystem();
-  await initTheme(); 
+  await initTheme();
 
   vvAppReady = true;
   await flushPendingVVChatSyncQueue();
 
-  initDiarySwipeGesture()
+  initDiarySwipeGesture();
 
   setTimeout(() => {
     flushPendingVVChatSyncQueue();
@@ -14020,7 +14082,7 @@ window.onload = async function () {
   setTimeout(async () => {
     const openedByRoute = await openChatByRoute();
 
-    // 先临时关闭自动恢复会话，避免覆盖 feed 跳转
+    // 临时关闭自动恢复会话，避免覆盖 feed 跳转
     // if (!openedByRoute) {
     //   await restoreLastChatSession();
     // }
@@ -14030,39 +14092,65 @@ window.onload = async function () {
       notifyVVHostReady();
     }
 
+    // 第一次就绪：路由恢复后
     window.__VV_FEED_NAV_READY__ = true;
     console.log('[VV][NAV][QUEUE] feed nav ready after route restore');
 
-    if (typeof consumeVVFeedNav === 'function') {
-      consumeVVFeedNav('after-route-restore');
+    if (window.__VV_PENDING_FEED_NAV__) {
+      console.log('[VV][NAV][QUEUE] route-restore: pending nav exists, consume now');
+      if (typeof consumeVVFeedNav === 'function') {
+        try {
+          consumeVVFeedNav();
+        } catch (e) {
+          console.error('[VV][NAV][QUEUE] route-restore consume error:', e);
+        }
+      }
     }
   }, 80);
 
+  // 兼容旧的 __VV_PENDING_VIEW__（如果还有别处往里写）
   setTimeout(function () {
     if (window.__VV_PENDING_VIEW__) {
       const data = window.__VV_PENDING_VIEW__;
       window.__VV_PENDING_VIEW__ = null;
 
-      console.log('[VV][NAV] consume pending view after init:', data);
+      console.log('[VV][NAV] consume legacy pending view after init:', data);
 
       const view = String(data.view || '').trim();
       const page = String(data.page || '').trim();
       const tab = String(data.tab || '').trim();
 
       if (view === 'feed' || page === 'feed' || tab === 'feed') {
-        if (typeof forceOpenFeedTab === 'function') {
+        // 统一走新队列消费，而不是直接 forceOpenFeedTab，
+        // 这样能保证先 forceBackToContactMainPage 复位外壳。
+        if (typeof queueVVFeedNav === 'function') {
+          queueVVFeedNav(
+            { postId: data.postId || '', reason: 'legacy-pending-view' },
+            'legacy-pending-view'
+          );
+        } else if (typeof forceOpenFeedTab === 'function') {
           forceOpenFeedTab(data.postId || '');
         }
       }
     }
   }, 500);
 
+  // 第二次就绪：onload 最末尾，所有初始化都跑完
   setTimeout(function () {
     window.__VV_FEED_NAV_READY__ = true;
     console.log('[VV][NAV][QUEUE] feed nav ready by window-onload-final');
 
-    if (typeof consumeVVFeedNav === 'function') {
-      consumeVVFeedNav('window-onload-final');
+    if (window.__VV_PENDING_FEED_NAV__) {
+      console.log('[VV][NAV][QUEUE] onload-final: pending nav exists, consume now');
+      if (typeof consumeVVFeedNav === 'function') {
+        try {
+          consumeVVFeedNav();
+        } catch (e) {
+          console.error('[VV][NAV][QUEUE] onload-final consume error:', e);
+        }
+      }
+    } else {
+      console.log('[VV][NAV][QUEUE] onload-final: no pending feed nav');
     }
   }, 600);
 };

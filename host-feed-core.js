@@ -19,6 +19,8 @@
   let lastPushedFeedHiddenSig = '';
   let pendingFeedInteraction = null;
 
+  let lastFeedNav = null;
+
   function getFeedHiddenSig(raw) {
     raw = String(raw || '');
 
@@ -119,15 +121,30 @@
   }
 
   function postFeedViewToPhone(reason, postId) {
+    var opts = {};
+
+    // 兼容旧调用：postFeedViewToPhone('ai-feed-detector', postId)
+    if (typeof reason === 'object' && reason !== null) {
+      opts = reason;
+      reason = opts.reason;
+      postId = opts.postId;
+    }
+
     reason = String(reason || 'feed').trim();
     postId = String(postId || '').trim();
+
+    lastFeedNav = {
+      reason: reason,
+      postId: postId,
+      savedAt: Date.now()
+    };
 
     console.log('[VVHOST_FEED][NAV] postFeedViewToPhone:', {
       reason: reason,
       postId: postId
     });
 
-    // 1. 仿照 chat 的 VVPHONE_SET_VIEW，明确告诉手机：切到 feed 视图
+    // 1. 主协议：仿照 chat 的 VVPHONE_SET_VIEW，明确告诉手机：切到 feed 视图
     postToPhone({
       type: 'VVPHONE_SET_VIEW',
       view: 'feed',
@@ -137,9 +154,10 @@
       reason: reason
     });
 
-    // 2. 兼容旧监听
+    // 2. 兼容旧监听：保留三条老协议
     postToPhone({
       type: 'VV_OPEN_FEED',
+      view: 'feed',
       page: 'feed',
       tab: 'feed',
       postId: postId,
@@ -148,6 +166,7 @@
 
     postToPhone({
       type: 'VV_NAVIGATE',
+      view: 'feed',
       page: 'feed',
       tab: 'feed',
       postId: postId,
@@ -156,10 +175,34 @@
 
     postToPhone({
       type: 'VV_SWITCH_TAB',
+      view: 'feed',
       page: 'feed',
       tab: 'feed',
       postId: postId,
       reason: reason
+    });
+  }
+
+  function resendLastFeedNavToPhone(reason) {
+    reason = String(reason || 'resend').trim();
+
+    if (!lastFeedNav) {
+      console.log('[VVHOST_FEED][NAV] no lastFeedNav to resend, reason:', reason);
+      return;
+    }
+
+    var age = Date.now() - Number(lastFeedNav.savedAt || 0);
+
+    console.log('[VVHOST_FEED][NAV] resend last feed nav:', {
+      reason: reason,
+      age: age,
+      lastFeedNav: lastFeedNav
+    });
+
+    // 不直接复用原 reason，避免日志看不出这是补发
+    postFeedViewToPhone({
+      reason: String(lastFeedNav.reason || 'feed') + '-' + reason,
+      postId: String(lastFeedNav.postId || '')
     });
   }
 
@@ -1689,20 +1732,51 @@
 
           if (!readyCtx || !Array.isArray(readyCtx.chat)) {
             console.warn('[VVHOST_FEED] READY: ctx/chat not available');
-            return;
-          }
+          } else {
+            var sentReadyHidden = false;
 
-          for (var ri = 0; ri < readyCtx.chat.length; ri++) {
-            var readyMes = String(readyCtx.chat[ri].mes || '');
+            for (var ri = 0; ri < readyCtx.chat.length; ri++) {
+              var readyMes = String(readyCtx.chat[ri].mes || '');
 
-            if (readyMes.includes('VV_FEED_HIDDEN_DATA')) {
-              pushFeedHiddenRawToPhone(readyMes, 'phone-ready');
-              console.log('[VVHOST_FEED] READY: sent feed hidden raw, length:', readyMes.length);
-              break;
+              if (readyMes.includes('VV_FEED_HIDDEN_DATA')) {
+                pushFeedHiddenRawToPhone(readyMes, 'phone-ready');
+                console.log('[VVHOST_FEED] READY: sent feed hidden raw, length:', readyMes.length);
+                sentReadyHidden = true;
+                break;
+              }
+            }
+
+            if (!sentReadyHidden) {
+              console.log('[VVHOST_FEED] READY: no VV_FEED_HIDDEN_DATA found');
             }
           }
         } catch (err) {
           console.warn('[VVHOST_FEED] READY scan error:', err);
+        }
+
+        // 关键新增：手机 ready 后补发最近一次 feed 跳转
+        // 原因：host 可能在 iframe 监听器建立前已经发过 VVPHONE_SET_VIEW / VV_OPEN_FEED，
+        // 那一波会漏接，所以这里延迟补发。
+        if (lastFeedNav) {
+          console.log('[VVHOST_FEED][NAV] phone ready -> schedule resend last feed nav:', lastFeedNav);
+
+          setTimeout(function () {
+            try {
+              resendLastFeedNavToPhone('phone-ready-resend-300ms');
+            } catch (err) {
+              console.warn('[VVHOST_FEED][NAV] resend after ready 300ms failed:', err);
+            }
+          }, 300);
+
+          setTimeout(function () {
+            try {
+              resendLastFeedNavToPhone('phone-ready-resend-1000ms');
+            } catch (err) {
+              console.warn('[VVHOST_FEED][NAV] resend after ready 1000ms failed:', err);
+            }
+          }, 1000);
+        } else {
+          console.log('[VVHOST_FEED][NAV] phone ready but lastFeedNav is empty, skip nav resend');
         }
 
         return;
@@ -1924,7 +1998,9 @@
 
           postToPhone({
             type: 'VV_EXECUTE_RESULT',
-            requestId, ok: true, error: null,
+            requestId: requestId,
+            ok: true,
+            error: null,
             chatId: lastExpectedChatId || '',
             viewId: lastViewId || ''
           });
@@ -1941,7 +2017,8 @@
           if (feedMode) VV_FEED_INTERCEPTOR.stop();
           postToPhone({
             type: 'VV_EXECUTE_RESULT',
-            requestId, ok: false,
+            requestId: requestId,
+            ok: false,
             error: String((err && err.message) || err || 'execute failed'),
             chatId: lastExpectedChatId || '',
             viewId: lastViewId || ''
@@ -1997,6 +2074,19 @@
           if (feedMes.includes('VV_FEED_HIDDEN_DATA')) {
             pushFeedHiddenRawToPhone(feedMes, 'feed-refresh');
             console.log('[VVHOST_FEED] feed refresh sent, length:', feedMes.length);
+
+            // 新增：刷新后如果有最近一次跳转意图，也补发一次。
+            // 这不是必须，但可以避免“数据到了，页面还停在别处”的情况。
+            if (lastFeedNav) {
+              setTimeout(function () {
+                try {
+                  resendLastFeedNavToPhone('feed-refresh-resend');
+                } catch (err) {
+                  console.warn('[VVHOST_FEED][NAV] feed refresh resend failed:', err);
+                }
+              }, 300);
+            }
+
             break;
           }
         }
